@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Multi-Panel Custom Layout - neuroimjs</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0d0d0d;
+      color: #ffffff;
+      overflow: hidden;
+    }
+
+    .app-container {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+
+    .header {
+      background: #1a1a1a;
+      padding: 15px 20px;
+      border-bottom: 1px solid #333;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .header h1 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 600;
+    }
+
+    .header-controls {
+      display: flex;
+      gap: 10px;
+    }
+
+    button {
+      background: #4CAF50;
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 13px;
+      transition: background 0.2s;
+    }
+
+    button:hover {
+      background: #45a049;
+    }
+
+    button.secondary {
+      background: #555;
+    }
+
+    button.secondary:hover {
+      background: #666;
+    }
+
+    .main-content {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    .sidebar {
+      width: 300px;
+      background: #1a1a1a;
+      border-right: 1px solid #333;
+      padding: 20px;
+      overflow-y: auto;
+    }
+
+    .sidebar h2 {
+      font-size: 14px;
+      font-weight: 600;
+      color: #4CAF50;
+      margin: 0 0 15px 0;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .info-group {
+      margin-bottom: 25px;
+    }
+
+    .info-row {
+      margin-bottom: 10px;
+      font-size: 12px;
+    }
+
+    .info-label {
+      color: #888;
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    .info-value {
+      color: #4CAF50;
+      font-family: 'SF Mono', Monaco, monospace;
+      font-size: 13px;
+    }
+
+    .viewer-grid {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      grid-template-rows: 2fr 1fr;
+      gap: 2px;
+      background: #000;
+      padding: 2px;
+    }
+
+    .view-panel {
+      background: #1a1a1a;
+      position: relative;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .view-panel.large {
+      grid-row: 1 / 3;
+    }
+
+    .view-header {
+      padding: 10px 15px;
+      background: rgba(0, 0, 0, 0.5);
+      border-bottom: 1px solid #333;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .view-title {
+      font-size: 12px;
+      font-weight: 600;
+      color: #aaa;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .view-info {
+      font-size: 11px;
+      color: #666;
+      font-family: 'SF Mono', Monaco, monospace;
+    }
+
+    .view-canvas-container {
+      flex: 1;
+      position: relative;
+    }
+
+    .view-canvas {
+      width: 100%;
+      height: 100%;
+    }
+
+    .crosshair-indicator {
+      position: absolute;
+      bottom: 10px;
+      right: 10px;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #4CAF50;
+      box-shadow: 0 0 10px rgba(76, 175, 80, 0.5);
+    }
+
+    .sync-badge {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      background: rgba(76, 175, 80, 0.2);
+      border: 1px solid #4CAF50;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 10px;
+      color: #4CAF50;
+      font-weight: 600;
+    }
+
+    .sync-badge.inactive {
+      background: rgba(102, 102, 102, 0.2);
+      border-color: #666;
+      color: #666;
+    }
+  </style>
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <div class="header">
+      <h1>Multi-Panel Brain Viewer</h1>
+      <div class="header-controls">
+        <button id="toggle-sync">
+          Sync: <span id="sync-status">ON</span>
+        </button>
+        <button class="secondary" id="toggle-crosshair">Crosshairs</button>
+        <button class="secondary" id="reset-view">Reset</button>
+      </div>
+    </div>
+
+    <div class="main-content">
+      <!-- Sidebar -->
+      <div class="sidebar">
+        <div class="info-group">
+          <h2>Coordinates</h2>
+          <div class="info-row">
+            <div class="info-label">World (mm):</div>
+            <div class="info-value" id="world-coord">-</div>
+          </div>
+          <div class="info-row">
+            <div class="info-label">Voxel:</div>
+            <div class="info-value" id="voxel-coord">-</div>
+          </div>
+        </div>
+
+        <div class="info-group">
+          <h2>Slice Indices</h2>
+          <div class="info-row">
+            <div class="info-label">Axial (Z):</div>
+            <div class="info-value" id="axial-slice">-</div>
+          </div>
+          <div class="info-row">
+            <div class="info-label">Sagittal (X):</div>
+            <div class="info-value" id="sagittal-slice">-</div>
+          </div>
+          <div class="info-row">
+            <div class="info-label">Coronal (Y):</div>
+            <div class="info-value" id="coronal-slice">-</div>
+          </div>
+        </div>
+
+        <div class="info-group">
+          <h2>Mouse Position</h2>
+          <div class="info-row">
+            <div class="info-label">Active View:</div>
+            <div class="info-value" id="active-view">-</div>
+          </div>
+          <div class="info-row">
+            <div class="info-label">Image Coord:</div>
+            <div class="info-value" id="mouse-image">-</div>
+          </div>
+          <div class="info-row">
+            <div class="info-label">World Coord:</div>
+            <div class="info-value" id="mouse-world">-</div>
+          </div>
+        </div>
+
+        <div class="info-group">
+          <h2>Status</h2>
+          <div class="info-row">
+            <div class="info-label">System:</div>
+            <div class="info-value" id="status">Initializing...</div>
+          </div>
+          <div class="info-row">
+            <div class="info-label">Views Loaded:</div>
+            <div class="info-value" id="views-loaded">0 / 3</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Viewer Grid -->
+      <div class="viewer-grid">
+        <!-- Large Axial View -->
+        <div class="view-panel large">
+          <div class="view-header">
+            <span class="view-title">Axial View</span>
+            <span class="view-info" id="axial-info">Loading...</span>
+          </div>
+          <div class="view-canvas-container">
+            <div id="axial-container" class="view-canvas"></div>
+            <div class="sync-badge" id="axial-sync">SYNCED</div>
+          </div>
+        </div>
+
+        <!-- Sagittal View -->
+        <div class="view-panel">
+          <div class="view-header">
+            <span class="view-title">Sagittal View</span>
+            <span class="view-info" id="sagittal-info">Loading...</span>
+          </div>
+          <div class="view-canvas-container">
+            <div id="sagittal-container" class="view-canvas"></div>
+            <div class="sync-badge" id="sagittal-sync">SYNCED</div>
+          </div>
+        </div>
+
+        <!-- Coronal View -->
+        <div class="view-panel">
+          <div class="view-header">
+            <span class="view-title">Coronal View</span>
+            <span class="view-info" id="coronal-info">Loading...</span>
+          </div>
+          <div class="view-canvas-container">
+            <div id="coronal-container" class="view-canvas"></div>
+            <div class="sync-badge" id="coronal-sync">SYNCED</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import * as nifti from 'nifti-reader-js';
+    import {
+      VolStack,
+      VolLayer,
+      ColorMapFactory,
+      FloatNeuroVol,
+      NeuroSpace,
+      SingleSliceViewer,
+      ViewSynchronizer,
+    } from '../src/browser';
+
+    // ── NIfTI loader ──────────────────────────────────────────
+    async function loadNiftiVolume(url) {
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error(`Fetch failed: ${resp.status}`);
+      let buffer = await resp.arrayBuffer();
+      if (nifti.isCompressed(buffer)) buffer = nifti.decompress(buffer);
+      if (!nifti.isNIFTI(buffer)) throw new Error('Not a valid NIfTI');
+      const header = nifti.readHeader(buffer);
+      const imgBuffer = nifti.readImage(header, buffer);
+      const dim = Array.from(header.dims.slice(1, 4));
+      const spacing = Array.from(header.pixDims.slice(1, 4));
+      const affine = header.affine;
+      const origin = [affine[0][3], affine[1][3], affine[2][3]];
+      const space = new NeuroSpace(dim, spacing, origin, undefined, affine);
+      const { TYPE_INT8, TYPE_UINT8, TYPE_INT16, TYPE_UINT16,
+              TYPE_INT32, TYPE_UINT32, TYPE_FLOAT32, TYPE_FLOAT64 } = nifti.NIFTI1;
+      let raw;
+      switch (header.datatypeCode) {
+        case TYPE_INT8:    raw = new Int8Array(imgBuffer); break;
+        case TYPE_UINT8:   raw = new Uint8Array(imgBuffer); break;
+        case TYPE_INT16:   raw = new Int16Array(imgBuffer); break;
+        case TYPE_UINT16:  raw = new Uint16Array(imgBuffer); break;
+        case TYPE_INT32:   raw = new Int32Array(imgBuffer); break;
+        case TYPE_UINT32:  raw = new Uint32Array(imgBuffer); break;
+        case TYPE_FLOAT32: raw = new Float32Array(imgBuffer); break;
+        case TYPE_FLOAT64: raw = new Float64Array(imgBuffer); break;
+        default: throw new Error(`Unsupported datatype ${header.datatypeCode}`);
+      }
+      const slope = header.scl_slope && header.scl_slope !== 0 ? header.scl_slope : 1;
+      const intercept = header.scl_inter || 0;
+      const floatData = new Float32Array(raw.length);
+      for (let i = 0; i < raw.length; i++) floatData[i] = raw[i] * slope + intercept;
+      const sample = [];
+      const step = Math.max(1, Math.floor(floatData.length / 250000));
+      for (let i = 0; i < floatData.length; i += step) sample.push(floatData[i]);
+      sample.sort((a, b) => a - b);
+      const pick = (p) => sample[Math.min(sample.length - 1, Math.max(0, Math.floor(p * (sample.length - 1))))];
+      let rangeMin = pick(0.02), rangeMax = pick(0.995);
+      if (!Number.isFinite(rangeMin) || rangeMin >= rangeMax) {
+        rangeMin = floatData.reduce((a, b) => Math.min(a, b), Infinity);
+        rangeMax = floatData.reduce((a, b) => Math.max(a, b), -Infinity);
+      }
+      return { vol: new FloatNeuroVol(space, floatData), space, range: [rangeMin, rangeMax] };
+    }
+
+    let synchronizer;
+    let views = {};
+    let crosshairVisible = true;
+
+    // Update status
+    function updateStatus(message) {
+      document.getElementById('status').textContent = message;
+    }
+
+    // Format coordinate for display
+    function formatCoord(coord) {
+      if (!coord) return 'N/A';
+      return coord.map(c => c.toFixed(1)).join(', ');
+    }
+
+    // Update sync badges
+    function updateSyncBadges(enabled) {
+      const badges = ['axial-sync', 'sagittal-sync', 'coronal-sync'];
+      badges.forEach(id => {
+        const badge = document.getElementById(id);
+        badge.textContent = enabled ? 'SYNCED' : 'INDEPENDENT';
+        badge.classList.toggle('inactive', !enabled);
+      });
+      document.getElementById('sync-status').textContent = enabled ? 'ON' : 'OFF';
+    }
+
+    // Main initialization
+    async function init() {
+      try {
+        updateStatus('Loading volume...');
+
+        const { vol, space, range } = await loadNiftiVolume(
+          '/tests/data/volumes/tpl-MNI152NLin2009aAsym_res-1_T1w.nii.gz'
+        );
+        const grayscale = ColorMapFactory.createGrayscale({ range });
+        const layer = new VolLayer('mni-template', vol, grayscale, range);
+        const volStack = new VolStack(layer);
+
+        updateStatus('Creating axial view...');
+        document.getElementById('views-loaded').textContent = '0 / 3';
+
+        // Create axial view (large panel)
+        views.axial = await SingleSliceViewer.createAxial(
+          document.getElementById('axial-container'),
+          volStack,
+          { showCrosshair: true, showSlider: false }
+        );
+
+        document.getElementById('axial-info').textContent = 'Ready';
+        document.getElementById('views-loaded').textContent = '1 / 3';
+        updateStatus('Creating sagittal view...');
+
+        // Create sagittal view
+        views.sagittal = await SingleSliceViewer.createSagittal(
+          document.getElementById('sagittal-container'),
+          volStack,
+          { showCrosshair: true, showSlider: false }
+        );
+
+        document.getElementById('sagittal-info').textContent = 'Ready';
+        document.getElementById('views-loaded').textContent = '2 / 3';
+        updateStatus('Creating coronal view...');
+
+        // Create coronal view
+        views.coronal = await SingleSliceViewer.createCoronal(
+          document.getElementById('coronal-container'),
+          volStack,
+          { showCrosshair: true, showSlider: false }
+        );
+
+        document.getElementById('coronal-info').textContent = 'Ready';
+        document.getElementById('views-loaded').textContent = '3 / 3';
+        updateStatus('Setting up synchronization...');
+
+        // Create synchronizer for all three views
+        synchronizer = ViewSynchronizer.createOrthogonal(
+          views.axial,
+          views.sagittal,
+          views.coronal,
+          { syncOnHover: false }
+        );
+
+        updateStatus('Ready');
+
+        // Set up coordinate updates
+        const updateCoordinates = () => {
+          const coord = views.axial.getCurrentCoord();
+          document.getElementById('world-coord').textContent = formatCoord(coord);
+
+          // Get voxel coordinates (approximate)
+          const voxelCoord = views.axial.getMouseVolumeCoordinate() || coord;
+          document.getElementById('voxel-coord').textContent = formatCoord(voxelCoord);
+
+          document.getElementById('axial-slice').textContent =
+            views.axial.getCurrentSliceIndex();
+          document.getElementById('sagittal-slice').textContent =
+            views.sagittal.getCurrentSliceIndex();
+          document.getElementById('coronal-slice').textContent =
+            views.coronal.getCurrentSliceIndex();
+        };
+
+        views.axial.onCoordChange(updateCoordinates);
+        views.sagittal.onCoordChange(updateCoordinates);
+        views.coronal.onCoordChange(updateCoordinates);
+
+        // Track active view and mouse position
+        ['axial', 'sagittal', 'coronal'].forEach(viewName => {
+          views[viewName].onPointerMove(({ imageCoord, worldCoord }) => {
+            document.getElementById('active-view').textContent =
+              viewName.charAt(0).toUpperCase() + viewName.slice(1);
+
+            if (imageCoord) {
+              document.getElementById('mouse-image').textContent =
+                `(${imageCoord.x.toFixed(0)}, ${imageCoord.y.toFixed(0)})`;
+            }
+
+            if (worldCoord) {
+              document.getElementById('mouse-world').textContent =
+                formatCoord(worldCoord);
+            }
+          });
+        });
+
+        // Set up controls
+        document.getElementById('toggle-sync').addEventListener('click', () => {
+          const isEnabled = synchronizer.toggle();
+          updateSyncBadges(isEnabled);
+        });
+
+        document.getElementById('toggle-crosshair').addEventListener('click', () => {
+          crosshairVisible = !crosshairVisible;
+          Object.values(views).forEach(view => view.setCrosshairVisible(crosshairVisible));
+        });
+
+        document.getElementById('reset-view').addEventListener('click', () => {
+          const centerCoord = views.axial.getCurrentCoord();
+          synchronizer.syncCoordinate(centerCoord);
+        });
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+          Object.values(views).forEach(view => view.handleResize());
+        });
+
+        // Initial update
+        updateCoordinates();
+        updateSyncBadges(true);
+
+        console.log('Multi-panel layout initialized successfully!');
+        console.log('Views:', views);
+        console.log('Synchronizer:', synchronizer);
+
+      } catch (error) {
+        console.error('Error initializing multi-panel layout:', error);
+        updateStatus('Error: ' + error.message);
+      }
+    }
+
+    // Start initialization
+    init();
+  </script>
+</body>
+</html>

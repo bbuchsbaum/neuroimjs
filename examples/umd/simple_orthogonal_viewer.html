@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>neuroimjs — SimpleOrthogonalViewer Demo</title>
+      <style>
+      html, body {
+        height: 100%;
+        margin: 0;
+        background: #111;
+        color: #ddd;
+        font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+      }
+      #app {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+      }
+      header {
+        padding: 8px 12px;
+        background: #1b1b1b;
+        border-bottom: 1px solid #2a2a2a;
+      }
+      #viewer-container {
+        flex: 1;
+        min-height: 0;
+        display: grid;
+        grid-template-rows: 1fr;
+        padding: 8px;
+      }
+      #viewer {
+        width: 100%;
+        height: 100%;
+        min-width: 320px;
+        min-height: 240px;
+        background: #000;
+        outline: 2px solid #444;
+      }
+      canvas { outline: 1px dashed #666; }
+      .controls {
+        padding: 8px 12px;
+        background: #1b1b1b;
+        border-top: 1px solid #2a2a2a;
+      }
+      button, select {
+        background: #2b2b2b;
+        color: #eee;
+        border: 1px solid #3a3a3a;
+        padding: 6px 10px;
+        border-radius: 4px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <header>
+        <strong>neuroimjs SimpleOrthogonalViewer</strong>
+        <span style="opacity:.6; margin-left:8px">procedural 64×64×64 volume</span>
+      </header>
+      <div id="viewer-container">
+        <div id="viewer"></div>
+      </div>
+      <div class="controls">
+        <button id="toggle-crosshair">Toggle Crosshair</button>
+        <select id="colormap">
+          <option value="Grayscale" selected>Grayscale</option>
+          <option value="Hot">Hot</option>
+          <option value="Viridis">Viridis</option>
+          <option value="RdYlBu">RdYlBu</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Load nifti-reader-js for browser parsing of .nii/.nii.gz -->
+    <script src="https://unpkg.com/nifti-reader-js@0.8.0/dist/nifti-reader.js"></script>
+    <!-- Load the UMD bundle built from this repo (run: npm run build:vite) -->
+    <script src="/dist/neuroimjs.umd.js"></script>
+    <script type="module">
+      (async function () {
+        const njs = window.neuroimjs;
+        if (!njs || !njs.SimpleOrthogonalViewer) {
+          console.error('neuroimjs UMD not found; run `npm run build:vite` first.');
+          return;
+        }
+
+        const {
+          SimpleOrthogonalViewer,
+          VolLayer,
+          VolStack,
+          ColorMapFactory,
+          FloatNeuroVol,
+          NeuroSpace,
+          AxisSet3D
+        } = njs;
+
+        // 1) Load nifti-reader-js (use global if available, else dynamic import)
+        let nifti = window.nifti;
+        if (!nifti) {
+          try {
+            const mod = await import('https://esm.sh/nifti-reader-js@0.8.0');
+            nifti = mod;
+          } catch (e) {
+            console.error('Failed to load nifti-reader-js', e);
+            throw e;
+          }
+        }
+
+        // 2) Fetch demo NIfTI from repo (served by http-server)
+        const niftiUrl = '/tests/data/volumes/tpl-MNI152NLin2009aAsym_res-1_T1w.nii.gz';
+        const resp = await fetch(niftiUrl);
+        if (!resp.ok) {
+          throw new Error('Failed to fetch demo NIfTI: ' + resp.status);
+        }
+        const arrayBuf = await resp.arrayBuffer();
+
+        // 3) Parse with nifti-reader-js
+        let buffer = arrayBuf;
+        if (nifti.isCompressed(buffer)) buffer = nifti.decompress(buffer);
+        if (!nifti.isNIFTI(buffer)) throw new Error('Not a valid NIfTI file');
+        const header = nifti.readHeader(buffer);
+        const imgBuffer = nifti.readImage(header, buffer);
+
+        // 4) Build NeuroSpace from header
+        const dim = Array.from(header.dims.slice(1, 4));
+        const spacing = Array.from(header.pixDims.slice(1, 4));
+        const affine = header.affine; // 4x4 array
+        const origin = [affine[0][3], affine[1][3], affine[2][3]];
+        const space = new NeuroSpace(dim, spacing, origin, undefined, affine);
+
+        // 5) Create a typed array view over image data
+        const { TYPE_INT8, TYPE_UINT8, TYPE_INT16, TYPE_UINT16, TYPE_INT32, TYPE_UINT32, TYPE_FLOAT32, TYPE_FLOAT64 } = nifti.NIFTI1;
+        let rawData;
+        switch (header.datatypeCode) {
+          case TYPE_INT8: rawData = new Int8Array(imgBuffer); break;
+          case TYPE_UINT8: rawData = new Uint8Array(imgBuffer); break;
+          case TYPE_INT16: rawData = new Int16Array(imgBuffer); break;
+          case TYPE_UINT16: rawData = new Uint16Array(imgBuffer); break;
+          case TYPE_INT32: rawData = new Int32Array(imgBuffer); break;
+          case TYPE_UINT32: rawData = new Uint32Array(imgBuffer); break;
+          case TYPE_FLOAT32: rawData = new Float32Array(imgBuffer); break;
+          case TYPE_FLOAT64: rawData = new Float64Array(imgBuffer); break;
+          default: throw new Error('Unsupported datatype ' + header.datatypeCode);
+        }
+        const expected = dim[0] * dim[1] * dim[2];
+        if (rawData.length !== expected) {
+          console.warn('Length mismatch:', rawData.length, 'expected', expected);
+        }
+
+        const slope = header.scl_slope && header.scl_slope !== 0 ? header.scl_slope : 1;
+        const intercept = header.scl_inter || 0;
+        const floatData = new Float32Array(rawData.length);
+        let min = Number.POSITIVE_INFINITY, max = Number.NEGATIVE_INFINITY;
+        for (let i = 0; i < rawData.length; i++) {
+          const v = rawData[i] * slope + intercept;
+          floatData[i] = v;
+          if (v < min) min = v;
+          if (v > max) max = v;
+        }
+
+        const percentiles = (values, lower = 0.02, upper = 0.995) => {
+          const sample = [];
+          const step = Math.max(1, Math.floor(values.length / 200000));
+          for (let i = 0; i < values.length; i += step) sample.push(values[i]);
+          sample.sort((a, b) => a - b);
+          const pick = (p) => sample[Math.min(sample.length - 1, Math.max(0, Math.floor(p * (sample.length - 1))))];
+          return [pick(lower), pick(upper)];
+        };
+        let [rangeMin, rangeMax] = percentiles(floatData, 0.02, 0.995);
+        if (!Number.isFinite(rangeMin) || !Number.isFinite(rangeMax) || rangeMin >= rangeMax) {
+          rangeMin = min;
+          rangeMax = max;
+        }
+        console.log('Intensity stats', { min, max, rangeMin, rangeMax, slope, intercept });
+
+        // 7) Create DenseNeuroVol and layer (always Float32)
+        const volFinal = new FloatNeuroVol(space, floatData);
+        const gray = ColorMapFactory.createGrayscale({ range: [rangeMin, rangeMax] });
+        const layer = new VolLayer('anatomical', volFinal, gray, [rangeMin, rangeMax], [0, 0], 1.0);
+
+        // 8) Stack and viewer
+        const stack = new VolStack(layer);
+        const container = document.getElementById('viewer');
+        const viewer = await SimpleOrthogonalViewer.create(container, stack, {
+          layout: 'top-bottom',
+          showCrosshair: true,
+          showSlider: false,
+          gapPx: 8,
+        });
+        viewer.setBackground(0x1e1e1e);
+
+        // Set initial world coord to center of FOV (approx origin + half extents)
+        const cx = origin[0] + (dim[0]-1) * spacing[0] / 2;
+        const cy = origin[1] + (dim[1]-1) * spacing[1] / 2;
+        const cz = origin[2] + (dim[2]-1) * spacing[2] / 2;
+        viewer.setWorldCoord([cx, cy, cz]);
+
+        // Controls
+        const btn = document.getElementById('toggle-crosshair');
+        let cross = true;
+        btn.addEventListener('click', () => {
+          cross = !cross;
+          viewer.setCrosshairVisible(cross);
+        });
+
+        const sel = document.getElementById('colormap');
+        sel.addEventListener('change', () => {
+          const name = sel.value;
+          viewer.updateLayer('anatomical', { colormap: name });
+        });
+      })();
+    </script>
+  </body>
+  </html>

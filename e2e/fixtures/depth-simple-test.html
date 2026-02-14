@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Simple Depth Test</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 20px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #1a1a1a;
+      color: #ffffff;
+    }
+
+    .test-container {
+      display: flex;
+      gap: 20px;
+      flex-wrap: wrap;
+    }
+
+    .viewer-panel {
+      background: #2a2a2a;
+      padding: 15px;
+      border-radius: 8px;
+      width: 288px;
+    }
+
+    .viewer-panel h2 {
+      font-size: 16px;
+      margin-top: 0;
+      margin-bottom: 10px;
+      color: #4CAF50;
+    }
+
+    .viewer-container {
+      width: 256px;
+      height: 256px;
+      border: 1px solid #444;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .status {
+      margin-top: 10px;
+      font-size: 12px;
+      font-family: monospace;
+    }
+
+    .status.success { color: #4CAF50; }
+    .status.error { color: #f44336; }
+    .status.loading { color: #ff9800; }
+  </style>
+</head>
+<body>
+  <h1>Simple Depth Enhancement Test</h1>
+
+  <div class="test-container">
+    <!-- Test 1: Without depth enhancement -->
+    <div class="viewer-panel">
+      <h2>1. No Depth Enhancement</h2>
+      <div id="no-depth" class="viewer-container"></div>
+      <div class="status loading" id="status-no-depth">Loading...</div>
+    </div>
+
+    <!-- Test 2: With depth enhancement -->
+    <div class="viewer-panel">
+      <h2>2. With Depth Enhancement</h2>
+      <div id="with-depth" class="viewer-container"></div>
+      <div class="status loading" id="status-with-depth">Loading...</div>
+    </div>
+  </div>
+
+  <script type="module">
+    import {
+      VolStack,
+      SingleSliceViewer,
+      NeuroSpace,
+      FloatNeuroVol,
+      ColorMapFactory,
+      VolLayer
+    } from '../../src/browser';
+
+    function setStatus(id, status, message) {
+      const el = document.getElementById(id);
+      el.className = `status ${status}`;
+      el.textContent = message;
+    }
+
+    async function runTests() {
+      try {
+        // Create a synthetic dense volume (same as overlay tests)
+        const space = new NeuroSpace([64, 64, 64], [2, 2, 2], [0, 0, 0]);
+        const denseData = new Float32Array(64 * 64 * 64);
+        for (let z = 0; z < 64; z++) {
+          for (let y = 0; y < 64; y++) {
+            for (let x = 0; x < 64; x++) {
+              const idx = x + y * 64 + z * 64 * 64;
+              denseData[idx] = (x + y + z) / (3 * 64);
+            }
+          }
+        }
+
+        // Test 1: Without depth enhancement
+        try {
+          setStatus('status-no-depth', 'loading', 'Creating viewer...');
+
+          const vol1 = new FloatNeuroVol(space, denseData.slice());
+          const layer1 = new VolLayer('vol', vol1, ColorMapFactory.createGrayscale());
+          const stack1 = new VolStack(layer1);
+
+          const viewer1 = await SingleSliceViewer.createAxial(
+            document.getElementById('no-depth'),
+            stack1,
+            { width: 256, height: 256, showCrosshair: false }
+          );
+
+          setStatus('status-no-depth', 'success', 'Rendered without depth enhancement');
+        } catch (error) {
+          console.error('Test 1 error:', error);
+          setStatus('status-no-depth', 'error', error.message);
+        }
+
+        // Test 2: With depth enhancement
+        try {
+          setStatus('status-with-depth', 'loading', 'Creating viewer with depth...');
+
+          const vol2 = new FloatNeuroVol(space, denseData.slice());
+          const layer2 = new VolLayer('vol', vol2, ColorMapFactory.createGrayscale());
+          const stack2 = new VolStack(layer2);
+
+          const viewer2 = await SingleSliceViewer.createAxial(
+            document.getElementById('with-depth'),
+            stack2,
+            {
+              width: 256,
+              height: 256,
+              showCrosshair: false,
+              enableDepthEnhancement: true,
+              depthEnhancementOptions: {
+                depthLayers: 2,
+                maxBlurRadius: 8,
+                parallaxAmount: 0.03,
+                baseOpacity: 0.4
+              }
+            }
+          );
+
+          const hasDepth = viewer2.hasDepthEnhancement();
+          setStatus('status-with-depth', 'success', `Depth: ${hasDepth ? 'enabled' : 'failed'}`);
+        } catch (error) {
+          console.error('Test 2 error:', error);
+          setStatus('status-with-depth', 'error', error.message);
+        }
+
+      } catch (error) {
+        console.error('Test suite error:', error);
+      }
+    }
+
+    runTests();
+  </script>
+</body>
+</html>

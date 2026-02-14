@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Viewer Features – E2E Test Fixture</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 20px;
+      font-family: system-ui, sans-serif;
+      background: #0c0f18;
+      color: #e9eef7;
+    }
+    h1 { margin: 0 0 10px 0; font-size: 18px; }
+    .status-chip {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .status-chip.loading { color: #ffd080; }
+    .status-chip.ready   { color: #7bdfff; }
+    .status-chip.error   { color: #ff7b8a; }
+    #ortho-root {
+      width: 1100px;
+      height: 720px;
+      background: #0f121b;
+      border: 1px solid rgba(255,255,255,0.05);
+      border-radius: 8px;
+      overflow: hidden;
+      position: relative;
+    }
+  </style>
+</head>
+<body>
+  <h1>Viewer Features E2E</h1>
+  <span id="status" class="status-chip loading">loading...</span>
+  <div id="ortho-root" data-testid="orthogonal-viewer"></div>
+
+  <script type="module">
+    import * as nifti from 'nifti-reader-js';
+    import {
+      OrthogonalImageViewer,
+      VolLayer,
+      VolStack,
+      ColorMapFactory,
+      FloatNeuroVol,
+      NeuroSpace,
+      ImageLayer,
+    } from '../../src/browser';
+
+    const statusEl = document.getElementById('status');
+    const setStatus = (text, state = 'ready') => {
+      statusEl.textContent = text;
+      statusEl.className = `status-chip ${state}`;
+    };
+
+    async function loadTemplateVolume(url) {
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error(`Fetch failed: ${resp.status}`);
+      let buffer = await resp.arrayBuffer();
+      if (nifti.isCompressed(buffer)) buffer = nifti.decompress(buffer);
+      if (!nifti.isNIFTI(buffer)) throw new Error('Not a valid NIfTI');
+      const header = nifti.readHeader(buffer);
+      const imgBuffer = nifti.readImage(header, buffer);
+      const dim = Array.from(header.dims.slice(1, 4));
+      const spacing = Array.from(header.pixDims.slice(1, 4));
+      const affine = header.affine;
+      const origin = [affine[0][3], affine[1][3], affine[2][3]];
+      const space = new NeuroSpace(dim, spacing, origin, undefined, affine);
+
+      const { TYPE_INT8, TYPE_UINT8, TYPE_INT16, TYPE_UINT16,
+              TYPE_INT32, TYPE_UINT32, TYPE_FLOAT32, TYPE_FLOAT64 } = nifti.NIFTI1;
+      let raw;
+      switch (header.datatypeCode) {
+        case TYPE_INT8:    raw = new Int8Array(imgBuffer); break;
+        case TYPE_UINT8:   raw = new Uint8Array(imgBuffer); break;
+        case TYPE_INT16:   raw = new Int16Array(imgBuffer); break;
+        case TYPE_UINT16:  raw = new Uint16Array(imgBuffer); break;
+        case TYPE_INT32:   raw = new Int32Array(imgBuffer); break;
+        case TYPE_UINT32:  raw = new Uint32Array(imgBuffer); break;
+        case TYPE_FLOAT32: raw = new Float32Array(imgBuffer); break;
+        case TYPE_FLOAT64: raw = new Float64Array(imgBuffer); break;
+        default: throw new Error(`Unsupported datatype ${header.datatypeCode}`);
+      }
+
+      const slope = header.scl_slope && header.scl_slope !== 0 ? header.scl_slope : 1;
+      const intercept = header.scl_inter || 0;
+      const floatData = new Float32Array(raw.length);
+      let min = Infinity, max = -Infinity;
+      for (let i = 0; i < raw.length; i++) {
+        const v = raw[i] * slope + intercept;
+        floatData[i] = v;
+        if (v < min) min = v;
+        if (v > max) max = v;
+      }
+      // Percentile-based windowing
+      const sample = [];
+      const step = Math.max(1, Math.floor(floatData.length / 250000));
+      for (let i = 0; i < floatData.length; i += step) sample.push(floatData[i]);
+      sample.sort((a, b) => a - b);
+      const pick = (p) => sample[Math.min(sample.length - 1, Math.max(0, Math.floor(p * (sample.length - 1))))];
+      let rangeMin = pick(0.02), rangeMax = pick(0.995);
+      if (!Number.isFinite(rangeMin) || rangeMin >= rangeMax) { rangeMin = min; rangeMax = max; }
+
+      return { vol: new FloatNeuroVol(space, floatData), space, range: [rangeMin, rangeMax] };
+    }
+
+    async function boot() {
+      try {
+        setStatus('loading template...', 'loading');
+        const { vol, space, range } = await loadTemplateVolume(
+          '/tests/data/volumes/tpl-MNI152NLin2009aAsym_res-1_T1w.nii.gz'
+        );
+
+        const grayscale = ColorMapFactory.createGrayscale({ range });
+        const layer = new VolLayer('mni-template', vol, grayscale, range);
+        const stack = new VolStack(layer);
+        const imageLayer = new ImageLayer(stack);
+        imageLayer.initialize();
+
+        const container = document.getElementById('ortho-root');
+        const viewer = await OrthogonalImageViewer.create({
+          container,
+          imageLayer,
+          options: {
+            layout: 'top-bottom',
+            showCrosshair: true,
+            showSlider: false,
+            gapPx: 10,
+          },
+        });
+
+        viewer.setWorldCoord(space.centroid());
+
+        // Label internal divs for Playwright selectors
+        const panels = Array.from(container.querySelectorAll(':scope > div'));
+        const viewNames = ['axial', 'coronal', 'sagittal'];
+        panels.forEach((el, i) => { if (viewNames[i]) el.dataset.view = viewNames[i]; });
+
+        // ── Expose test API ──────────────────────────────────────
+        window.__FEATURES_VIEWER__ = viewer;
+        window.__FEATURES_TEST__ = {
+          dims: space.dim.slice(),
+          space,
+
+          // Coordinate helpers
+          voxelToWorld(coord) { return space.voxelToWorld(coord); },
+          worldToVoxel(coord) { return space.worldToVoxel(coord); },
+
+          getCoords() {
+            return {
+              global: viewer.currentCoord.slice(),
+              axial:    viewer.sliceViewers.axial.model.currentCoord.slice(),
+              coronal:  viewer.sliceViewers.coronal.model.currentCoord.slice(),
+              sagittal: viewer.sliceViewers.sagittal.model.currentCoord.slice(),
+            };
+          },
+
+          // Slice indices
+          getSliceIndices() {
+            return {
+              axial:    viewer.sliceViewers.axial.model.currentSliceIndex,
+              coronal:  viewer.sliceViewers.coronal.model.currentSliceIndex,
+              sagittal: viewer.sliceViewers.sagittal.model.currentSliceIndex,
+            };
+          },
+
+          // Zoom
+          getZoom(viewName) {
+            const sv = viewer.getSliceViewer(viewName);
+            return sv.view.getZoom ? sv.view.getZoom() : 1.0;
+          },
+          setZoom(viewName, level) {
+            const sv = viewer.getSliceViewer(viewName);
+            if (sv.view.setZoom) sv.view.setZoom(level);
+          },
+          resetView(viewName) {
+            const sv = viewer.getSliceViewer(viewName);
+            if (sv.view.resetView) sv.view.resetView();
+          },
+          resetAllViews() {
+            ['axial', 'coronal', 'sagittal'].forEach(v => {
+              const sv = viewer.getSliceViewer(v);
+              if (sv.view.resetView) sv.view.resetView();
+            });
+          },
+
+          // Pan
+          getPan(viewName) {
+            const sv = viewer.getSliceViewer(viewName);
+            return sv.view.getPan ? sv.view.getPan() : { x: 0, y: 0 };
+          },
+
+          // Layer introspection
+          hasLayer(viewName, layerName) {
+            const sv = viewer.getSliceViewer(viewName);
+            if (!sv.view.layers) return false;
+            return sv.view.layers.some(l => {
+              const tag = l._layerTag || l.constructor?.name;
+              return tag === layerName || l.constructor?.name === layerName;
+            });
+          },
+
+          getLayerNames(viewName) {
+            const sv = viewer.getSliceViewer(viewName);
+            if (!sv.view.layers) return [];
+            return sv.view.layers.map(l => l._layerTag || l.constructor?.name);
+          },
+
+          // Crosshair
+          hasCrosshair() {
+            return ['axial', 'coronal', 'sagittal'].every(name =>
+              viewer.sliceViewers[name]?.view.layers?.some(
+                l => l.constructor?.name === 'CrossHair'
+              )
+            );
+          },
+          toggleCrosshair(flag) { viewer.setCrosshairVisible(flag); },
+
+          // Volume data access for intensity verification
+          getVoxelValue(i, j, k) {
+            return vol.getAt(i, j, k);
+          },
+        };
+
+        window.__FEATURES_READY__ = true;
+        setStatus('ready', 'ready');
+      } catch (err) {
+        console.error(err);
+        setStatus(err.message || 'failed', 'error');
+        window.__FEATURES_READY__ = false;
+      }
+    }
+
+    boot();
+  </script>
+</body>
+</html>

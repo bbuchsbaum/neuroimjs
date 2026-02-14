@@ -1,0 +1,64 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Coverage
+coverage/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+
+# Logs
+*.log
+npm-debug.log*
+
+# Test artifacts
+test-results/
+playwright-report/
+
+# OMC state
+.omc/
+
+# Working docs / analysis artifacts
+doc_archive/
+ANALYSIS_FILES_EXAMINED.txt
+COORDINATE_SYSTEMS.md
+README_VOLLAYER_ANALYSIS.md
+SimpleOrthogonalViewer_API_Reference.md
+SimpleOrthogonalViewer_API_SUMMARY.md
+SimpleOrthogonalViewer_EXAMPLES.md
+SimpleOrthogonalViewer_README.md
+VOLLAYER_COLORMAP_ANALYSIS.md
+VOLLAYER_QUICK_REFERENCE.md
+feature_parity.md
+orthogonal-slice-report.md
+orthogonal-slices-usage.md
+visideas.md
+
+# Archive
+archive/
+
+# Generated output (PNGs, slices)
+output/
+examples/output/
+
+# NIfTI data files (large binaries — download separately)
+*.nii
+*.nii.gz
+
+# Playwright snapshots
+e2e/**/*-snapshots/

@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Multi-Layer Brain Viewer - neuroimjs</title>
+  <!-- Shoelace theme (required by LayerControlPanel) -->
+  <link rel="stylesheet"
+        href="https://cdn.jsdelivr.net/npm/@shoelace-style/shoelace@2.17.1/cdn/themes/light.css" />
+  <style>
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0d0d0d;
+      color: #ffffff;
+      overflow: hidden;
+    }
+
+    .app-container {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+
+    .header {
+      background: #1a1a1a;
+      padding: 15px 20px;
+      border-bottom: 1px solid #333;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .header h1 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 600;
+    }
+
+    .header-controls {
+      display: flex;
+      gap: 10px;
+    }
+
+    button {
+      background: #4CAF50;
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 13px;
+      transition: background 0.2s;
+    }
+
+    button:hover { background: #45a049; }
+    button.secondary { background: #555; }
+    button.secondary:hover { background: #666; }
+
+    .main-content {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    .sidebar {
+      width: 300px;
+      background: #1e1e1e;
+      border-right: 1px solid #333;
+      overflow-y: auto;
+      flex-shrink: 0;
+    }
+
+    .viewer-grid {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      grid-template-rows: 1fr 1fr;
+      gap: 2px;
+      background: #000;
+      padding: 2px;
+    }
+
+    .view-panel {
+      background: #1a1a1a;
+      position: relative;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .view-panel.large {
+      grid-row: 1 / 3;
+    }
+
+    .view-header {
+      padding: 10px 15px;
+      background: rgba(0, 0, 0, 0.5);
+      border-bottom: 1px solid #333;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .view-title {
+      font-size: 12px;
+      font-weight: 600;
+      color: #aaa;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .view-info {
+      font-size: 11px;
+      color: #666;
+      font-family: 'SF Mono', Monaco, monospace;
+    }
+
+    .view-canvas-container {
+      flex: 1;
+      position: relative;
+    }
+
+    .view-canvas {
+      width: 100%;
+      height: 100%;
+    }
+
+    .sync-badge {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      background: rgba(76, 175, 80, 0.2);
+      border: 1px solid #4CAF50;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 10px;
+      color: #4CAF50;
+      font-weight: 600;
+    }
+
+    .sync-badge.inactive {
+      background: rgba(102, 102, 102, 0.2);
+      border-color: #666;
+      color: #666;
+    }
+
+    .status-bar {
+      padding: 8px 16px;
+      background: #111;
+      border-top: 1px solid #333;
+      font-size: 11px;
+      color: #888;
+      display: flex;
+      justify-content: space-between;
+    }
+  </style>
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <div class="header">
+      <h1>Multi-Layer Brain Viewer</h1>
+      <div class="header-controls">
+        <button id="toggle-sync">
+          Sync: <span id="sync-status">ON</span>
+        </button>
+        <button class="secondary" id="toggle-crosshair">Crosshairs</button>
+      </div>
+    </div>
+
+    <div class="main-content">
+      <!-- Sidebar with LayerControlPanel -->
+      <div class="sidebar">
+        <layer-control-panel id="layer-panel" theme="dark"></layer-control-panel>
+      </div>
+
+      <!-- Viewer Grid -->
+      <div class="viewer-grid">
+        <!-- Large Axial View -->
+        <div class="view-panel large">
+          <div class="view-header">
+            <span class="view-title">Axial View</span>
+            <span class="view-info" id="axial-info">Loading...</span>
+          </div>
+          <div class="view-canvas-container">
+            <div id="axial-container" class="view-canvas"></div>
+            <div class="sync-badge" id="axial-sync">SYNCED</div>
+          </div>
+        </div>
+
+        <!-- Sagittal View -->
+        <div class="view-panel">
+          <div class="view-header">
+            <span class="view-title">Sagittal View</span>
+            <span class="view-info" id="sagittal-info">Loading...</span>
+          </div>
+          <div class="view-canvas-container">
+            <div id="sagittal-container" class="view-canvas"></div>
+            <div class="sync-badge" id="sagittal-sync">SYNCED</div>
+          </div>
+        </div>
+
+        <!-- Coronal View -->
+        <div class="view-panel">
+          <div class="view-header">
+            <span class="view-title">Coronal View</span>
+            <span class="view-info" id="coronal-info">Loading...</span>
+          </div>
+          <div class="view-canvas-container">
+            <div id="coronal-container" class="view-canvas"></div>
+            <div class="sync-badge" id="coronal-sync">SYNCED</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Status bar -->
+    <div class="status-bar">
+      <span id="status">Initializing...</span>
+      <span id="coord-display">-</span>
+    </div>
+  </div>
+
+  <script type="module">
+    import * as nifti from 'nifti-reader-js';
+    import {
+      VolStack,
+      VolLayer,
+      ColorMapFactory,
+      FloatNeuroVol,
+      NeuroSpace,
+      SingleSliceViewer,
+      ViewSynchronizer,
+      LayerControlPanel,
+    } from '../src/browser';
+
+    // ── NIfTI loader ──────────────────────────────────────────
+    async function loadNiftiVolume(url) {
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error(`Fetch failed: ${resp.status}`);
+      let buffer = await resp.arrayBuffer();
+      if (nifti.isCompressed(buffer)) buffer = nifti.decompress(buffer);
+      if (!nifti.isNIFTI(buffer)) throw new Error('Not a valid NIfTI');
+      const header = nifti.readHeader(buffer);
+      const imgBuffer = nifti.readImage(header, buffer);
+      const dim = Array.from(header.dims.slice(1, 4));
+      const spacing = Array.from(header.pixDims.slice(1, 4));
+      const affine = header.affine;
+      const origin = [affine[0][3], affine[1][3], affine[2][3]];
+      const space = new NeuroSpace(dim, spacing, origin, undefined, affine);
+      const { TYPE_INT8, TYPE_UINT8, TYPE_INT16, TYPE_UINT16,
+              TYPE_INT32, TYPE_UINT32, TYPE_FLOAT32, TYPE_FLOAT64 } = nifti.NIFTI1;
+      let raw;
+      switch (header.datatypeCode) {
+        case TYPE_INT8:    raw = new Int8Array(imgBuffer); break;
+        case TYPE_UINT8:   raw = new Uint8Array(imgBuffer); break;
+        case TYPE_INT16:   raw = new Int16Array(imgBuffer); break;
+        case TYPE_UINT16:  raw = new Uint16Array(imgBuffer); break;
+        case TYPE_INT32:   raw = new Int32Array(imgBuffer); break;
+        case TYPE_UINT32:  raw = new Uint32Array(imgBuffer); break;
+        case TYPE_FLOAT32: raw = new Float32Array(imgBuffer); break;
+        case TYPE_FLOAT64: raw = new Float64Array(imgBuffer); break;
+        default: throw new Error(`Unsupported datatype ${header.datatypeCode}`);
+      }
+      const slope = header.scl_slope && header.scl_slope !== 0 ? header.scl_slope : 1;
+      const intercept = header.scl_inter || 0;
+      const floatData = new Float32Array(raw.length);
+      for (let i = 0; i < raw.length; i++) floatData[i] = raw[i] * slope + intercept;
+      const sample = [];
+      const step = Math.max(1, Math.floor(floatData.length / 250000));
+      for (let i = 0; i < floatData.length; i += step) sample.push(floatData[i]);
+      sample.sort((a, b) => a - b);
+      const pick = (p) => sample[Math.min(sample.length - 1, Math.max(0, Math.floor(p * (sample.length - 1))))];
+      let rangeMin = pick(0.02), rangeMax = pick(0.995);
+      if (!Number.isFinite(rangeMin) || rangeMin >= rangeMax) {
+        rangeMin = floatData.reduce((a, b) => Math.min(a, b), Infinity);
+        rangeMax = floatData.reduce((a, b) => Math.max(a, b), -Infinity);
+      }
+      return { vol: new FloatNeuroVol(space, floatData), space, dim, range: [rangeMin, rangeMax] };
+    }
+
+    // ── Synthetic activation sphere ───────────────────────────
+    function createActivationSphere(space, dims, radius, peakIntensity) {
+      const [nx, ny, nz] = dims;
+      const cx = Math.floor(nx / 2);
+      const cy = Math.floor(ny / 2);
+      const cz = Math.floor(nz / 2);
+      const data = new Float32Array(nx * ny * nz);
+
+      for (let z = 0; z < nz; z++) {
+        for (let y = 0; y < ny; y++) {
+          for (let x = 0; x < nx; x++) {
+            const dx = x - cx;
+            const dy = y - cy;
+            const dz = z - cz;
+            const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+            if (dist < radius) {
+              // Gaussian falloff from center
+              const sigma = radius / 2.5;
+              data[x + y * nx + z * nx * ny] =
+                peakIntensity * Math.exp(-(dist * dist) / (2 * sigma * sigma));
+            }
+          }
+        }
+      }
+      return new FloatNeuroVol(space, data);
+    }
+
+    // ── Helpers ───────────────────────────────────────────────
+    function updateStatus(msg) {
+      document.getElementById('status').textContent = msg;
+    }
+
+    function formatCoord(c) {
+      return c ? c.map(v => v.toFixed(1)).join(', ') : '-';
+    }
+
+    function updateSyncBadges(enabled) {
+      ['axial-sync', 'sagittal-sync', 'coronal-sync'].forEach(id => {
+        const b = document.getElementById(id);
+        b.textContent = enabled ? 'SYNCED' : 'INDEPENDENT';
+        b.classList.toggle('inactive', !enabled);
+      });
+      document.getElementById('sync-status').textContent = enabled ? 'ON' : 'OFF';
+    }
+
+    // ── Main initialization ──────────────────────────────────
+    let synchronizer;
+    let views = {};
+    let crosshairVisible = true;
+
+    async function init() {
+      try {
+        updateStatus('Loading T1 template...');
+
+        // 1. Load the MNI T1 background volume
+        const { vol, space, dim, range } = await loadNiftiVolume(
+          '/tests/data/volumes/tpl-MNI152NLin2009aAsym_res-1_T1w.nii.gz'
+        );
+
+        // 2. Create background layer
+        const grayscale = ColorMapFactory.createGrayscale({ range });
+        const bgLayer = new VolLayer('T1-background', vol, grayscale, range);
+
+        // 3. Create synthetic activation overlay
+        updateStatus('Generating activation overlay...');
+        const activationVol = createActivationSphere(space, dim, 15, 5.0);
+        const hotCmap = ColorMapFactory.createHot({
+          range: [0, 5],
+          threshold: [0.5, 0.5],
+          alpha: 0.7,
+        });
+        const activationLayer = new VolLayer(
+          'activation', activationVol, hotCmap, [0, 5], [0.5, 0.5], 0.7
+        );
+
+        // 4. Build VolStack with both layers
+        const volStack = new VolStack(bgLayer);
+        volStack.addLayer(activationLayer);
+
+        // 5. Create three orthogonal views
+        updateStatus('Creating axial view...');
+        views.axial = await SingleSliceViewer.createAxial(
+          document.getElementById('axial-container'),
+          volStack,
+          { showCrosshair: true, showSlider: false }
+        );
+        document.getElementById('axial-info').textContent = 'Ready';
+
+        updateStatus('Creating sagittal view...');
+        views.sagittal = await SingleSliceViewer.createSagittal(
+          document.getElementById('sagittal-container'),
+          volStack,
+          { showCrosshair: true, showSlider: false }
+        );
+        document.getElementById('sagittal-info').textContent = 'Ready';
+
+        updateStatus('Creating coronal view...');
+        views.coronal = await SingleSliceViewer.createCoronal(
+          document.getElementById('coronal-container'),
+          volStack,
+          { showCrosshair: true, showSlider: false }
+        );
+        document.getElementById('coronal-info').textContent = 'Ready';
+
+        // 6. Synchronize views
+        updateStatus('Synchronizing views...');
+        synchronizer = ViewSynchronizer.createOrthogonal(
+          views.axial, views.sagittal, views.coronal,
+          { syncOnHover: false }
+        );
+
+        // 7. Connect LayerControlPanel to the VolStack
+        const panel = document.getElementById('layer-panel');
+        panel.volStack = volStack;
+
+        // 8. Wire up coordinate display
+        const updateCoords = () => {
+          const coord = views.axial.getCurrentCoord();
+          document.getElementById('coord-display').textContent =
+            `World: [${formatCoord(coord)}]  |  Slices: A=${views.axial.getCurrentSliceIndex()} S=${views.sagittal.getCurrentSliceIndex()} C=${views.coronal.getCurrentSliceIndex()}`;
+        };
+        views.axial.onCoordChange(updateCoords);
+        views.sagittal.onCoordChange(updateCoords);
+        views.coronal.onCoordChange(updateCoords);
+        updateCoords();
+
+        // 9. Header controls
+        document.getElementById('toggle-sync').addEventListener('click', () => {
+          const enabled = synchronizer.toggle();
+          updateSyncBadges(enabled);
+        });
+
+        document.getElementById('toggle-crosshair').addEventListener('click', () => {
+          crosshairVisible = !crosshairVisible;
+          Object.values(views).forEach(v => v.setCrosshairVisible(crosshairVisible));
+        });
+
+        // 10. Handle resize
+        window.addEventListener('resize', () => {
+          Object.values(views).forEach(v => v.handleResize());
+        });
+
+        updateSyncBadges(true);
+        updateStatus('Ready');
+
+      } catch (error) {
+        console.error('Initialization error:', error);
+        updateStatus('Error: ' + error.message);
+      }
+    }
+
+    init();
+  </script>
+</body>
+</html>

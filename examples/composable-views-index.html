@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Composable Views Examples - neuroimjs</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      padding: 40px 20px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: #ffffff;
+      min-height: 100vh;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    h1 {
+      font-size: 48px;
+      font-weight: 700;
+      margin: 0 0 10px 0;
+      text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    }
+
+    .subtitle {
+      font-size: 20px;
+      color: rgba(255, 255, 255, 0.9);
+      margin-bottom: 50px;
+    }
+
+    .intro {
+      background: rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(10px);
+      padding: 30px;
+      border-radius: 12px;
+      margin-bottom: 40px;
+      line-height: 1.6;
+    }
+
+    .intro h2 {
+      margin-top: 0;
+      font-size: 24px;
+    }
+
+    .intro p {
+      margin: 15px 0;
+      color: rgba(255, 255, 255, 0.95);
+    }
+
+    .intro code {
+      background: rgba(0, 0, 0, 0.2);
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-family: 'SF Mono', Monaco, monospace;
+      font-size: 14px;
+    }
+
+    .demos-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+      gap: 30px;
+      margin-bottom: 50px;
+    }
+
+    .demo-card {
+      background: rgba(255, 255, 255, 0.15);
+      backdrop-filter: blur(10px);
+      border-radius: 12px;
+      overflow: hidden;
+      transition: transform 0.3s ease, box-shadow 0.3s ease;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+
+    .demo-card:hover {
+      transform: translateY(-5px);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+    }
+
+    .demo-card-header {
+      padding: 25px;
+      background: rgba(0, 0, 0, 0.2);
+    }
+
+    .demo-card h3 {
+      margin: 0 0 10px 0;
+      font-size: 22px;
+      font-weight: 600;
+    }
+
+    .demo-card .tag {
+      display: inline-block;
+      padding: 4px 12px;
+      background: rgba(255, 255, 255, 0.2);
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .demo-card-body {
+      padding: 25px;
+    }
+
+    .demo-card p {
+      margin: 0 0 15px 0;
+      line-height: 1.6;
+      color: rgba(255, 255, 255, 0.9);
+    }
+
+    .features {
+      list-style: none;
+      padding: 0;
+      margin: 0 0 20px 0;
+    }
+
+    .features li {
+      padding: 6px 0;
+      color: rgba(255, 255, 255, 0.85);
+      font-size: 14px;
+    }
+
+    .features li:before {
+      content: "✓";
+      margin-right: 10px;
+      color: #4CAF50;
+      font-weight: bold;
+    }
+
+    .demo-button {
+      display: inline-block;
+      padding: 12px 24px;
+      background: #4CAF50;
+      color: white;
+      text-decoration: none;
+      border-radius: 6px;
+      font-weight: 600;
+      transition: background 0.2s ease;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    }
+
+    .demo-button:hover {
+      background: #45a049;
+    }
+
+    .resources {
+      background: rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(10px);
+      padding: 30px;
+      border-radius: 12px;
+      margin-top: 40px;
+    }
+
+    .resources h2 {
+      margin-top: 0;
+      font-size: 24px;
+    }
+
+    .resources ul {
+      list-style: none;
+      padding: 0;
+    }
+
+    .resources li {
+      margin: 10px 0;
+    }
+
+    .resources a {
+      color: #ffffff;
+      text-decoration: none;
+      font-weight: 500;
+      transition: color 0.2s ease;
+    }
+
+    .resources a:hover {
+      color: #4CAF50;
+    }
+
+    .npm-commands {
+      background: rgba(0, 0, 0, 0.3);
+      padding: 20px;
+      border-radius: 8px;
+      margin: 20px 0;
+      font-family: 'SF Mono', Monaco, monospace;
+      font-size: 14px;
+    }
+
+    .npm-commands code {
+      color: #4CAF50;
+      display: block;
+      padding: 5px 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🧠 Composable Views</h1>
+    <p class="subtitle">Build custom neuroimaging viewer layouts with ease</p>
+
+    <div class="intro">
+      <h2>What are Composable Views?</h2>
+      <p>
+        neuroimjs now provides <code>SingleSliceViewer</code> and <code>ViewSynchronizer</code>
+        components that let you create individual orientation views (axial, sagittal, coronal)
+        and wire them together in any custom layout you need.
+      </p>
+      <p>
+        Perfect for integrating into existing applications, creating custom panel arrangements,
+        or building views that span multiple windows or GUI frameworks.
+      </p>
+
+      <div class="npm-commands">
+        <strong>Run any demo with npm:</strong>
+        <code>npm run demo:single-view    # Single axial view</code>
+        <code>npm run demo:two-view       # Two synchronized views</code>
+        <code>npm run demo:multi-panel    # Multi-panel custom layout</code>
+      </div>
+    </div>
+
+    <div class="demos-grid">
+      <!-- Demo 1: Single View -->
+      <div class="demo-card">
+        <div class="demo-card-header">
+          <h3>Single Axial View</h3>
+          <span class="tag">Beginner</span>
+        </div>
+        <div class="demo-card-body">
+          <p>
+            Create a standalone axial view with basic event handling and controls.
+            Perfect starting point for embedding viewers in custom applications.
+          </p>
+          <ul class="features">
+            <li>Single orientation view</li>
+            <li>Coordinate event listeners</li>
+            <li>Mouse position tracking</li>
+            <li>Crosshair toggle</li>
+          </ul>
+          <a href="single-axial-view.html" class="demo-button">View Demo →</a>
+        </div>
+      </div>
+
+      <!-- Demo 2: Two-View Sync -->
+      <div class="demo-card">
+        <div class="demo-card-header">
+          <h3>Two-View Synchronization</h3>
+          <span class="tag">Intermediate</span>
+        </div>
+        <div class="demo-card-body">
+          <p>
+            Synchronize axial and sagittal views with configurable sync modes.
+            Shows how to coordinate multiple views with ViewSynchronizer.
+          </p>
+          <ul class="features">
+            <li>Two synchronized views</li>
+            <li>Toggle sync on/off</li>
+            <li>Click vs hover sync modes</li>
+            <li>Programmatic coordinate updates</li>
+          </ul>
+          <a href="two-view-sync.html" class="demo-button">View Demo →</a>
+        </div>
+      </div>
+
+      <!-- Demo 3: Multi-Panel -->
+      <div class="demo-card">
+        <div class="demo-card-header">
+          <h3>Multi-Panel Custom Layout</h3>
+          <span class="tag">Advanced</span>
+        </div>
+        <div class="demo-card-body">
+          <p>
+            Professional multi-panel layout with three synchronized views,
+            custom grid arrangement, and side information panel.
+          </p>
+          <ul class="features">
+            <li>Custom CSS Grid layout</li>
+            <li>Three orthogonal views</li>
+            <li>Information sidebar</li>
+            <li>Professional UI/UX</li>
+          </ul>
+          <a href="multi-panel-custom-layout.html" class="demo-button">View Demo →</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="resources">
+      <h2>📚 Documentation & Resources</h2>
+      <ul>
+        <li>
+          <a href="../docs/COMPOSABLE_VIEWS.md" target="_blank">
+            📖 Complete Composable Views Guide
+          </a>
+          - Comprehensive developer documentation
+        </li>
+        <li>
+          <a href="../docs/COMPOSABLE_VIEWS_SUMMARY.md" target="_blank">
+            📝 Implementation Summary
+          </a>
+          - Overview of what was added
+        </li>
+        <li>
+          <a href="https://github.com/your-repo/neuroimjs" target="_blank">
+            💻 View Source on GitHub
+          </a>
+          - Contribute or report issues
+        </li>
+      </ul>
+
+      <h2 style="margin-top: 30px;">🚀 Quick Start</h2>
+      <p style="margin: 15px 0; color: rgba(255, 255, 255, 0.9);">
+        Creating a single view is as simple as:
+      </p>
+      <div class="npm-commands">
+        <code>import { VolStack, SingleSliceViewer } from 'neuroimjs';</code>
+        <code></code>
+        <code>const volStack = await VolStack.fromNifti('brain.nii.gz');</code>
+        <code>const viewer = await SingleSliceViewer.createAxial(</code>
+        <code>  container, volStack, { showCrosshair: true }</code>
+        <code>);</code>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

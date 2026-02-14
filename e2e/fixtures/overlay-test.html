@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Overlay Test - SparseNeuroVol + DenseNeuroVol</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 20px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #1a1a1a;
+      color: #ffffff;
+    }
+
+    h1 {
+      font-size: 24px;
+      margin-bottom: 10px;
+    }
+
+    .test-container {
+      display: flex;
+      gap: 20px;
+      flex-wrap: wrap;
+    }
+
+    .viewer-panel {
+      background: #2a2a2a;
+      padding: 15px;
+      border-radius: 8px;
+      /* Fixed dimensions for stable screenshots */
+      width: 288px;
+      height: 340px;
+      box-sizing: border-box;
+      overflow: hidden;
+    }
+
+    .viewer-panel h2 {
+      font-size: 16px;
+      margin-top: 0;
+      margin-bottom: 10px;
+      color: #4CAF50;
+      height: 20px;
+      overflow: hidden;
+    }
+
+    .viewer-container {
+      width: 256px;
+      height: 256px;
+      border: 1px solid #444;
+      /* Ensure canvas doesn't overflow */
+      overflow: hidden;
+      position: relative;
+    }
+
+    .status {
+      margin-top: 10px;
+      font-size: 12px;
+      font-family: monospace;
+      height: 16px;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+
+    .status.success { color: #4CAF50; }
+    .status.error { color: #f44336; }
+    .status.loading { color: #ff9800; }
+
+    #test-results {
+      margin-top: 30px;
+      padding: 15px;
+      background: #2a2a2a;
+      border-radius: 8px;
+      font-family: monospace;
+      font-size: 12px;
+    }
+
+    .test-pass { color: #4CAF50; }
+    .test-fail { color: #f44336; }
+  </style>
+</head>
+<body>
+  <h1>Overlay Test: Mixed Volume Types</h1>
+
+    <div class="test-container">
+    <!-- Test 1: Dense volume only -->
+    <div class="viewer-panel">
+      <h2>1. Dense Volume Only</h2>
+      <div id="dense-only" class="viewer-container" data-testid="dense-only"></div>
+      <div class="status loading" id="status-dense">Loading...</div>
+    </div>
+
+    <!-- Test 2: Sparse volume only -->
+    <div class="viewer-panel">
+      <h2>2. Sparse Volume Only</h2>
+      <div id="sparse-only" class="viewer-container" data-testid="sparse-only"></div>
+      <div class="status loading" id="status-sparse">Loading...</div>
+    </div>
+
+    <!-- Test 3: Dense + Sparse overlay -->
+    <div class="viewer-panel">
+      <h2>3. Dense + Sparse Overlay</h2>
+      <div id="overlay" class="viewer-container" data-testid="overlay"></div>
+      <div class="status loading" id="status-overlay">Loading...</div>
+    </div>
+
+    <!-- Test 4: ROI converted to Sparse -->
+    <div class="viewer-panel">
+      <h2>4. ROI as Sparse Overlay</h2>
+      <div id="roi-overlay" class="viewer-container" data-testid="roi-overlay"></div>
+      <div class="status loading" id="status-roi">Loading...</div>
+    </div>
+
+    <!-- Test 5: Dynamic ROI added after viewer creation -->
+    <div class="viewer-panel">
+      <h2>5. Template + Dynamic ROI Add</h2>
+      <div id="template-dynamic" class="viewer-container" data-testid="template-dynamic"></div>
+      <div class="status loading" id="status-template-dyn">Loading...</div>
+    </div>
+  </div>
+
+  <div id="test-results">
+    <div>Test Results:</div>
+    <div id="results-list"></div>
+  </div>
+
+  <script type="module">
+    import {
+      VolStack,
+      SingleSliceViewer,
+      NeuroSpace,
+      FloatNeuroVol,
+      SparseNeuroVol,
+      ColorMapFactory,
+      VolLayer,
+      ROICoords
+    } from '../../src/browser';
+
+    const results = [];
+
+    function addResult(name, passed, message = '') {
+      results.push({ name, passed, message });
+      updateResultsDisplay();
+    }
+
+    function updateResultsDisplay() {
+      const list = document.getElementById('results-list');
+      list.innerHTML = results.map(r => `
+        <div class="${r.passed ? 'test-pass' : 'test-fail'}">
+          ${r.passed ? '✓' : '✗'} ${r.name}${r.message ? ': ' + r.message : ''}
+        </div>
+      `).join('');
+    }
+
+    function setStatus(id, status, message) {
+      const el = document.getElementById(id);
+      el.className = `status ${status}`;
+      el.textContent = message;
+    }
+
+    async function runTests() {
+      try {
+        // Create a synthetic dense volume (10x10x10)
+        const space = new NeuroSpace([64, 64, 64], [2, 2, 2], [0, 0, 0]);
+
+        // Test 1: Dense volume only
+        try {
+          setStatus('status-dense', 'loading', 'Creating dense volume...');
+
+          const denseData = new Float32Array(64 * 64 * 64);
+          for (let z = 0; z < 64; z++) {
+            for (let y = 0; y < 64; y++) {
+              for (let x = 0; x < 64; x++) {
+                const idx = x + y * 64 + z * 64 * 64;
+                // Create a gradient pattern
+                denseData[idx] = (x + y + z) / (3 * 64);
+              }
+            }
+          }
+          const denseVol = new FloatNeuroVol(space, denseData);
+
+          const grayscaleMap = ColorMapFactory.createGrayscale();
+          const denseLayer = new VolLayer('dense', denseVol, grayscaleMap);
+          const denseStack = new VolStack(denseLayer);
+
+          const denseViewer = await SingleSliceViewer.createAxial(
+            document.getElementById('dense-only'),
+            denseStack,
+            { width: 256, height: 256, showCrosshair: false }
+          );
+
+          setStatus('status-dense', 'success', 'Dense volume rendered');
+          addResult('Dense volume creation', true);
+          addResult('Dense volume VolStack', true);
+          addResult('Dense volume viewer', true);
+        } catch (error) {
+          setStatus('status-dense', 'error', error.message);
+          addResult('Dense volume', false, error.message);
+        }
+
+        // Test 2: Sparse volume only
+        try {
+          setStatus('status-sparse', 'loading', 'Creating sparse volume...');
+
+          // Create a sparse volume with a spherical ROI at center
+          const sparseVol = SparseNeuroVol.fromSphere(space, [32, 32, 32], 10, 1.0);
+
+          const hotMap = ColorMapFactory.createHot();
+          const sparseLayer = new VolLayer('sparse', sparseVol, hotMap);
+          const sparseStack = new VolStack(sparseLayer);
+
+          const sparseViewer = await SingleSliceViewer.createAxial(
+            document.getElementById('sparse-only'),
+            sparseStack,
+            { width: 256, height: 256, showCrosshair: false }
+          );
+
+          setStatus('status-sparse', 'success', `Sparse volume rendered (${sparseVol.nonDefaultCount} voxels)`);
+          addResult('SparseNeuroVol.fromSphere', true);
+          addResult('Sparse volume VolStack', true);
+          addResult('Sparse volume viewer', true);
+        } catch (error) {
+          setStatus('status-sparse', 'error', error.message);
+          addResult('Sparse volume', false, error.message);
+        }
+
+        // Test 3: Dense + Sparse overlay
+        try {
+          setStatus('status-overlay', 'loading', 'Creating overlay...');
+
+          // Dense background
+          const denseData = new Float32Array(64 * 64 * 64);
+          for (let z = 0; z < 64; z++) {
+            for (let y = 0; y < 64; y++) {
+              for (let x = 0; x < 64; x++) {
+                const idx = x + y * 64 + z * 64 * 64;
+                denseData[idx] = (x + y + z) / (3 * 64);
+              }
+            }
+          }
+          const denseVol = new FloatNeuroVol(space, denseData);
+
+          // Sparse overlay (spherical activation)
+          const sparseVol = SparseNeuroVol.fromSphere(space, [32, 32, 32], 8, 1.0);
+
+          const grayscaleMap = ColorMapFactory.createGrayscale();
+          const hotMap = ColorMapFactory.createHot();
+
+          const denseLayer = new VolLayer('background', denseVol, grayscaleMap);
+          const sparseLayer = new VolLayer('activation', sparseVol, hotMap, null, [0.2, 1], 0.7);
+
+          // Create mixed stack
+          const mixedStack = new VolStack(denseLayer, sparseLayer);
+
+          const overlayViewer = await SingleSliceViewer.createAxial(
+            document.getElementById('overlay'),
+            mixedStack,
+            { width: 256, height: 256, showCrosshair: false }
+          );
+
+          setStatus('status-overlay', 'success', 'Overlay rendered (2 layers)');
+          addResult('Mixed VolStack (dense+sparse)', true);
+          addResult('Overlay viewer rendering', true);
+        } catch (error) {
+          setStatus('status-overlay', 'error', error.message);
+          addResult('Overlay', false, error.message);
+        }
+
+        // Test 4: ROI to Sparse conversion
+        try {
+          setStatus('status-roi', 'loading', 'Creating ROI overlay...');
+
+          // Dense background
+          const denseData = new Float32Array(64 * 64 * 64);
+          for (let z = 0; z < 64; z++) {
+            for (let y = 0; y < 64; y++) {
+              for (let x = 0; x < 64; x++) {
+                const idx = x + y * 64 + z * 64 * 64;
+                denseData[idx] = (x + y + z) / (3 * 64);
+              }
+            }
+          }
+          const denseVol = new FloatNeuroVol(space, denseData);
+
+          // Create ROI coordinates (a box region)
+          const coords = [];
+          for (let z = 25; z < 40; z++) {
+            for (let y = 25; y < 40; y++) {
+              for (let x = 25; x < 40; x++) {
+                coords.push([x, y, z]);
+              }
+            }
+          }
+
+          // Convert ROI to SparseNeuroVol
+          const roi = new ROICoords(coords, space);
+          const roiSparse = roi.asSparse(1.0);
+
+          const grayscaleMap = ColorMapFactory.createGrayscale();
+          const viridisMap = ColorMapFactory.fromPreset('Viridis');
+
+          const denseLayer = new VolLayer('background', denseVol, grayscaleMap);
+          const roiLayer = new VolLayer('roi', roiSparse, viridisMap, null, [0.5, 1], 0.6);
+
+          const roiStack = new VolStack(denseLayer, roiLayer);
+
+          const roiViewer = await SingleSliceViewer.createAxial(
+            document.getElementById('roi-overlay'),
+            roiStack,
+            { width: 256, height: 256, showCrosshair: false }
+          );
+
+          setStatus('status-roi', 'success', `ROI overlay rendered (${roiSparse.nonDefaultCount} voxels)`);
+          addResult('ROICoords.asSparse()', true);
+          addResult('ROI as VolLayer', true);
+          addResult('ROI overlay viewer', true);
+        } catch (error) {
+          setStatus('status-roi', 'error', error.message);
+          addResult('ROI overlay', false, error.message);
+        }
+
+        // Test 5: Dynamic addLayer after viewer creation (regression for layerCount updates)
+        try {
+          setStatus('status-template-dyn', 'loading', 'Creating template viewer...');
+
+          const denseData = new Float32Array(64 * 64 * 64);
+          for (let z = 0; z < 64; z++) {
+            for (let y = 0; y < 64; y++) {
+              for (let x = 0; x < 64; x++) {
+                const idx = x + y * 64 + z * 64 * 64;
+                denseData[idx] = (x + y + z) / (3 * 64);
+              }
+            }
+          }
+          const templateVol = new FloatNeuroVol(space, denseData);
+          const templateLayer = new VolLayer('template', templateVol, ColorMapFactory.createGrayscale());
+          const templateStack = new VolStack(templateLayer);
+
+          const templateViewer = await SingleSliceViewer.createAxial(
+            document.getElementById('template-dynamic'),
+            templateStack,
+            { width: 256, height: 256, showCrosshair: false }
+          );
+
+          // Add spherical ROI AFTER viewer is ready
+          const sphere = SparseNeuroVol.fromSphere(space, [32, 32, 32], 8, 1.0);
+          const sphereLayer = new VolLayer('sphere-roi', sphere, ColorMapFactory.createHot(), null, [0.2, 1], 0.6);
+          templateStack.addLayer(sphereLayer);
+
+          // Nudge viewer to ensure reactions fire
+          templateViewer.setCoord([32, 32, 32]);
+          await new Promise(res => setTimeout(res, 50));
+
+          const ids = templateStack.getLayerIds();
+          const len = templateStack.length;
+          const passed = len === 2 && ids.includes('sphere-roi');
+
+          setStatus('status-template-dyn', passed ? 'success' : 'error', `Layers: ${ids.join(', ')}`);
+          addResult('Dynamic addLayer increases stack length', passed, `len=${len}, ids=${ids.join(',')}`);
+        } catch (error) {
+          setStatus('status-template-dyn', 'error', error.message);
+          addResult('Dynamic addLayer', false, error.message);
+        }
+
+        // Final summary
+        const passed = results.filter(r => r.passed).length;
+        const total = results.length;
+        console.log(`Tests completed: ${passed}/${total} passed`);
+
+        // Expose results for Playwright
+        window.__TEST_RESULTS__ = {
+          passed,
+          total,
+          results,
+          allPassed: passed === total
+        };
+
+      } catch (error) {
+        console.error('Test suite error:', error);
+        addResult('Test suite', false, error.message);
+      }
+    }
+
+    // Run tests when page loads
+    runTests();
+  </script>
+</body>
+</html>

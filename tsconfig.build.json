@@ -1,0 +1,23 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src"
+  },
+  "include": ["src/**/*"],
+  "exclude": [
+    "node_modules", 
+    "dist", 
+    "coverage", 
+    "examples",
+    "**/*.spec.ts", 
+    "**/*.test.ts",
+    "**/__tests__/**/*",
+    "src/**/*.test.ts",
+    "src/**/*.spec.ts",
+    "src/display/__tests__/**/*",
+    "src/display/utils/__tests__/**/*",
+    "src/display/memory/__tests__/**/*",
+    "tests/**/*"
+  ]
+}

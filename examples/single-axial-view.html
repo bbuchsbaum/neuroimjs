@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Single Axial View Example - neuroimjs</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 20px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #1a1a1a;
+      color: #ffffff;
+    }
+
+    h1 {
+      font-size: 24px;
+      margin-bottom: 10px;
+    }
+
+    p {
+      color: #aaaaaa;
+      margin-bottom: 30px;
+    }
+
+    #axial-container {
+      width: 512px;
+      height: 512px;
+      border: 1px solid #333;
+      margin-bottom: 20px;
+    }
+
+    .info-panel {
+      font-family: monospace;
+      font-size: 12px;
+      background: #2a2a2a;
+      padding: 15px;
+      border-radius: 4px;
+      max-width: 512px;
+    }
+
+    .info-row {
+      margin-bottom: 8px;
+    }
+
+    .info-label {
+      color: #888;
+      display: inline-block;
+      width: 140px;
+    }
+
+    .info-value {
+      color: #4CAF50;
+    }
+
+    .controls {
+      margin-bottom: 20px;
+      max-width: 512px;
+    }
+
+    button {
+      background: #4CAF50;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      margin-right: 10px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+
+    button:hover {
+      background: #45a049;
+    }
+
+    button:active {
+      background: #3d8b40;
+    }
+  </style>
+</head>
+<body>
+  <h1>Single Axial View Example</h1>
+  <p>
+    This example demonstrates how to create a single standalone axial view
+    using SingleSliceViewer. The view can be embedded in any custom layout.
+  </p>
+
+  <div class="controls">
+    <button id="toggle-crosshair">Toggle Crosshair</button>
+    <button id="center-view">Center View</button>
+  </div>
+
+  <div id="axial-container"></div>
+
+  <div class="info-panel">
+    <div class="info-row">
+      <span class="info-label">Status:</span>
+      <span class="info-value" id="status">Initializing...</span>
+    </div>
+    <div class="info-row">
+      <span class="info-label">Current Slice:</span>
+      <span class="info-value" id="slice-index">-</span>
+    </div>
+    <div class="info-row">
+      <span class="info-label">World Coordinate:</span>
+      <span class="info-value" id="world-coord">-</span>
+    </div>
+    <div class="info-row">
+      <span class="info-label">Mouse Position:</span>
+      <span class="info-value" id="mouse-pos">-</span>
+    </div>
+    <div class="info-row">
+      <span class="info-label">Mouse World:</span>
+      <span class="info-value" id="mouse-world">-</span>
+    </div>
+  </div>
+
+  <script type="module">
+    import * as nifti from 'nifti-reader-js';
+    import {
+      VolStack,
+      VolLayer,
+      ColorMapFactory,
+      FloatNeuroVol,
+      NeuroSpace,
+      SingleSliceViewer,
+    } from '../src/browser';
+
+    // ── NIfTI loader ──────────────────────────────────────────
+    async function loadNiftiVolume(url) {
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error(`Fetch failed: ${resp.status}`);
+      let buffer = await resp.arrayBuffer();
+      if (nifti.isCompressed(buffer)) buffer = nifti.decompress(buffer);
+      if (!nifti.isNIFTI(buffer)) throw new Error('Not a valid NIfTI');
+      const header = nifti.readHeader(buffer);
+      const imgBuffer = nifti.readImage(header, buffer);
+      const dim = Array.from(header.dims.slice(1, 4));
+      const spacing = Array.from(header.pixDims.slice(1, 4));
+      const affine = header.affine;
+      const origin = [affine[0][3], affine[1][3], affine[2][3]];
+      const space = new NeuroSpace(dim, spacing, origin, undefined, affine);
+      const { TYPE_INT8, TYPE_UINT8, TYPE_INT16, TYPE_UINT16,
+              TYPE_INT32, TYPE_UINT32, TYPE_FLOAT32, TYPE_FLOAT64 } = nifti.NIFTI1;
+      let raw;
+      switch (header.datatypeCode) {
+        case TYPE_INT8:    raw = new Int8Array(imgBuffer); break;
+        case TYPE_UINT8:   raw = new Uint8Array(imgBuffer); break;
+        case TYPE_INT16:   raw = new Int16Array(imgBuffer); break;
+        case TYPE_UINT16:  raw = new Uint16Array(imgBuffer); break;
+        case TYPE_INT32:   raw = new Int32Array(imgBuffer); break;
+        case TYPE_UINT32:  raw = new Uint32Array(imgBuffer); break;
+        case TYPE_FLOAT32: raw = new Float32Array(imgBuffer); break;
+        case TYPE_FLOAT64: raw = new Float64Array(imgBuffer); break;
+        default: throw new Error(`Unsupported datatype ${header.datatypeCode}`);
+      }
+      const slope = header.scl_slope && header.scl_slope !== 0 ? header.scl_slope : 1;
+      const intercept = header.scl_inter || 0;
+      const floatData = new Float32Array(raw.length);
+      for (let i = 0; i < raw.length; i++) floatData[i] = raw[i] * slope + intercept;
+      const sample = [];
+      const step = Math.max(1, Math.floor(floatData.length / 250000));
+      for (let i = 0; i < floatData.length; i += step) sample.push(floatData[i]);
+      sample.sort((a, b) => a - b);
+      const pick = (p) => sample[Math.min(sample.length - 1, Math.max(0, Math.floor(p * (sample.length - 1))))];
+      let rangeMin = pick(0.02), rangeMax = pick(0.995);
+      if (!Number.isFinite(rangeMin) || rangeMin >= rangeMax) {
+        rangeMin = floatData.reduce((a, b) => Math.min(a, b), Infinity);
+        rangeMax = floatData.reduce((a, b) => Math.max(a, b), -Infinity);
+      }
+      return { vol: new FloatNeuroVol(space, floatData), space, range: [rangeMin, rangeMax] };
+    }
+
+    // Update status
+    function updateStatus(message) {
+      document.getElementById('status').textContent = message;
+    }
+
+    // Format coordinate for display
+    function formatCoord(coord) {
+      if (!coord) return 'N/A';
+      return coord.map(c => c.toFixed(2)).join(', ');
+    }
+
+    // Main initialization
+    async function init() {
+      try {
+        updateStatus('Loading volume data...');
+
+        const { vol, space, range } = await loadNiftiVolume(
+          '/tests/data/volumes/tpl-MNI152NLin2009aAsym_res-1_T1w.nii.gz'
+        );
+        const grayscale = ColorMapFactory.createGrayscale({ range });
+        const layer = new VolLayer('mni-template', vol, grayscale, range);
+        const volStack = new VolStack(layer);
+
+        updateStatus('Creating axial view...');
+
+        // Create a single axial view
+        const axialView = await SingleSliceViewer.createAxial(
+          document.getElementById('axial-container'),
+          volStack,
+          {
+            showCrosshair: true,
+            showSlider: true,
+            width: 512,
+            height: 512
+          }
+        );
+
+        updateStatus('Ready');
+
+        // Listen to coordinate changes
+        axialView.onCoordChange(coord => {
+          document.getElementById('world-coord').textContent = formatCoord(coord);
+        });
+
+        // Listen to slice index changes
+        axialView.onSliceChange(index => {
+          document.getElementById('slice-index').textContent = index.toString();
+        });
+
+        // Listen to pointer move events
+        axialView.onPointerMove(({ imageCoord, worldCoord }) => {
+          if (imageCoord) {
+            document.getElementById('mouse-pos').textContent =
+              `(${imageCoord.x.toFixed(0)}, ${imageCoord.y.toFixed(0)})`;
+          } else {
+            document.getElementById('mouse-pos').textContent = 'Outside';
+          }
+
+          if (worldCoord) {
+            document.getElementById('mouse-world').textContent = formatCoord(worldCoord);
+          } else {
+            document.getElementById('mouse-world').textContent = 'Outside';
+          }
+        });
+
+        // Set up controls
+        let crosshairVisible = true;
+        document.getElementById('toggle-crosshair').addEventListener('click', () => {
+          crosshairVisible = !crosshairVisible;
+          axialView.setCrosshairVisible(crosshairVisible);
+        });
+
+        document.getElementById('center-view').addEventListener('click', () => {
+          const centerCoord = axialView.getCurrentCoord();
+          axialView.setCoord(centerCoord);
+        });
+
+        // Update initial values
+        document.getElementById('world-coord').textContent =
+          formatCoord(axialView.getCurrentCoord());
+        document.getElementById('slice-index').textContent =
+          axialView.getCurrentSliceIndex().toString();
+
+        console.log('Single axial view created successfully!');
+        console.log('View orientation:', axialView.getOrientation());
+        console.log('Coordinate transformer:', axialView.getCoordinateTransformer());
+
+      } catch (error) {
+        console.error('Error initializing viewer:', error);
+        updateStatus('Error: ' + error.message);
+      }
+    }
+
+    // Start initialization
+    init();
+  </script>
+</body>
+</html>

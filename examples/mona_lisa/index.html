@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Mona Lisa Blinking</title>
+    <style>
+        body {
+            margin: 0;
+            background-color: black;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas" width="600" height="800"></canvas>
+    <script>
+        var canvas = document.getElementById('canvas');
+        var ctx = canvas.getContext('2d');
+
+        function drawMonaLisa(eyesOpen) {
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Set stroke color and line width
+            ctx.strokeStyle = 'green';
+            ctx.lineWidth = 2;
+
+            // Draw face outline (oval)
+            ctx.beginPath();
+            ctx.ellipse(300, 400, 100, 150, 0, 0, 2 * Math.PI);
+            ctx.stroke();
+
+            // Draw hair (simple arc over the head)
+            ctx.beginPath();
+            ctx.arc(300, 300, 120, Math.PI, 2 * Math.PI);
+            ctx.stroke();
+
+            // Draw body (triangle)
+            ctx.beginPath();
+            ctx.moveTo(200, 550);
+            ctx.lineTo(400, 550);
+            ctx.lineTo(300, 700);
+            ctx.closePath();
+            ctx.stroke();
+
+            // Draw eyes
+            if (eyesOpen) {
+                // Left eye
+                ctx.beginPath();
+                ctx.ellipse(270, 380, 15, 7, 0, 0, 2 * Math.PI);
+                ctx.stroke();
+                // Right eye
+                ctx.beginPath();
+                ctx.ellipse(330, 380, 15, 7, 0, 0, 2 * Math.PI);
+                ctx.stroke();
+            } else {
+                // Eyes closed - draw lines
+                ctx.beginPath();
+                ctx.moveTo(255, 380);
+                ctx.lineTo(285, 380);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(315, 380);
+                ctx.lineTo(345, 380);
+                ctx.stroke();
+            }
+
+            // Draw nose (simple line)
+            ctx.beginPath();
+            ctx.moveTo(300, 390);
+            ctx.lineTo(300, 420);
+            ctx.stroke();
+
+            // Draw mouth (smile)
+            ctx.beginPath();
+            ctx.arc(300, 450, 20, 0, Math.PI);
+            ctx.stroke();
+        }
+
+        var eyesOpen = true;
+
+        function blink() {
+            drawMonaLisa(eyesOpen);
+            eyesOpen = !eyesOpen;
+        }
+
+        drawMonaLisa(eyesOpen); // Initial draw
+        setInterval(blink, 1000); // Blink every 1 second
+
+    </script>
+</body>
+</html>

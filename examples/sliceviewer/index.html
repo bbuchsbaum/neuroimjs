@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Slice Viewer with Control Panel</title>
+  <!-- Add Shoelace theme -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@shoelace-style/shoelace@2.12.0/cdn/themes/light.css" />
+  <!-- Add Lit CDN -->
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+    }
+    *, *::before, *::after {
+      box-sizing: border-box;
+    }
+    #app-container {
+      display: flex;
+      flex-direction: row; /* Change to row to place items side by side */
+      height: 100vh; /* Use viewport height to ensure it fills the screen */
+      width: 100%;
+    }
+    #control-panel {
+      width: 250px;
+      background-color: #1a1a1a;
+      overflow-y: auto;
+      color: white;
+      flex-shrink: 0;
+      padding: 15px;
+    }
+    #viewer-container {
+      flex: 1;
+      min-height: 0; /* Ensure it can shrink to fit content */
+      position: relative;
+      background-color: black;
+      overflow: hidden;
+    }
+    #status-bar {
+      width: 100%;
+      position: absolute;
+      bottom: 0;
+    }
+    canvas {
+      display: block;
+    }
+    /* Control panel styling */
+    #control-panel input,
+    #control-panel select {
+      width: 100%;
+      padding: 8px;
+      margin-bottom: 16px;
+      background-color: #4a4a4a;
+      color: #ffffff;
+      border: none;
+      border-radius: 4px;
+      box-sizing: border-box;
+    }
+    #control-panel label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: bold;
+    }
+    /* Added max-width for inputs and selects */
+    #control-panel input,
+    #control-panel select {
+      max-width: 220px;
+    }
+  </style>
+</head>
+<body>
+  <div id="app-container">
+    <layer-control-panel id="control-panel"></layer-control-panel>
+    <div id="viewer-container"></div>
+    <status-bar id="status-bar"></status-bar> <!-- Add the status bar here -->
+  </div>
+  
+  <script>
+    window.onerror = function(message, source, lineno, colno, error) {
+      console.error('Global error:', message, source, lineno, colno, error);
+      document.body.innerHTML += '<p>Error: ' + message + '</p>';
+    };
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/nouislider@15.8.1/dist/nouislider.min.js"></script>
+  <!-- Add Shoelace script -->
+  <script type="module" src="https://cdn.jsdelivr.net/npm/@shoelace-style/shoelace@2.12.0/cdn/shoelace-autoloader.js"></script>
+  <!-- Load your neuroimjs library -->
+  <script type="module" src="../../dist/neuroimjs.es.js"></script>
+  <!-- Load your application script -->
+  <script type="module" src="sliceviewer.js"></script>
+</body>
+</html>

@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OrthogonalImageViewer – MNI Template</title>
+  <style>
+    :root {
+      --panel-bg: #11131a;
+      --accent: #7bdfff;
+      --text: #e9eef7;
+      --muted: #9aa7c2;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      padding: 20px;
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      background: radial-gradient(1200px at 15% 20%, #1e2433 0%, #0c0f18 55%);
+      color: var(--text);
+    }
+
+    h1 {
+      margin: 0 0 6px 0;
+      font-weight: 600;
+      letter-spacing: 0.2px;
+    }
+
+    p {
+      margin: 0 0 14px 0;
+      color: var(--muted);
+      max-width: 820px;
+      line-height: 1.4;
+    }
+
+    .shell {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 14px;
+      max-width: 1220px;
+    }
+
+    .viewer-frame {
+      background: linear-gradient(135deg, rgba(255,255,255,0.04), rgba(255,255,255,0.01));
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 14px;
+      padding: 14px;
+      box-shadow: 0 14px 40px rgba(0,0,0,0.35);
+    }
+
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 10px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .status-chip {
+      padding: 6px 10px;
+      border-radius: 10px;
+      background: rgba(255,255,255,0.06);
+      color: var(--text);
+      font-weight: 600;
+      letter-spacing: 0.3px;
+    }
+
+    .status-chip.ready { color: #7bdfff; }
+    .status-chip.error { color: #ff7b8a; }
+
+    #ortho-root {
+      width: 1100px;
+      height: 720px;
+      margin: 0 auto;
+      border-radius: 12px;
+      background: #0f121b;
+      border: 1px solid rgba(255,255,255,0.05);
+      overflow: hidden;
+      position: relative;
+    }
+
+    .hint {
+      font-size: 12px;
+      color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <div>
+      <h1>OrthogonalImageViewer • MNI152 template</h1>
+      <p>
+        Loads the real MNI152 1mm T1w template as the background volume and renders axial, coronal, and sagittal
+        slices simultaneously with crosshairs enabled. The page exposes a tiny test API so Playwright can assert
+        that all three views render and that crosshair visibility and shared coordinates stay in sync.
+      </p>
+    </div>
+
+    <div class="viewer-frame">
+      <div class="toolbar">
+        <span id="status" class="status-chip">loading template…</span>
+        <span class="hint">Source: <code>tests/data/volumes/tpl-MNI152NLin2009aAsym_res-1_T1w.nii.gz</code></span>
+      </div>
+      <div id="ortho-root" data-testid="orthogonal-viewer"></div>
+    </div>
+  </div>
+
+  <script type="module">
+    import * as nifti from 'nifti-reader-js';
+    import {
+      OrthogonalImageViewer,
+      VolLayer,
+      VolStack,
+      ColorMapFactory,
+      FloatNeuroVol,
+      NeuroSpace,
+      ImageLayer,
+    } from '../../src/browser';
+
+    const statusEl = document.getElementById('status');
+
+    const setStatus = (text, state = 'ready') => {
+      statusEl.textContent = text;
+      statusEl.className = `status-chip ${state}`;
+    };
+
+    const percentiles = (values, lower = 0.02, upper = 0.995) => {
+      const sample = [];
+      const step = Math.max(1, Math.floor(values.length / 250000));
+      for (let i = 0; i < values.length; i += step) sample.push(values[i]);
+      sample.sort((a, b) => a - b);
+      const pick = (p) => sample[Math.min(sample.length - 1, Math.max(0, Math.floor(p * (sample.length - 1))))];
+      return [pick(lower), pick(upper)];
+    };
+
+    async function loadTemplateVolume(url) {
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error(`Failed to fetch template: ${resp.status}`);
+      let buffer = await resp.arrayBuffer();
+
+      if (nifti.isCompressed(buffer)) buffer = nifti.decompress(buffer);
+      if (!nifti.isNIFTI(buffer)) throw new Error('Fetched file is not a valid NIfTI');
+
+      const header = nifti.readHeader(buffer);
+      const imgBuffer = nifti.readImage(header, buffer);
+
+      const dim = Array.from(header.dims.slice(1, 4));
+      const spacing = Array.from(header.pixDims.slice(1, 4));
+      const affine = header.affine;
+      const origin = [affine[0][3], affine[1][3], affine[2][3]];
+      const space = new NeuroSpace(dim, spacing, origin, undefined, affine);
+
+      const {
+        TYPE_INT8, TYPE_UINT8, TYPE_INT16, TYPE_UINT16,
+        TYPE_INT32, TYPE_UINT32, TYPE_FLOAT32, TYPE_FLOAT64,
+      } = nifti.NIFTI1;
+
+      let raw;
+      switch (header.datatypeCode) {
+        case TYPE_INT8: raw = new Int8Array(imgBuffer); break;
+        case TYPE_UINT8: raw = new Uint8Array(imgBuffer); break;
+        case TYPE_INT16: raw = new Int16Array(imgBuffer); break;
+        case TYPE_UINT16: raw = new Uint16Array(imgBuffer); break;
+        case TYPE_INT32: raw = new Int32Array(imgBuffer); break;
+        case TYPE_UINT32: raw = new Uint32Array(imgBuffer); break;
+        case TYPE_FLOAT32: raw = new Float32Array(imgBuffer); break;
+        case TYPE_FLOAT64: raw = new Float64Array(imgBuffer); break;
+        default: throw new Error(`Unsupported datatype code ${header.datatypeCode}`);
+      }
+
+      const slope = header.scl_slope && header.scl_slope !== 0 ? header.scl_slope : 1;
+      const intercept = header.scl_inter || 0;
+
+      const floatData = new Float32Array(raw.length);
+      let min = Number.POSITIVE_INFINITY;
+      let max = Number.NEGATIVE_INFINITY;
+      for (let i = 0; i < raw.length; i++) {
+        const v = raw[i] * slope + intercept;
+        floatData[i] = v;
+        if (v < min) min = v;
+        if (v > max) max = v;
+      }
+
+      let [rangeMin, rangeMax] = percentiles(floatData);
+      if (!Number.isFinite(rangeMin) || !Number.isFinite(rangeMax) || rangeMin >= rangeMax) {
+        rangeMin = min;
+        rangeMax = max;
+      }
+
+      const vol = new FloatNeuroVol(space, floatData);
+      return { vol, space, range: [rangeMin, rangeMax] };
+    }
+
+    async function boot() {
+      try {
+        setStatus('loading template…', 'loading');
+
+        const { vol, space, range } = await loadTemplateVolume(
+          '/tests/data/volumes/tpl-MNI152NLin2009aAsym_res-1_T1w.nii.gz'
+        );
+
+        const grayscale = ColorMapFactory.createGrayscale({ range });
+        const layer = new VolLayer('mni-template', vol, grayscale, range);
+        const stack = new VolStack(layer);
+        const imageLayer = new ImageLayer(stack);
+        imageLayer.initialize();
+
+        const container = document.getElementById('ortho-root');
+        const viewer = await OrthogonalImageViewer.create({
+          container,
+          imageLayer,
+          options: {
+            layout: 'top-bottom',
+            showCrosshair: true,
+            showSlider: false,
+            gapPx: 10,
+          },
+        });
+
+        // Set an initial world coordinate roughly at center.
+        viewer.setWorldCoord(space.centroid());
+
+        // Label internal divs for Playwright selectors (order is deterministic).
+        const [axial, coronal, sagittal] = Array.from(container.querySelectorAll(':scope > div'));
+        if (axial) axial.dataset.view = 'axial';
+        if (coronal) coronal.dataset.view = 'coronal';
+        if (sagittal) sagittal.dataset.view = 'sagittal';
+
+        // Expose a tiny test surface for Playwright
+        window.__ORTHO_VIEWER__ = viewer;
+        window.__ORTHO_TEST__ = {
+          dims: space.dim.slice(),
+          voxelToWorld(coord) {
+            return space.voxelToWorld(coord);
+          },
+          worldToVoxel(coord) {
+            return space.worldToVoxel(coord);
+          },
+          getCoords() {
+            return {
+              global: viewer.currentCoord.slice(),
+              axial: viewer.sliceViewers.axial.model.currentCoord.slice(),
+              coronal: viewer.sliceViewers.coronal.model.currentCoord.slice(),
+              sagittal: viewer.sliceViewers.sagittal.model.currentCoord.slice(),
+            };
+          },
+          /**
+           * Set coordinate using voxel space for convenience.
+           */
+          setVoxelCoord(coord) {
+            const world = space.voxelToWorld(coord);
+            viewer.setWorldCoord(world);
+          },
+          hasCrosshair() {
+            return ['axial', 'coronal', 'sagittal'].every(
+              (name) => viewer.sliceViewers[name]?.view.layers.some(
+                (layer) => layer.constructor?.name === 'CrossHair'
+              )
+            );
+          },
+          toggleCrosshair(flag) {
+            viewer.setCrosshairVisible(flag);
+          },
+        };
+
+        window.__ORTHO_READY__ = true;
+        setStatus('ready • template loaded', 'ready');
+      } catch (err) {
+        console.error(err);
+        setStatus(err.message || 'failed to load template', 'error');
+        window.__ORTHO_READY__ = false;
+      }
+    }
+
+    boot();
+  </script>
+</body>
+</html>

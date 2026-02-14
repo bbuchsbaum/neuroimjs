@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Depth-Enhanced Slice Viewing Demo</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 20px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #1a1a1a;
+      color: #ffffff;
+    }
+
+    h1 {
+      font-size: 24px;
+      margin-bottom: 10px;
+    }
+
+    .description {
+      color: #888;
+      margin-bottom: 20px;
+      max-width: 800px;
+      line-height: 1.5;
+    }
+
+    .test-container {
+      display: flex;
+      gap: 20px;
+      flex-wrap: wrap;
+    }
+
+    .viewer-panel {
+      background: #2a2a2a;
+      padding: 15px;
+      border-radius: 8px;
+    }
+
+    .viewer-panel h2 {
+      font-size: 16px;
+      margin-top: 0;
+      margin-bottom: 10px;
+      color: #4CAF50;
+    }
+
+    .viewer-container {
+      width: 256px;
+      height: 256px;
+      border: 1px solid #444;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .status {
+      margin-top: 10px;
+      font-size: 12px;
+      font-family: monospace;
+    }
+
+    .status.success { color: #4CAF50; }
+    .status.error { color: #f44336; }
+    .status.loading { color: #ff9800; }
+
+    .controls {
+      margin-top: 15px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      font-size: 12px;
+    }
+
+    .control-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .control-row label {
+      min-width: 100px;
+      color: #aaa;
+    }
+
+    .control-row input[type="range"] {
+      width: 100px;
+    }
+
+    .control-row .value {
+      min-width: 40px;
+      color: #4CAF50;
+      font-family: monospace;
+    }
+
+    .instructions {
+      margin-top: 15px;
+      padding: 10px;
+      background: #333;
+      border-radius: 4px;
+      font-size: 11px;
+      color: #aaa;
+      max-width: 256px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Depth-Enhanced Slice Viewing</h1>
+  <p class="description">
+    Move your cursor over the right viewer to see adjacent slices shift with parallax effect.
+    The depth enhancement renders blurred adjacent slices that move based on cursor position.
+  </p>
+
+  <div class="test-container">
+    <!-- Standard viewer for comparison -->
+    <div class="viewer-panel">
+      <h2>Standard Viewer</h2>
+      <div id="standard-viewer" class="viewer-container"></div>
+      <div class="status loading" id="status-standard">Loading...</div>
+    </div>
+
+    <!-- Depth enhanced viewer -->
+    <div class="viewer-panel">
+      <h2>With Depth Enhancement</h2>
+      <div id="depth-viewer" class="viewer-container"></div>
+      <div class="status loading" id="status-depth">Loading...</div>
+
+      <div class="controls" id="depth-controls" style="display: none;">
+        <div class="control-row">
+          <label>Depth Layers:</label>
+          <input type="range" id="depth-layers" min="1" max="5" value="2" step="1">
+          <span class="value" id="depth-layers-value">2</span>
+        </div>
+        <div class="control-row">
+          <label>Blur Radius:</label>
+          <input type="range" id="blur-radius" min="2" max="20" value="8" step="1">
+          <span class="value" id="blur-radius-value">8px</span>
+        </div>
+        <div class="control-row">
+          <label>Parallax:</label>
+          <input type="range" id="parallax" min="0" max="0.1" value="0.03" step="0.01">
+          <span class="value" id="parallax-value">0.03</span>
+        </div>
+        <div class="control-row">
+          <label>Opacity:</label>
+          <input type="range" id="opacity" min="0.1" max="0.8" value="0.4" step="0.05">
+          <span class="value" id="opacity-value">0.4</span>
+        </div>
+      </div>
+
+      <div class="instructions">
+        Move cursor over viewer to see parallax effect.
+        Adjacent slices shift based on cursor position.
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import {
+      VolStack,
+      SingleSliceViewer,
+      NeuroSpace,
+      FloatNeuroVol,
+      ColorMapFactory,
+      VolLayer
+    } from '../../src/browser';
+
+    function setStatus(id, status, message) {
+      const el = document.getElementById(id);
+      el.className = `status ${status}`;
+      el.textContent = message;
+    }
+
+    let depthViewer = null;
+
+    async function init() {
+      // Create volume data (same as overlay tests)
+      const space = new NeuroSpace([64, 64, 64], [2, 2, 2], [0, 0, 0]);
+      const data = new Float32Array(64 * 64 * 64);
+      for (let z = 0; z < 64; z++) {
+        for (let y = 0; y < 64; y++) {
+          for (let x = 0; x < 64; x++) {
+            const idx = x + y * 64 + z * 64 * 64;
+            data[idx] = (x + y + z) / (3 * 64);
+          }
+        }
+      }
+
+      // Test 1: Standard viewer (no depth enhancement)
+      try {
+        setStatus('status-standard', 'loading', 'Creating...');
+        const vol1 = new FloatNeuroVol(space, data.slice());
+        const layer1 = new VolLayer('vol', vol1, ColorMapFactory.createGrayscale());
+        const stack1 = new VolStack(layer1);
+
+        await SingleSliceViewer.createAxial(
+          document.getElementById('standard-viewer'),
+          stack1,
+          { width: 256, height: 256, showCrosshair: false }
+        );
+        setStatus('status-standard', 'success', 'Standard viewer ready');
+      } catch (err) {
+        console.error('Standard viewer error:', err);
+        setStatus('status-standard', 'error', err.message);
+      }
+
+      // Test 2: Depth enhanced viewer
+      try {
+        setStatus('status-depth', 'loading', 'Creating with depth...');
+        const vol2 = new FloatNeuroVol(space, data.slice());
+        const layer2 = new VolLayer('vol', vol2, ColorMapFactory.createGrayscale());
+        const stack2 = new VolStack(layer2);
+
+        depthViewer = await SingleSliceViewer.createAxial(
+          document.getElementById('depth-viewer'),
+          stack2,
+          {
+            width: 256,
+            height: 256,
+            showCrosshair: false,
+            enableDepthEnhancement: true,
+            depthEnhancementOptions: {
+              depthLayers: 2,
+              maxBlurRadius: 8,
+              parallaxAmount: 0.03,
+              baseOpacity: 0.4
+            }
+          }
+        );
+
+        const hasDepth = depthViewer.hasDepthEnhancement();
+        setStatus('status-depth', 'success', `Depth: ${hasDepth ? 'ON' : 'OFF'}`);
+
+        if (hasDepth) {
+          document.getElementById('depth-controls').style.display = 'block';
+          setupControls();
+        }
+      } catch (err) {
+        console.error('Depth viewer error:', err);
+        setStatus('status-depth', 'error', err.message);
+      }
+    }
+
+    function setupControls() {
+      document.getElementById('depth-layers').addEventListener('input', (e) => {
+        const val = parseInt(e.target.value);
+        document.getElementById('depth-layers-value').textContent = val;
+        depthViewer.setDepthEnhancementOptions({ depthLayers: val });
+      });
+
+      document.getElementById('blur-radius').addEventListener('input', (e) => {
+        const val = parseInt(e.target.value);
+        document.getElementById('blur-radius-value').textContent = val + 'px';
+        depthViewer.setDepthEnhancementOptions({ maxBlurRadius: val });
+      });
+
+      document.getElementById('parallax').addEventListener('input', (e) => {
+        const val = parseFloat(e.target.value);
+        document.getElementById('parallax-value').textContent = val.toFixed(2);
+        depthViewer.setDepthEnhancementOptions({ parallaxAmount: val });
+      });
+
+      document.getElementById('opacity').addEventListener('input', (e) => {
+        const val = parseFloat(e.target.value);
+        document.getElementById('opacity-value').textContent = val.toFixed(2);
+        depthViewer.setDepthEnhancementOptions({ baseOpacity: val });
+      });
+    }
+
+    init();
+  </script>
+</body>
+</html>

@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Rain Game</title>
+    <style>
+        body {
+            background-color: black;
+            color: green;
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Courier New', Courier, monospace;
+        }
+        #gameCanvas {
+            display: block;
+            margin: 0 auto;
+            background-color: black;
+        }
+        #controls {
+            position: absolute;
+            top: 0;
+            left: 0;
+            padding: 10px;
+            color: green;
+        }
+        #settings {
+            position: absolute;
+            top: 40px;
+            left: 0;
+            padding: 10px;
+            color: green;
+        }
+        input[type=range] {
+            width: 200px;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+    <div id="controls">
+        Score: <span id="scoreValue">0</span>
+    </div>
+    <div id="settings">
+        Rain Speed: <input type="range" id="rainSpeed" min="1" max="10" value="5"><br>
+        Pan Width: <input type="range" id="panWidth" min="50" max="300" value="100">
+    </div>
+    <script>
+        var canvas = document.getElementById('gameCanvas');
+        var context = canvas.getContext('2d');
+
+        // Set canvas size to window size
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        // Variables
+        var panWidth = parseInt(document.getElementById('panWidth').value);
+        var rainSpeed = parseInt(document.getElementById('rainSpeed').value);
+
+        var pan = {
+            x: canvas.width / 2 - panWidth / 2,
+            y: canvas.height - 50,
+            width: panWidth,
+            height: 20
+        };
+
+        var rainDrops = [];
+        var score = 0;
+
+        // Event listeners
+        window.addEventListener('mousemove', function(event) {
+            pan.x = event.clientX - pan.width / 2;
+        });
+
+        document.getElementById('rainSpeed').addEventListener('input', function(event) {
+            rainSpeed = parseInt(event.target.value);
+        });
+
+        document.getElementById('panWidth').addEventListener('input', function(event) {
+            pan.width = parseInt(event.target.value);
+        });
+
+        window.addEventListener('resize', function() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            pan.y = canvas.height - 50;
+        });
+
+        // Game loop
+        function gameLoop() {
+            update();
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+
+        function update() {
+            // Update rain drops
+            for (var i = 0; i < rainDrops.length; i++) {
+                var drop = rainDrops[i];
+                drop.y += rainSpeed;
+
+                // Check if caught by pan
+                if (drop.y >= pan.y && drop.y <= pan.y + pan.height) {
+                    if (drop.x >= pan.x && drop.x <= pan.x + pan.width) {
+                        // Caught
+                        rainDrops.splice(i, 1);
+                        i--;
+                        score++;
+                        document.getElementById('scoreValue').innerText = score;
+                        continue;
+                    }
+                }
+
+                // Remove drops that fall beyond canvas
+                if (drop.y > canvas.height) {
+                    rainDrops.splice(i, 1);
+                    i--;
+                }
+            }
+
+            // Add new rain drops
+            if (Math.random() < 0.05 * rainSpeed / 5) {
+                var newDrop = {
+                    x: Math.random() * canvas.width,
+                    y: 0
+                };
+                rainDrops.push(newDrop);
+            }
+        }
+
+        function draw() {
+            // Clear canvas
+            context.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Draw rain drops
+            context.strokeStyle = '#00FF00'; // Brighter green color
+            context.lineWidth = 2; // Thicker lines
+            for (var i = 0; i < rainDrops.length; i++) {
+                var drop = rainDrops[i];
+                context.beginPath();
+                context.moveTo(drop.x, drop.y);
+                context.lineTo(drop.x, drop.y + 20); // Longer drops
+                context.stroke();
+            }
+
+            // Draw pan
+            context.strokeStyle = 'green';
+            context.lineWidth = 1;
+            context.strokeRect(pan.x, pan.y, pan.width, pan.height);
+        }
+
+        gameLoop();
+    </script>
+</body>
+</html>
