@@ -682,9 +682,46 @@ describe('Statistical Operations', () => {
     it('should compute median correctly', () => {
       const values1 = new Float32Array([1, 2, 3, 4, 5]);
       expect(StatFunctions.median(values1)).toBe(3);
-      
+
       const values2 = new Float32Array([1, 2, 3, 4]);
       expect(StatFunctions.median(values2)).toBe(2.5);
+    });
+
+    it('should compute min/max on large arrays without stack overflow', () => {
+      // Math.min(...values) overflows the call stack around ~10^5 elements;
+      // whole-brain ROIs routinely exceed this. The loop-based impl must not throw.
+      const n = 200_000;
+      const values = new Float32Array(n);
+      for (let i = 0; i < n; i++) {
+        values[i] = i; // 0 .. n-1
+      }
+      // Plant a known extreme away from the ends.
+      values[12345] = -42;
+      values[54321] = n + 1000;
+
+      expect(() => StatFunctions.min(values)).not.toThrow();
+      expect(() => StatFunctions.max(values)).not.toThrow();
+      expect(StatFunctions.min(values)).toBe(-42);
+      expect(StatFunctions.max(values)).toBe(n + 1000);
+    });
+
+    it('should skip NaN in min/max', () => {
+      const values = new Float32Array([5, NaN, 2, NaN, 8, 1, 9]);
+      expect(StatFunctions.min(values)).toBe(1);
+      expect(StatFunctions.max(values)).toBe(9);
+
+      // All-NaN input yields NaN rather than +/-Infinity.
+      const allNaN = new Float32Array([NaN, NaN]);
+      expect(Number.isNaN(StatFunctions.min(allNaN))).toBe(true);
+      expect(Number.isNaN(StatFunctions.max(allNaN))).toBe(true);
+    });
+
+    it('should skip NaN in mean and std', () => {
+      const values = new Float32Array([2, NaN, 4, NaN, 6]);
+      // mean over the 3 valid values {2,4,6} = 4
+      expect(StatFunctions.mean(values)).toBe(4);
+      // sample std over {2,4,6} = 2
+      expect(StatFunctions.std(values)).toBeCloseTo(2, 6);
     });
   });
 });

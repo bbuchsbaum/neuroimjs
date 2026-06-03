@@ -249,7 +249,7 @@ describe('ColorMap', () => {
 
   test('emits events in correct order', () => {
     const events: string[] = [];
-    
+
     colorMap.on('rangeChanged', () => events.push('range'));
     colorMap.on('thresholdChanged', () => events.push('threshold'));
     colorMap.on('alphaChanged', () => events.push('alpha'));
@@ -259,5 +259,110 @@ describe('ColorMap', () => {
     colorMap.setAlpha(0.7);
 
     expect(events).toEqual(['range', 'threshold', 'alpha']);
+  });
+
+  describe('non-finite (NaN) values render transparent', () => {
+    // Minimal ImageData-like stub; fillImageData only touches `.data`.
+    const makeImageData = (numPixels: number) => ({
+      data: new Uint8ClampedArray(numPixels * 4),
+      width: numPixels,
+      height: 1,
+      colorSpace: 'srgb' as const,
+    });
+
+    test('fillImageData maps a NaN pixel to alpha=0 (transparent)', () => {
+      const map = new ColorMap([
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, 0, 1],
+      ], { range: [0, 100] });
+
+      const img = makeImageData(3) as unknown as ImageData;
+      // pixel 0: NaN (no data), pixel 1: in-range finite, pixel 2: Infinity
+      map.fillImageData(img, [NaN, 0, Infinity]);
+
+      // NaN pixel => fully transparent black
+      expect(img.data[0]).toBe(0);
+      expect(img.data[1]).toBe(0);
+      expect(img.data[2]).toBe(0);
+      expect(img.data[3]).toBe(0);
+
+      // Infinity pixel => also fully transparent
+      expect(img.data[8]).toBe(0);
+      expect(img.data[9]).toBe(0);
+      expect(img.data[10]).toBe(0);
+      expect(img.data[11]).toBe(0);
+    });
+
+    test('fillImageData maps a finite in-range value to opaque expected RGBA', () => {
+      const map = new ColorMap([
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, 0, 1],
+      ], { range: [0, 100] });
+
+      const img = makeImageData(1) as unknown as ImageData;
+      map.fillImageData(img, [0]); // value 0 => first color (red)
+
+      expect(img.data[0]).toBe(255); // R
+      expect(img.data[1]).toBe(0);   // G
+      expect(img.data[2]).toBe(0);   // B
+      expect(img.data[3]).toBe(255); // A => fully opaque
+    });
+
+    test('fillImageData maps min and max exactly to the endpoint colors', () => {
+      const map = new ColorMap([
+        [1, 0, 0],   // index 0
+        [0, 1, 0],   // index 1
+        [0, 0, 1],   // index 2 (last)
+      ], { range: [0, 100] });
+
+      const img = makeImageData(2) as unknown as ImageData;
+      map.fillImageData(img, [0, 100]); // min, max
+
+      // min => first color (red), opaque
+      expect(Array.from(img.data.slice(0, 4))).toEqual([255, 0, 0, 255]);
+      // max => last color (blue), opaque
+      expect(Array.from(img.data.slice(4, 8))).toEqual([0, 0, 255, 255]);
+    });
+
+    test('getColor with NaN returns a transparent / zero-alpha color', () => {
+      // RGBA map => transparent black with alpha 0
+      expect(colorMapWithAlpha.getColor(NaN)).toEqual([0, 0, 0, 0]);
+      expect(colorMapWithAlpha.getColor(Infinity)).toEqual([0, 0, 0, 0]);
+      expect(colorMapWithAlpha.getColor(-Infinity)).toEqual([0, 0, 0, 0]);
+
+      // RGB-only map => no alpha channel, but RGB collapses to black (no LUT lookup)
+      expect(colorMap.getColor(NaN)).toEqual([0, 0, 0]);
+    });
+
+    test('getColorArray with NaN returns zero color / zero alpha', () => {
+      const valsWithAlpha = colorMapWithAlpha.getColorArray([NaN, 0, Infinity]);
+      // pixel 0 (NaN): RGBA all zero
+      expect(Array.from(valsWithAlpha.slice(0, 4))).toEqual([0, 0, 0, 0]);
+      // pixel 1 (finite, value 0 => first color [0,0,0,1]) stays opaque
+      expect(valsWithAlpha[7]).toBe(1);
+      // pixel 2 (Infinity): RGBA all zero
+      expect(Array.from(valsWithAlpha.slice(8, 12))).toEqual([0, 0, 0, 0]);
+
+      // RGB-only map => 3 components, NaN collapses to black
+      const valsRGB = colorMap.getColorArray([NaN]);
+      expect(Array.from(valsRGB.slice(0, 3))).toEqual([0, 0, 0]);
+    });
+
+    test('degenerate range (min === max) does not produce NaN indices', () => {
+      const map = new ColorMap([
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, 0, 1],
+      ], { range: [5, 5] }); // RangeValidator may reset, but guard must hold regardless
+
+      // Should not throw and should return a valid finite color
+      const c = map.getColor(5);
+      expect(c.every(v => Number.isFinite(v))).toBe(true);
+
+      const arr = map.getColorArray([5]);
+      expect(Array.from(arr).every(v => Number.isFinite(v))).toBe(true);
+    });
   });
 });

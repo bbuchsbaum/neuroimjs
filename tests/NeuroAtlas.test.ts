@@ -3,7 +3,7 @@ import { NeuroAtlas } from '../src/atlas/NeuroAtlas';
 import { ClusteredNeuroVol } from '../src/volume/ClusteredNeuroVol';
 import { LogicalNeuroVol } from '../src/volume/LogicalNeuroVol';
 import { NeuroSpace } from '../src/geometry/NeuroSpace';
-import { ROIVol } from '../src/roi/ROI';
+import { ROIVol } from '../src/roi/ROI_improved';
 
 describe('NeuroAtlas', () => {
   let mockAtlasVol: ClusteredNeuroVol;

@@ -134,4 +134,43 @@ describe('ConnectedComponents', () => {
       }
     });
   });
+
+  describe('connectivity 6 / 18 / 26 discrimination', () => {
+    const lin = (x: number, y: number, z: number) => x + y * 10 + z * 100;
+
+    /** Two foreground voxels at the given grid positions, value 10, mask 1. */
+    function twoVoxels(a: [number, number, number], b: [number, number, number]) {
+      const vd = new Float32Array(n);
+      const md = new Uint8Array(n);
+      for (const [x, y, z] of [a, b]) {
+        vd[lin(x, y, z)] = 10;
+        md[lin(x, y, z)] = 1;
+      }
+      return { values: new FloatNeuroVol(space, vd), mask: new UInt8NeuroVol(space, md) };
+    }
+
+    const count = (v: FloatNeuroVol, m: UInt8NeuroVol, c: Connectivity) =>
+      ConnectedComponents.performConnectedComponents(v, m, 1, c).clusters.length;
+
+    it('face-adjacent voxels are one component under all connectivities', () => {
+      const { values, mask } = twoVoxels([1, 1, 1], [2, 1, 1]); // share a face
+      expect(count(values, mask, Connectivity.Six)).toBe(1);
+      expect(count(values, mask, Connectivity.Eighteen)).toBe(1);
+      expect(count(values, mask, Connectivity.TwentySix)).toBe(1);
+    });
+
+    it('edge-diagonal voxels split under 6 but join under 18 and 26', () => {
+      const { values, mask } = twoVoxels([1, 1, 1], [2, 2, 1]); // share only an edge
+      expect(count(values, mask, Connectivity.Six)).toBe(2);
+      expect(count(values, mask, Connectivity.Eighteen)).toBe(1);
+      expect(count(values, mask, Connectivity.TwentySix)).toBe(1);
+    });
+
+    it('corner-diagonal voxels split under 6 and 18 but join under 26', () => {
+      const { values, mask } = twoVoxels([1, 1, 1], [2, 2, 2]); // share only a corner
+      expect(count(values, mask, Connectivity.Six)).toBe(2);
+      expect(count(values, mask, Connectivity.Eighteen)).toBe(2);
+      expect(count(values, mask, Connectivity.TwentySix)).toBe(1);
+    });
+  });
 });

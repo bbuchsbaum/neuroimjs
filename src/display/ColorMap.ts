@@ -148,11 +148,6 @@ export class ColorMap {
   private emitter: Emitter<ColorMapEvents>;
   public name: string;                   // A label for the color map (e.g., "Grayscale")
   public isCustom: boolean;              // True if name === "Custom"
-  
-  // Lookup table for performance optimization
-  private lookupTable: Uint32Array | null = null;
-  private lookupTableRange: [number, number] | null = null;
-  private readonly LOOKUP_TABLE_SIZE = 4096;
 
   /**
    * Constructs a ColorMap with given colors and optional configuration.
@@ -236,7 +231,6 @@ export class ColorMap {
     }
 
     this.range = validation.range;
-    this.invalidateLookupTable();
     this.emitter.emit('rangeChanged', this.range);
   }
 
@@ -257,7 +251,6 @@ export class ColorMap {
     } else {
       this.threshold = [0, 0];
     }
-    this.invalidateLookupTable();
     this.emitter.emit('thresholdChanged', this.threshold);
   }
 
@@ -345,53 +338,7 @@ export class ColorMap {
     }
 
     this._hasAlpha = true;
-    this.invalidateLookupTable();
     this.emitter.emit('alphaChanged', [this._hasAlpha]);
-  }
-
-  /**
-   * Invalidates the lookup table cache
-   */
-  private invalidateLookupTable(): void {
-    this.lookupTable = null;
-    this.lookupTableRange = null;
-  }
-
-  /**
-   * Builds a lookup table for fast color mapping
-   */
-  private buildLookupTable(): void {
-    const [min, max] = this.range;
-    const [low, high] = this.threshold;
-    const useThreshold = low < high;
-    
-    this.lookupTable = new Uint32Array(this.LOOKUP_TABLE_SIZE);
-    this.lookupTableRange = [min, max];
-    
-    const numColorsMinus1 = this.colors.length - 1;
-    const rangeDelta = max - min || 1;
-    
-    for (let i = 0; i < this.LOOKUP_TABLE_SIZE; i++) {
-      const normalizedValue = i / (this.LOOKUP_TABLE_SIZE - 1);
-      const value = min + normalizedValue * rangeDelta;
-      
-      let colorIndex = Math.floor(normalizedValue * numColorsMinus1);
-      colorIndex = Math.max(0, Math.min(colorIndex, numColorsMinus1));
-      
-      const color = this.colors[colorIndex];
-      const r = Math.round(color[0] * 255);
-      const g = Math.round(color[1] * 255);
-      const b = Math.round(color[2] * 255);
-      let a = this._hasAlpha ? Math.round((color[3] ?? 1) * 255) : 255;
-      
-      // Apply threshold - values strictly between low and high are transparent
-      if (useThreshold && value > low && value < high) {
-        a = 0;
-      }
-      
-      // Pack RGBA into single 32-bit value (little-endian)
-      this.lookupTable[i] = (a << 24) | (b << 16) | (g << 8) | r;
-    }
   }
 
   /**
@@ -407,8 +354,16 @@ export class ColorMap {
     const [min, max] = this.range;
     const [low, high] = this.threshold;
 
-    // Normalize value => [0..1] fraction along the color map
-    const normalizedValue = (value - min) / (max - min);
+    // Non-finite values (NaN, Infinity) represent "no data" and must render
+    // as fully transparent rather than producing a NaN LUT index (opaque black).
+    if (!Number.isFinite(value)) {
+      return this._hasAlpha ? [0, 0, 0, 0] : [0, 0, 0];
+    }
+
+    // Normalize value => [0..1] fraction along the color map.
+    // Guard the divisor so a degenerate range (max === min) can't yield NaN.
+    const rangeDelta = (max - min) || 1;
+    const normalizedValue = (value - min) / rangeDelta;
     const index = Math.min(
       Math.max(
         Math.floor(normalizedValue * (this.colors.length - 1)),
@@ -465,12 +420,24 @@ export class ColorMap {
 
     for (let i = 0, len = values.length; i < len; i++) {
       const value = values[i];
+      const offset = i * 4;
+
+      // Non-finite values (NaN, Infinity) represent "no data" and must render
+      // as fully transparent rather than producing a NaN LUT index, which would
+      // write `undefined` (clamped to 0) and yield an opaque black pixel.
+      if (!Number.isFinite(value)) {
+        data[offset] = 0;
+        data[offset + 1] = 0;
+        data[offset + 2] = 0;
+        data[offset + 3] = 0;
+        continue;
+      }
+
       const normalizedValue = (value - min) / rangeDelta;
       let index = Math.floor(normalizedValue * numColorsMinus1);
       index = Math.max(0, Math.min(index, numColorsMinus1));
 
       const color = scaledColors[index];
-      const offset = i * 4;
 
       data[offset] = color[0];
       data[offset + 1] = color[1];
@@ -503,9 +470,28 @@ export class ColorMap {
     const [min, max] = this.range;
     const [low, high] = this.threshold;
 
+    // Guard the divisor so a degenerate range (max === min) can't yield NaN indices.
+    const rangeDelta = (max - min) || 1;
+
     for (let i = 0; i < values.length; i++) {
       const value = values[i];
-      const normalizedValue = (value - min) / (max - min);
+      const offset = i * componentsPerColor;
+
+      // Non-finite values (NaN, Infinity) represent "no data" and must render
+      // as fully transparent rather than producing a NaN LUT index. The
+      // Float32Array is already zero-initialized, so RGB stays 0; explicitly
+      // set alpha=0 when present.
+      if (!Number.isFinite(value)) {
+        colorArray[offset] = 0;
+        colorArray[offset + 1] = 0;
+        colorArray[offset + 2] = 0;
+        if (this._hasAlpha) {
+          colorArray[offset + 3] = 0;
+        }
+        continue;
+      }
+
+      const normalizedValue = (value - min) / rangeDelta;
       const index = Math.min(
         Math.max(
           Math.floor(normalizedValue * (this.colors.length - 1)),
@@ -514,7 +500,6 @@ export class ColorMap {
         this.colors.length - 1
       );
       const color = this.colors[index];
-      const offset = i * componentsPerColor;
 
       colorArray[offset] = color[0];
       colorArray[offset + 1] = color[1];

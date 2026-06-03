@@ -8,6 +8,8 @@ import { TypedArray, NumericType } from '../types';
 import { FloatNeuroVol } from '../volume/DenseNeuroVol';
 import { INeuroVec, DetrendMethod, TemporalFilter } from './INeuroVec';
 import { DenseNeuroVec } from './NeuroVec';
+import { dft, idftReal, binFrequencyHz } from './fft';
+import { seriesMean, seriesStd, seriesMin, seriesMax, seriesMedian } from './temporalOps';
 
 /**
  * Enhanced abstract class for dense 4D neuroimaging data with time series operations
@@ -165,21 +167,21 @@ export abstract class EnhancedDenseNeuroVec<TArray extends TypedArray, TVol exte
    * Calculate temporal minimum
    */
   temporalMin(): NeuroVol {
-    return this.temporalReduce((series) => Math.min(...series));
+    return this.temporalReduce((series) => seriesMin(series));
   }
 
   /**
    * Calculate temporal maximum
    */
   temporalMax(): NeuroVol {
-    return this.temporalReduce((series) => Math.max(...series));
+    return this.temporalReduce((series) => seriesMax(series));
   }
 
   /**
    * Calculate temporal median
    */
   temporalMedian(): NeuroVol {
-    return this.temporalReduce((series) => this.median(series));
+    return this.temporalReduce((series) => seriesMedian(series));
   }
 
   /**
@@ -412,20 +414,156 @@ export abstract class EnhancedDenseNeuroVec<TArray extends TypedArray, TVol exte
         break;
       }
       case 'polynomial': {
-        const order = options?.order || 2;
-        // TODO: Implement polynomial detrending
-        throw new Error('Polynomial detrending not yet implemented');
+        const order = options?.order ?? 2;
+        const coeffs = this.polynomialFit(series, order);
+        for (let i = 0; i < n; i++) {
+          let trend = 0;
+          let pow = 1;
+          for (let c = 0; c < coeffs.length; c++) {
+            trend += coeffs[c] * pow;
+            pow *= i;
+          }
+          detrended[i] = series[i] - trend;
+        }
+        break;
       }
     }
 
     return detrended;
   }
 
+  /**
+   * Fit a polynomial of the given order to a series using ordinary
+   * least-squares (normal equations solved by Gaussian elimination).
+   *
+   * Returns coefficients [c0, c1, ..., c_order] for the model
+   *   y(t) = c0 + c1*t + c2*t^2 + ... + c_order*t^order
+   */
+  private polynomialFit(series: Float32Array, order: number): number[] {
+    const n = series.length;
+    const m = order + 1;
+
+    // Build the normal-equation matrices: (V^T V) c = V^T y, where V is the
+    // Vandermonde matrix of the time index. Sums of powers of t are reused.
+    const powerSums = new Float64Array(2 * order + 1);
+    for (let t = 0; t < n; t++) {
+      let pow = 1;
+      for (let p = 0; p <= 2 * order; p++) {
+        powerSums[p] += pow;
+        pow *= t;
+      }
+    }
+
+    const rhs = new Float64Array(m);
+    for (let t = 0; t < n; t++) {
+      let pow = 1;
+      for (let p = 0; p < m; p++) {
+        rhs[p] += series[t] * pow;
+        pow *= t;
+      }
+    }
+
+    // Assemble augmented matrix [A | b].
+    const A: number[][] = [];
+    for (let r = 0; r < m; r++) {
+      const row = new Array(m + 1);
+      for (let c = 0; c < m; c++) {
+        row[c] = powerSums[r + c];
+      }
+      row[m] = rhs[r];
+      A.push(row);
+    }
+
+    // Gaussian elimination with partial pivoting.
+    for (let col = 0; col < m; col++) {
+      let pivot = col;
+      for (let r = col + 1; r < m; r++) {
+        if (Math.abs(A[r][col]) > Math.abs(A[pivot][col])) {
+          pivot = r;
+        }
+      }
+      if (pivot !== col) {
+        const tmp = A[col];
+        A[col] = A[pivot];
+        A[pivot] = tmp;
+      }
+
+      const diag = A[col][col];
+      if (Math.abs(diag) < 1e-12) {
+        continue; // Singular column (e.g. order too high for n); leave as 0.
+      }
+
+      for (let r = 0; r < m; r++) {
+        if (r === col) continue;
+        const factor = A[r][col] / diag;
+        if (factor === 0) continue;
+        for (let c = col; c <= m; c++) {
+          A[r][c] -= factor * A[col][c];
+        }
+      }
+    }
+
+    const coeffs = new Array(m).fill(0);
+    for (let r = 0; r < m; r++) {
+      const diag = A[r][r];
+      coeffs[r] = Math.abs(diag) < 1e-12 ? 0 : A[r][m] / diag;
+    }
+
+    return coeffs;
+  }
+
+  /**
+   * Apply a frequency-domain temporal filter to a single voxel time series.
+   *
+   * Uses a forward DFT, zeroes out frequency bins outside the requested band,
+   * then inverse-transforms and returns the real part.
+   *
+   * - low-pass:  only `highFreq` provided -> keep bins with freq <= highFreq
+   * - high-pass: only `lowFreq` provided  -> keep bins with freq >= lowFreq
+   *              (the DC / mean component is removed)
+   * - band-pass: both provided           -> keep lowFreq <= freq <= highFreq
+   *
+   * Frequencies are derived from the sampling interval `tr` (seconds):
+   *   freq[k] = k / (n * tr)  for k = 0..floor(n/2), mirrored for k > n/2.
+   */
   private filterSeries(series: Float32Array, lowFreq?: number, highFreq?: number, tr: number = 2.0): Float32Array {
-    // Simple butterworth filter implementation
-    // TODO: Implement proper frequency filtering
-    console.warn('Temporal filtering not fully implemented, returning original series');
-    return series;
+    const n = series.length;
+
+    // Nothing meaningful to filter / no band specified -> return a copy.
+    if (n === 0 || (lowFreq === undefined && highFreq === undefined)) {
+      return new Float32Array(series);
+    }
+
+    const hasLow = lowFreq !== undefined;
+    const hasHigh = highFreq !== undefined;
+
+    const { re, im } = dft(series);
+
+    for (let k = 0; k < n; k++) {
+      const f = binFrequencyHz(k, n, tr);
+
+      // Determine whether this frequency bin lies inside the passband.
+      let keep = true;
+      if (hasLow && f < (lowFreq as number)) {
+        keep = false; // below high-pass cutoff
+      }
+      if (hasHigh && f > (highFreq as number)) {
+        keep = false; // above low-pass cutoff
+      }
+
+      if (!keep) {
+        re[k] = 0;
+        im[k] = 0;
+      }
+    }
+
+    const reconstructed = idftReal(re, im);
+
+    const result = new Float32Array(n);
+    for (let t = 0; t < n; t++) {
+      result[t] = reconstructed[t];
+    }
+    return result;
   }
 
   private convolveSeries(series: Float32Array, kernel: number[]): Float32Array {
@@ -469,11 +607,7 @@ export abstract class EnhancedDenseNeuroVec<TArray extends TypedArray, TVol exte
   }
 
   private mean(data: Float32Array): number {
-    let sum = 0;
-    for (let i = 0; i < data.length; i++) {
-      sum += data[i];
-    }
-    return sum / data.length;
+    return seriesMean(data);
   }
 
   private meanSubset(data: Float32Array, indices: number[]): number {
@@ -485,21 +619,7 @@ export abstract class EnhancedDenseNeuroVec<TArray extends TypedArray, TVol exte
   }
 
   private std(data: Float32Array): number {
-    const m = this.mean(data);
-    let sum = 0;
-    for (let i = 0; i < data.length; i++) {
-      const diff = data[i] - m;
-      sum += diff * diff;
-    }
-    return Math.sqrt(sum / (data.length - 1));
-  }
-
-  private median(data: Float32Array): number {
-    const sorted = Array.from(data).sort((a, b) => a - b);
-    const mid = Math.floor(sorted.length / 2);
-    return sorted.length % 2 !== 0 
-      ? sorted[mid] 
-      : (sorted[mid - 1] + sorted[mid]) / 2;
+    return seriesStd(data);
   }
 
   private pearsonCorrelation(x: Float32Array, y: Float32Array, xMean?: number, xStd?: number): number {

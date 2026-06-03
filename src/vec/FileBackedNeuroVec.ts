@@ -8,6 +8,7 @@ import { NeuroVol } from '../volume/NeuroVol';
 import { FloatNeuroVol } from '../volume/DenseNeuroVol';
 import { INeuroVec, DetrendMethod, TemporalFilter } from './INeuroVec';
 import { EnhancedFloat32NeuroVec } from './EnhancedNeuroVec';
+import { seriesMin, seriesMax, seriesMedian } from './temporalOps';
 
 /**
  * Cache entry for volume data
@@ -267,21 +268,15 @@ export class FileBackedNeuroVec implements INeuroVec {
   }
 
   temporalMin(): NeuroVol {
-    return this.temporalReduce((values) => Math.min(...values));
+    return this.temporalReduce((values) => seriesMin(values));
   }
 
   temporalMax(): NeuroVol {
-    return this.temporalReduce((values) => Math.max(...values));
+    return this.temporalReduce((values) => seriesMax(values));
   }
 
   temporalMedian(): NeuroVol {
-    return this.temporalReduce((values) => {
-      const sorted = values.sort((a, b) => a - b);
-      const mid = Math.floor(sorted.length / 2);
-      return sorted.length % 2 !== 0 
-        ? sorted[mid] 
-        : (sorted[mid - 1] + sorted[mid]) / 2;
-    });
+    return this.temporalReduce((values) => seriesMedian(values));
   }
 
   temporalCorrelation(seed: [number, number, number]): NeuroVol {

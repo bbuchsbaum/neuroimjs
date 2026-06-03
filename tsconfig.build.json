@@ -18,6 +18,8 @@
     "src/display/__tests__/**/*",
     "src/display/utils/__tests__/**/*",
     "src/display/memory/__tests__/**/*",
+    "src/testing/**/*",
+    "src/test-migration/**/*",
     "tests/**/*"
   ]
 }

@@ -171,10 +171,10 @@ export class SparseNeuroVol implements NeuroVol {
   ): NeuroSlice {
     const { space } = this;
     const reorientedSpace = space.reorient(outAxes);
-    const transformMatrix = space.getTransformationMatrixTo(reorientedSpace);
-    const coordHomogeneous = [...coord, 1];
-    const transformedCoord = transformMatrix.mmul(Matrix.columnVector(coordHomogeneous)).to1DArray();
-    const fixedAxisValue = transformedCoord[2];
+
+    // `coord` is a world coordinate; find its out-of-plane index in the
+    // reoriented grid.
+    const fixedAxisValue = reorientedSpace.coordToGrid(coord)[2];
 
     const [nx, ny] = [reorientedSpace.dim[0], reorientedSpace.dim[1]];
     const sliceData = new (this.getDataConstructor())(nx * ny);
@@ -186,9 +186,10 @@ export class SparseNeuroVol implements NeuroVol {
 
     for (let j = 0; j < ny; j++) {
       for (let i = 0; i < nx; i++) {
-        const sliceCoord = [i, j, fixedAxisValue, 1];
-        const volCoordHomogeneous = space.getTransformationMatrixTo(space).mmul(Matrix.columnVector(sliceCoord)).to1DArray();
-        const [x, y, z] = volCoordHomogeneous.slice(0, 3);
+        // Map the reoriented slice pixel to a world coordinate, then into the
+        // source grid (applies the correct axis permutation/flip).
+        const worldPix = reorientedSpace.gridToCoord([i, j, fixedAxisValue]);
+        const [x, y, z] = space.coordToGrid(worldPix);
 
         let value = this.defaultValue;
         if (interpolation === 'nearest') {

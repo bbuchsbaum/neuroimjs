@@ -238,12 +238,157 @@ describe('EnhancedNeuroVec', () => {
   describe('Clone', () => {
     it('should create independent copy', () => {
       const cloned = vec.clone();
-      
+
       // Modify original
       vec.setAt(0, 0, 0, 0, 999);
-      
+
       // Clone should be unchanged
       expect(cloned.getAt(0, 0, 0, 0)).toBe(10);
+    });
+  });
+
+  describe('Temporal Filtering', () => {
+    const N = 64; // time points
+    const TR = 1.0; // seconds -> Nyquist = 0.5 Hz
+    const fDims = [1, 1, 1, N];
+
+    // Helpers operating on plain arrays for known-answer checks.
+    const amplitude = (arr: Float32Array | number[]): number => {
+      let mn = Infinity;
+      let mx = -Infinity;
+      for (let i = 0; i < arr.length; i++) {
+        if (arr[i] < mn) mn = arr[i];
+        if (arr[i] > mx) mx = arr[i];
+      }
+      return (mx - mn) / 2;
+    };
+
+    const meanOf = (arr: Float32Array | number[]): number => {
+      let s = 0;
+      for (let i = 0; i < arr.length; i++) s += arr[i];
+      return s / arr.length;
+    };
+
+    const correlation = (a: Float32Array, b: Float32Array): number => {
+      const ma = meanOf(a);
+      const mb = meanOf(b);
+      let num = 0;
+      let da = 0;
+      let db = 0;
+      for (let i = 0; i < a.length; i++) {
+        const x = a[i] - ma;
+        const y = b[i] - mb;
+        num += x * y;
+        da += x * x;
+        db += y * y;
+      }
+      return num / Math.sqrt(da * db);
+    };
+
+    const makeVec = (signal: (t: number) => number): EnhancedFloat32NeuroVec => {
+      const fSpace = new NeuroSpace(fDims, [1, 1, 1, TR], [0, 0, 0, 0], AxisSet3D.AXIAL_LPI);
+      const v = new EnhancedFloat32NeuroVec(fSpace);
+      for (let t = 0; t < N; t++) {
+        v.setAt(0, 0, 0, t, signal(t));
+      }
+      return v;
+    };
+
+    // Choose frequencies that land exactly on DFT bins: f = k / (N * TR).
+    const freqLow = 4 / (N * TR);  // 0.0625 Hz
+    const freqHigh = 16 / (N * TR); // 0.25 Hz
+
+    it('preserves a sinusoid whose frequency is inside the passband', () => {
+      const v = makeVec((t) => Math.sin(2 * Math.PI * freqLow * t));
+      const original = v.getTimeSeries(0, 0, 0);
+
+      // Band-pass that contains freqLow but excludes freqHigh.
+      const filtered = v
+        .temporalFilter({ lowFreq: freqLow / 2, highFreq: freqLow * 2, tr: TR })
+        .getTimeSeries(0, 0, 0);
+
+      expect(amplitude(filtered)).toBeCloseTo(amplitude(original), 3);
+      expect(correlation(original, filtered)).toBeGreaterThan(0.999);
+    });
+
+    it('strongly attenuates a sinusoid outside the band', () => {
+      const v = makeVec((t) => Math.sin(2 * Math.PI * freqHigh * t));
+      const originalAmp = amplitude(v.getTimeSeries(0, 0, 0));
+      expect(originalAmp).toBeGreaterThan(0.9); // sanity: amplitude ~1
+
+      // Band-pass centered on freqLow excludes freqHigh entirely.
+      const filtered = v
+        .temporalFilter({ lowFreq: freqLow / 2, highFreq: freqLow * 2, tr: TR })
+        .getTimeSeries(0, 0, 0);
+
+      expect(amplitude(filtered)).toBeLessThan(1e-4);
+    });
+
+    it('low-pass passes low frequency and blocks high frequency', () => {
+      const v = makeVec(
+        (t) => Math.sin(2 * Math.PI * freqLow * t) + Math.sin(2 * Math.PI * freqHigh * t)
+      );
+
+      // Low-pass cutoff between freqLow and freqHigh.
+      const filtered = v
+        .temporalFilter({ highFreq: (freqLow + freqHigh) / 2, tr: TR })
+        .getTimeSeries(0, 0, 0);
+
+      // Only the low component (amplitude ~1) should remain.
+      const lowOnly = makeVec((t) => Math.sin(2 * Math.PI * freqLow * t)).getTimeSeries(0, 0, 0);
+      expect(amplitude(filtered)).toBeCloseTo(1, 2);
+      expect(correlation(lowOnly, filtered)).toBeGreaterThan(0.999);
+    });
+
+    it('high-pass removes a constant (DC) signal', () => {
+      const v = makeVec(() => 42);
+      const filtered = v
+        .temporalFilter({ lowFreq: freqLow / 2, tr: TR })
+        .getTimeSeries(0, 0, 0);
+
+      for (let t = 0; t < N; t++) {
+        expect(Math.abs(filtered[t])).toBeLessThan(1e-6);
+      }
+    });
+
+    it('low-pass preserves a constant (DC) signal', () => {
+      const v = makeVec(() => 42);
+      const filtered = v
+        .temporalFilter({ highFreq: freqHigh, tr: TR })
+        .getTimeSeries(0, 0, 0);
+
+      for (let t = 0; t < N; t++) {
+        expect(filtered[t]).toBeCloseTo(42, 3);
+      }
+    });
+
+    it('high-pass removes the mean of a sinusoid plus offset', () => {
+      const v = makeVec((t) => 100 + Math.sin(2 * Math.PI * freqHigh * t));
+      const filtered = v
+        .temporalFilter({ lowFreq: freqLow / 2, tr: TR })
+        .getTimeSeries(0, 0, 0);
+
+      // DC/offset removed; oscillation retained.
+      expect(Math.abs(meanOf(filtered))).toBeLessThan(1e-4);
+      expect(amplitude(filtered)).toBeCloseTo(1, 2);
+    });
+  });
+
+  describe('Polynomial Detrending', () => {
+    it('removes a quadratic trend', () => {
+      const N = 20;
+      const pSpace = new NeuroSpace([1, 1, 1, N], [1, 1, 1, 2], [0, 0, 0, 0], AxisSet3D.AXIAL_LPI);
+      const pVec = new EnhancedFloat32NeuroVec(pSpace);
+      for (let t = 0; t < N; t++) {
+        // y = 3 + 2t + 0.5 t^2
+        pVec.setAt(0, 0, 0, t, 3 + 2 * t + 0.5 * t * t);
+      }
+
+      const detrended = pVec.detrend('polynomial', { order: 2 });
+      const series = detrended.getTimeSeries(0, 0, 0);
+      for (let t = 0; t < N; t++) {
+        expect(Math.abs(series[t])).toBeLessThan(1e-2);
+      }
     });
   });
 });

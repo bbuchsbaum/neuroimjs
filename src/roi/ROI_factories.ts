@@ -7,9 +7,15 @@ import { ValueError, TypedArray } from '../types';
 /**
  * Creates a spherical ROI centered at the given coordinates.
  * 
+ * The `radius` is interpreted in **physical units (mm)**. Per-axis voxel
+ * spacing (from `vol.space.spacing`) is applied to each displacement, so on
+ * anisotropic data the neighborhood is a physical sphere (i.e. fewer voxels are
+ * included along coarsely-sampled axes). On isotropic 1mm data this reduces to
+ * the classic integer voxel sphere.
+ *
  * @param vol - The NeuroVol representing the volume
  * @param centroid - The center voxel coordinates [i, j, k]
- * @param radius - The radius of the sphere in voxel units
+ * @param radius - The radius of the sphere in millimeters (physical units)
  * @param fill - Optional value(s) to assign to the data slot. Defaults to 1
  * @param nonzero - If true, only include voxels with non-zero values from the source volume
  * @returns An ROIVolWindow representing the spherical ROI
@@ -27,23 +33,33 @@ export function sphericalROI(
 
   const space = vol.space;
   const dims = space.dim;
+  // Per-axis voxel spacing in mm (do NOT average — keep anisotropy).
+  const spacing = space.spacing;
+  const sx = spacing[0] || 1;
+  const sy = spacing[1] || 1;
+  const sz = spacing[2] || 1;
   const coords: number[][] = [];
   const radiusSquared = radius * radius;
 
-  // Calculate bounding box
-  const minBound = centroid.map(c => Math.max(0, Math.floor(c - radius)));
-  const maxBound = centroid.map((c, idx) => Math.min(dims[idx] - 1, Math.ceil(c + radius)));
+  // Calculate bounding box. radius is in mm, so the per-axis half-width in
+  // voxels is radius / spacing along that axis.
+  const voxelRadius = [radius / sx, radius / sy, radius / sz];
+  const minBound = centroid.map((c, idx) => Math.max(0, Math.floor(c - voxelRadius[idx])));
+  const maxBound = centroid.map((c, idx) =>
+    Math.min(dims[idx] - 1, Math.ceil(c + voxelRadius[idx]))
+  );
 
   // Iterate through the bounding box
   for (let i = minBound[0]; i <= maxBound[0]; i++) {
     for (let j = minBound[1]; j <= maxBound[1]; j++) {
       for (let k = minBound[2]; k <= maxBound[2]; k++) {
-        // Calculate squared distance from centroid
-        const distSquared = 
-          (i - centroid[0]) ** 2 + 
-          (j - centroid[1]) ** 2 + 
-          (k - centroid[2]) ** 2;
-        
+        // Squared physical distance (mm) from centroid, scaling each axis
+        // displacement by its voxel spacing.
+        const distSquared =
+          ((i - centroid[0]) * sx) ** 2 +
+          ((j - centroid[1]) * sy) ** 2 +
+          ((k - centroid[2]) * sz) ** 2;
+
         if (distSquared <= radiusSquared) {
           // Check nonzero constraint if needed
           if (!nonzero || vol.getAt(i, j, k) !== 0) {

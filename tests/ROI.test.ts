@@ -258,14 +258,86 @@ describe('ROI Factory Functions', () => {
       // Set some voxels to zero
       vol.setAt(5, 5, 5, 0);
       vol.setAt(5, 5, 6, 0);
-      
+
       const roi = sphericalROI(vol, [5, 5, 5], 1, 1, true);
-      
+
       // Center and adjacent zero voxel should be excluded
-      const hasCenter = roi.coords.some(c => 
+      const hasCenter = roi.coords.some(c =>
         c[0] === 5 && c[1] === 5 && c[2] === 5
       );
       expect(hasCenter).toBe(false);
+    });
+
+    it('should treat radius as mm and respect anisotropic spacing', () => {
+      // 2x2x4 mm spacing: the k axis (z) is sampled twice as coarsely.
+      const anisoSpace = new NeuroSpace(
+        [10, 10, 10],
+        [2, 2, 4],
+        [0, 0, 0],
+        AxisSet3D.AXIAL_LPI
+      );
+      const anisoVol = new FloatNeuroVol(anisoSpace);
+      for (let i = 0; i < anisoVol.length; i++) {
+        anisoVol.data[i] = 1; // all nonzero so geometry alone decides membership
+      }
+
+      const center = [5, 5, 5];
+      const radius = 4; // mm
+      const roi = sphericalROI(anisoVol, center, radius);
+
+      // Every included voxel must lie within `radius` mm physically.
+      for (const coord of roi.coords) {
+        const dxMm = (coord[0] - center[0]) * 2;
+        const dyMm = (coord[1] - center[1]) * 2;
+        const dzMm = (coord[2] - center[2]) * 4;
+        const distMm = Math.sqrt(dxMm * dxMm + dyMm * dyMm + dzMm * dzMm);
+        expect(distMm).toBeLessThanOrEqual(radius + 1e-6);
+      }
+
+      // Along the fine 2mm axes a +/-2 voxel step is 4mm -> included.
+      const hasFarX = roi.coords.some(c => c[0] === 3 && c[1] === 5 && c[2] === 5);
+      const hasFarY = roi.coords.some(c => c[0] === 5 && c[1] === 3 && c[2] === 5);
+      expect(hasFarX).toBe(true);
+      expect(hasFarY).toBe(true);
+
+      // Along the coarse 4mm axis a +/-2 voxel step is 8mm -> excluded.
+      const hasFarZ = roi.coords.some(c => c[0] === 5 && c[1] === 5 && c[2] === 3);
+      expect(hasFarZ).toBe(false);
+
+      // The single-voxel z neighbor (4mm) sits exactly on the radius -> included.
+      const hasNearZ = roi.coords.some(c => c[0] === 5 && c[1] === 5 && c[2] === 6);
+      expect(hasNearZ).toBe(true);
+
+      // Span along z (coarse axis) must be strictly smaller than along x/y.
+      const xSpan = new Set(roi.coords.map(c => c[0])).size;
+      const zSpan = new Set(roi.coords.map(c => c[2])).size;
+      expect(zSpan).toBeLessThan(xSpan);
+    });
+
+    it('should match the classic voxel sphere on isotropic 1mm spacing', () => {
+      // Regression guard: on isotropic 1mm data, mm radius == voxel radius.
+      const roi = sphericalROI(vol, [5, 5, 5], 2);
+      const center = [5, 5, 5];
+
+      // Count voxels the old raw-voxel-distance algorithm would have included.
+      let expectedCount = 0;
+      for (let i = 3; i <= 7; i++) {
+        for (let j = 3; j <= 7; j++) {
+          for (let k = 3; k <= 7; k++) {
+            const d2 = (i - 5) ** 2 + (j - 5) ** 2 + (k - 5) ** 2;
+            if (d2 <= 4) expectedCount++;
+          }
+        }
+      }
+      expect(roi.coords.length).toBe(expectedCount);
+      for (const coord of roi.coords) {
+        const d = Math.sqrt(
+          (coord[0] - center[0]) ** 2 +
+          (coord[1] - center[1]) ** 2 +
+          (coord[2] - center[2]) ** 2
+        );
+        expect(d).toBeLessThanOrEqual(2);
+      }
     });
   });
 

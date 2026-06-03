@@ -257,6 +257,40 @@ describe('NeuroSpace', () => {
     });
   });
 
+  describe('Encapsulation & affine-derived spacing', () => {
+    it('does not let callers mutate the space via origin/spacing getters', () => {
+      const ns = new NeuroSpace([4, 5, 6], [2, 2.5, 3], [10, 20, 30]);
+      // Mutating the returned arrays must not affect the space.
+      ns.origin[0] = 999;
+      ns.spacing[1] = 999;
+      ns.getOrigin()[2] = 999;
+      expect(ns.origin).toEqual([10, 20, 30]);
+      expect(ns.spacing).toEqual([2, 2.5, 3]);
+      expect(ns.getOrigin()).toEqual([10, 20, 30]);
+    });
+
+    it('derives spacing from the affine column norms when not provided', () => {
+      // Affine with scales [2,3,4] on the diagonal and a translation.
+      const affine = [
+        [2, 0, 0, 5],
+        [0, 3, 0, 6],
+        [0, 0, 4, 7],
+        [0, 0, 0, 1],
+      ];
+      const ns = new NeuroSpace(
+        [4, 4, 4],
+        undefined,
+        undefined,
+        undefined,
+        affine
+      );
+      expect(ns.spacing[0]).toBeCloseTo(2, 6);
+      expect(ns.spacing[1]).toBeCloseTo(3, 6);
+      expect(ns.spacing[2]).toBeCloseTo(4, 6);
+      expect(ns.origin).toEqual([5, 6, 7]);
+    });
+  });
+
   describe('Reorientation', () => {
     it('should reorient the NeuroSpace correctly for 3D', () => {
       const dim = [10, 20, 30];
@@ -314,10 +348,47 @@ describe('NeuroSpace', () => {
 
       // Verify the new spacing and origin
       expect(reorientedNs.spacing).toEqual([2, 3, 1]); // Reordered spacing
-      expect(reorientedNs.origin).toEqual([38, 0, 0]); // Adjusted origin for flipped axis
+      // World-preserving origin: new voxel (0,0,0) corresponds to old voxel
+      // (0,19,0), whose world coord is [0, 2*19, 0] = [0, 38, 0]. The flip offset
+      // belongs to the WORLD y-axis, not the new frame's x slot.
+      expect(reorientedNs.origin[0]).toBeCloseTo(0, 6);
+      expect(reorientedNs.origin[1]).toBeCloseTo(38, 6);
+      expect(reorientedNs.origin[2]).toBeCloseTo(0, 6);
 
       // Verify dimensions
       expect(reorientedNs.dim).toEqual([20, 30, 10]); // Reordered dimensions
+    });
+
+    it('preserves every voxel world coordinate under reorientation (invariant)', () => {
+      // Anisotropic spacing + nonzero origin + an axis flip — the hard case.
+      const dim = [10, 20, 30];
+      const spacing = [1, 2, 3];
+      const origin = [5, 6, 7];
+      const ns = new NeuroSpace(
+        dim,
+        spacing,
+        origin,
+        new AxisSet3D(NamedAxis.LEFT_RIGHT, NamedAxis.POST_ANT, NamedAxis.INF_SUP)
+      );
+      const reoriented = ns.reorient(
+        new AxisSet3D(NamedAxis.ANT_POST, NamedAxis.INF_SUP, NamedAxis.LEFT_RIGHT)
+      );
+
+      // The multiset of world coordinates over the 8 grid corners must be
+      // identical: reorientation relabels axes but cannot move physical points.
+      const cornersWorld = (s: NeuroSpace): string[] => {
+        const out: string[] = [];
+        const d = s.dim;
+        for (const i of [0, d[0] - 1])
+          for (const j of [0, d[1] - 1])
+            for (const k of [0, d[2] - 1]) {
+              const w = s.gridToCoord([i, j, k]).map((v) => Math.round(v * 1e6) / 1e6);
+              out.push(w.join(','));
+            }
+        return out.sort();
+      };
+
+      expect(cornersWorld(reoriented)).toEqual(cornersWorld(ns));
     });
 
     it('should throw an error when reorienting to incompatible axes', () => {

@@ -111,8 +111,14 @@ export async function readVol(
     } else {
       buffer = input;
       onProgress?.(0.3);
+      // An ArrayBuffer passed directly may still be gzip-compressed (e.g. raw
+      // bytes of a .nii.gz downloaded over the network). Decompress if needed.
+      if (nifti.isCompressed(buffer)) {
+        buffer = nifti.decompress(buffer);
+        onProgress?.(0.5);
+      }
     }
-    
+
     if (!nifti.isNIFTI(buffer)) {
       throw new ValueError('The file is not a valid NIfTI file.');
     }
@@ -506,13 +512,57 @@ function createVolFromBuffer(
       throw new ValueError(`Unsupported data type: ${header.datatypeCode}`);
   }
   
-  const typedArray = new TypedArrayConstructor(
+  let typedArray: TypedArray = new TypedArrayConstructor(
     buffer,
     0,
     buffer.byteLength / (header.numBitsPerVoxel / 8)
   );
-  
+
+  // NIfTI image data is stored in the file's endianness. nifti-reader-js'
+  // readImage() returns the raw bytes without swapping, so big-endian files
+  // must be byte-swapped before they are reinterpreted as native TypedArrays.
+  if (header.littleEndian === false && typedArray.BYTES_PER_ELEMENT > 1) {
+    byteSwapInPlace(typedArray);
+  }
+
+  // Apply scl_slope / scl_inter intensity scaling. Per the NIfTI-1 spec a
+  // scl_slope of 0 means "no scaling". When scaling is active the result is
+  // generally non-integer, so we promote to Float32 regardless of the stored
+  // datatype.
+  const rawSlope = header.scl_slope;
+  const rawInter = header.scl_inter;
+  const slope = !rawSlope || Number.isNaN(rawSlope) ? 1 : rawSlope;
+  const inter = !rawInter || Number.isNaN(rawInter) ? 0 : rawInter;
+  if (slope !== 1 || inter !== 0) {
+    const scaled = new Float32Array(typedArray.length);
+    for (let i = 0; i < typedArray.length; i++) {
+      scaled[i] = typedArray[i] * slope + inter;
+    }
+    return createNeuroVol('float32', space, scaled);
+  }
+
   return createNeuroVol(dataType, space, typedArray);
+}
+
+/**
+ * Swap the byte order of every element of a TypedArray in place.
+ * Used to convert big-endian NIfTI image data to the host (little-endian)
+ * representation expected by JS TypedArrays.
+ */
+function byteSwapInPlace(arr: TypedArray): void {
+  const bpe = arr.BYTES_PER_ELEMENT;
+  if (bpe <= 1) return;
+  const u8 = new Uint8Array(arr.buffer, arr.byteOffset, arr.byteLength);
+  const half = bpe >> 1;
+  for (let i = 0; i < u8.length; i += bpe) {
+    for (let j = 0; j < half; j++) {
+      const a = i + j;
+      const b = i + bpe - 1 - j;
+      const tmp = u8[a];
+      u8[a] = u8[b];
+      u8[b] = tmp;
+    }
+  }
 }
 
 async function createNiftiBuffer(vol: NeuroVol, dataType?: string): Promise<ArrayBuffer> {
@@ -520,9 +570,11 @@ async function createNiftiBuffer(vol: NeuroVol, dataType?: string): Promise<Arra
   const dim = space.dim;
   const spacing = space.spacing;
   
-  // Create header buffer
+  // Create header buffer. Buffer.alloc() may return a view into a shared pool,
+  // so the DataView must respect byteOffset/byteLength rather than assuming the
+  // backing ArrayBuffer starts at this header.
   const headerBuffer = Buffer.alloc(352); // 348 byte header + 4 byte padding
-  const headerView = new DataView(headerBuffer.buffer);
+  const headerView = new DataView(headerBuffer.buffer, headerBuffer.byteOffset, headerBuffer.byteLength);
   
   // Initialize buffer with zeros
   headerBuffer.fill(0);
@@ -633,24 +685,33 @@ async function createNiftiBuffer(vol: NeuroVol, dataType?: string): Promise<Arra
     headerView.setUint8(228 + i, 0);
   }
   
-  // Set qform_code
-  headerView.setInt16(252, 0, true);
-  
-  // Set sform_code
-  headerView.setInt16(254, 1, true);
-  
-  // Set quatern_b, quatern_c, quatern_d
-  headerView.setFloat32(256, 0.0, true);
-  headerView.setFloat32(260, 0.0, true);
-  headerView.setFloat32(264, 0.0, true);
-  
-  // Set qoffset_x, qoffset_y, qoffset_z
-  headerView.setFloat32(268, space.origin[0], true);
-  headerView.setFloat32(272, space.origin[1], true);
-  headerView.setFloat32(276, space.origin[2], true);
-  
-  // Set srow_x, srow_y, srow_z
+  // Derive a quaternion (qform) from the affine so the file carries BOTH the
+  // qform and sform transforms. Many tools (e.g. FSL/SPM) prefer qform; writing
+  // only sform — as the previous implementation did — loses the orientation for
+  // those readers.
   const affine = space.trans.to2DArray();
+  const q = matToQuatern(affine);
+
+  // pixdim[0] carries qfac (handedness), offset 76
+  headerView.setFloat32(76, q.qfac, true);
+
+  // Set qform_code = 1 (NIFTI_XFORM_SCANNER_ANAT)
+  headerView.setInt16(252, 1, true);
+
+  // Set sform_code = 1
+  headerView.setInt16(254, 1, true);
+
+  // Set quatern_b, quatern_c, quatern_d
+  headerView.setFloat32(256, q.quatern[0], true);
+  headerView.setFloat32(260, q.quatern[1], true);
+  headerView.setFloat32(264, q.quatern[2], true);
+
+  // Set qoffset_x, qoffset_y, qoffset_z
+  headerView.setFloat32(268, q.qoffset[0], true);
+  headerView.setFloat32(272, q.qoffset[1], true);
+  headerView.setFloat32(276, q.qoffset[2], true);
+
+  // Set srow_x, srow_y, srow_z
   headerView.setFloat32(280, affine[0][0], true);
   headerView.setFloat32(284, affine[0][1], true);
   headerView.setFloat32(288, affine[0][2], true);
@@ -735,29 +796,51 @@ function getDatatypeName(datatypeCode: number): string {
 
 function convertDataType(data: TypedArray, dataType?: string): TypedArray {
   if (!dataType) return data;
-  
+
   const upperType = dataType.toUpperCase();
-  
+
   switch (upperType) {
     case 'FLOAT32':
       return data instanceof Float32Array ? data : new Float32Array(data);
     case 'FLOAT64':
       return data instanceof Float64Array ? data : new Float64Array(data);
     case 'INT16':
-      return data instanceof Int16Array ? data : new Int16Array(data);
+      return data instanceof Int16Array ? data : roundClampToInt(data, Int16Array, -32768, 32767);
     case 'INT32':
-      return data instanceof Int32Array ? data : new Int32Array(data);
+      return data instanceof Int32Array ? data : roundClampToInt(data, Int32Array, -2147483648, 2147483647);
     case 'UINT8':
-      return data instanceof Uint8Array ? data : new Uint8Array(data);
+      return data instanceof Uint8Array ? data : roundClampToInt(data, Uint8Array, 0, 255);
     case 'UINT16':
-      return data instanceof Uint16Array ? data : new Uint16Array(data);
+      return data instanceof Uint16Array ? data : roundClampToInt(data, Uint16Array, 0, 65535);
     case 'INT8':
-      return data instanceof Int8Array ? data : new Int8Array(data);
+      return data instanceof Int8Array ? data : roundClampToInt(data, Int8Array, -128, 127);
     case 'UINT32':
-      return data instanceof Uint32Array ? data : new Uint32Array(data);
+      return data instanceof Uint32Array ? data : roundClampToInt(data, Uint32Array, 0, 4294967295);
     default:
       return data;
   }
+}
+
+/**
+ * Convert floating-point (or wider integer) data to an integer TypedArray by
+ * rounding to nearest and clamping to the target type's range. This avoids the
+ * silent truncation-toward-zero and modulo-wraparound that a plain
+ * `new Int16Array(floatData)` would produce.
+ */
+function roundClampToInt<T extends TypedArray>(
+  data: TypedArray,
+  Ctor: new (len: number) => T,
+  min: number,
+  max: number
+): T {
+  const out = new Ctor(data.length);
+  for (let i = 0; i < data.length; i++) {
+    let v = Math.round(data[i]);
+    if (v < min) v = min;
+    else if (v > max) v = max;
+    out[i] = v;
+  }
+  return out;
 }
 
 function create4DNiftiHeader(shape: number[], spacing: number[], origin: number[], dataType?: string): any {
@@ -780,8 +863,82 @@ function create4DNiftiHeader(shape: number[], spacing: number[], origin: number[
   };
 }
 
+/**
+ * Convert a 4x4 affine (srow form) into NIfTI quaternion parameters
+ * (quatern_b/c/d, qoffset, pixdim scales, and qfac handedness), following the
+ * standard nifti_mat44_to_quatern algorithm.
+ */
+function matToQuatern(affine: number[][]): {
+  quatern: [number, number, number];
+  qoffset: [number, number, number];
+  pixdim: [number, number, number];
+  qfac: number;
+} {
+  let r11 = affine[0][0], r12 = affine[0][1], r13 = affine[0][2];
+  let r21 = affine[1][0], r22 = affine[1][1], r23 = affine[1][2];
+  let r31 = affine[2][0], r32 = affine[2][1], r33 = affine[2][2];
+  const qoffset: [number, number, number] = [affine[0][3], affine[1][3], affine[2][3]];
+
+  // Column norms are the voxel sizes (pixdim).
+  let xd = Math.sqrt(r11 * r11 + r21 * r21 + r31 * r31);
+  let yd = Math.sqrt(r12 * r12 + r22 * r22 + r32 * r32);
+  let zd = Math.sqrt(r13 * r13 + r23 * r23 + r33 * r33);
+
+  if (xd === 0) { r11 = 1; r21 = 0; r31 = 0; xd = 1; }
+  if (yd === 0) { r12 = 0; r22 = 1; r32 = 0; yd = 1; }
+  if (zd === 0) { r13 = 0; r23 = 0; r33 = 1; zd = 1; }
+
+  // Normalize the columns to obtain a pure rotation matrix.
+  r11 /= xd; r21 /= xd; r31 /= xd;
+  r12 /= yd; r22 /= yd; r32 /= yd;
+  r13 /= zd; r23 /= zd; r33 /= zd;
+
+  // If the determinant is negative the coordinate system is left-handed; record
+  // that in qfac and flip the third column so the remaining matrix is a proper
+  // rotation.
+  const det =
+    r11 * (r22 * r33 - r32 * r23) -
+    r12 * (r21 * r33 - r31 * r23) +
+    r13 * (r21 * r32 - r31 * r22);
+  let qfac = 1;
+  if (det < 0) { r13 = -r13; r23 = -r23; r33 = -r33; qfac = -1; }
+
+  // Rotation matrix -> quaternion.
+  const trace = r11 + r22 + r33 + 1;
+  let a: number, b: number, c: number, d: number;
+  if (trace > 0.5) {
+    a = 0.5 * Math.sqrt(trace);
+    b = 0.25 * (r32 - r23) / a;
+    c = 0.25 * (r13 - r31) / a;
+    d = 0.25 * (r21 - r12) / a;
+  } else {
+    const xa = 1 + r11 - (r22 + r33);
+    const ya = 1 + r22 - (r11 + r33);
+    const za = 1 + r33 - (r11 + r22);
+    if (xa > 1) {
+      b = 0.5 * Math.sqrt(xa);
+      c = 0.25 * (r12 + r21) / b;
+      d = 0.25 * (r13 + r31) / b;
+      a = 0.25 * (r32 - r23) / b;
+    } else if (ya > 1) {
+      c = 0.5 * Math.sqrt(ya);
+      b = 0.25 * (r12 + r21) / c;
+      d = 0.25 * (r23 + r32) / c;
+      a = 0.25 * (r13 - r31) / c;
+    } else {
+      d = 0.5 * Math.sqrt(za);
+      b = 0.25 * (r13 + r31) / d;
+      c = 0.25 * (r23 + r32) / d;
+      a = 0.25 * (r21 - r12) / d;
+    }
+    if (a < 0) { b = -b; c = -c; d = -d; }
+  }
+
+  return { quatern: [b, c, d], qoffset, pixdim: [xd, yd, zd], qfac };
+}
+
 function writeNiftiHeader(buffer: Buffer, header: any): void {
-  const view = new DataView(buffer.buffer);
+  const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
   
   // sizeof_hdr
   view.setInt32(0, 348, true);

@@ -77,7 +77,12 @@ export class Kernel3D implements IKernel3D {
     // Determine kernel size if not provided
     if (!size) {
       const maxSigma = Math.max(sigmaX, sigmaY, sigmaZ);
-      size = Math.ceil(maxSigma * 6) | 1; // Make it odd
+      // Use a half-width (radius) of 3*sigma so the kernel captures ~99.7% of
+      // the Gaussian mass, then build a full odd-sized kernel: size = 2r + 1.
+      // The previous `Math.ceil(maxSigma*6) | 1` only set the low bit, which
+      // truncated the kernel to as little as 2*sigma for non-integer sigma.
+      const radius = Math.max(1, Math.ceil(3 * maxSigma));
+      size = 2 * radius + 1; // always odd, >= 3
     }
 
     const center = Math.floor(size / 2);

@@ -2,6 +2,10 @@
 
 A comprehensive neuroimaging library for JavaScript/TypeScript that provides tools for loading, processing, visualizing, and analyzing brain imaging data in the browser and Node.js.
 
+> 📖 **[Documentation & live demos →](https://bbuchsbaum.github.io/neuroimjs/)** — interactive brain viewers, guides, and the full API reference.
+>
+> ⚠️ **Pre-1.0 (`0.1.0`).** The viewer stack and core data structures are dependable; some I/O and processing paths have known issues. See the **[Stability matrix](https://bbuchsbaum.github.io/neuroimjs/guide/stability)** before depending on a feature.
+
 ## Features
 
 - 🧠 **Volume Processing** - Load and manipulate NIfTI, AFNI, and other neuroimaging formats
@@ -22,15 +26,23 @@ npm install neuroimjs
 ### Basic Volume Loading and Visualization
 
 ```typescript
-import { VolStack, SimpleOrthogonalViewer } from 'neuroimjs';
+import {
+  readVol, VolLayer, VolStack, ColorMapFactory, SimpleOrthogonalViewer,
+} from 'neuroimjs';
 
-// Load a NIfTI file
-const volStack = await VolStack.fromNifti('brain.nii.gz');
+// Load a NIfTI volume (Node path here; in the browser pass an ArrayBuffer)
+const vol = await readVol('brain.nii.gz');
+const range = vol.getRange();
+
+// Wrap it in a display layer stack
+const stack = new VolStack(
+  new VolLayer('t1', vol, ColorMapFactory.createGrayscale({ range }), range)
+);
 
 // Create a 3-view orthogonal viewer
 const viewer = await SimpleOrthogonalViewer.create(
   document.getElementById('viewer-container'),
-  volStack
+  stack
 );
 ```
 
@@ -39,10 +51,17 @@ const viewer = await SimpleOrthogonalViewer.create(
 Create custom layouts with individual slice views:
 
 ```typescript
-import { VolStack, SingleSliceViewer, ViewSynchronizer } from 'neuroimjs';
+import {
+  readVol, VolLayer, VolStack, ColorMapFactory,
+  SingleSliceViewer, ViewSynchronizer,
+} from 'neuroimjs';
 
-// Load data
-const volStack = await VolStack.fromNifti('brain.nii.gz');
+// Build a display stack from a volume (see "Basic Volume Loading" above)
+const vol = await readVol('brain.nii.gz');
+const range = vol.getRange();
+const volStack = new VolStack(
+  new VolLayer('t1', vol, ColorMapFactory.createGrayscale({ range }), range)
+);
 
 // Create individual views
 const axial = await SingleSliceViewer.createAxial(axialContainer, volStack);
@@ -64,7 +83,7 @@ axial.onCoordChange(coord => {
 - ⚙️ Full control over synchronization behavior
 - 📡 Event-driven coordination with type-safe APIs
 
-See the [Composable Views Guide](docs/COMPOSABLE_VIEWS.md) for complete documentation.
+See the [Composable Views Guide](https://bbuchsbaum.github.io/neuroimjs/guide/composable-views) for complete documentation.
 
 ## Examples
 
@@ -90,13 +109,13 @@ See [examples/README.md](examples/README.md) for more details.
 ### Volume Data
 
 ```typescript
-import { DenseNeuroVol, NeuroSpace } from 'neuroimjs';
+import { FloatNeuroVol, NeuroSpace } from 'neuroimjs';
 
-// Create a volume programmatically
+// Create a volume programmatically — constructor takes (space, data)
 const space = new NeuroSpace([64, 64, 64], [3, 3, 3]);
-const volume = new DenseNeuroVol(data, space);
+const volume = new FloatNeuroVol(space, data);
 
-// Read/write NIfTI files
+// Read/write NIfTI files (intensity scaling + endianness handled on read)
 import { readVol, writeVol } from 'neuroimjs';
 const vol = await readVol('input.nii.gz');
 await writeVol(vol, 'output.nii.gz');
@@ -105,17 +124,18 @@ await writeVol(vol, 'output.nii.gz');
 ### 4D Time-Series Data
 
 ```typescript
-import { NeuroVec } from 'neuroimjs';
+import { readVec } from 'neuroimjs';
 
-// Load 4D fMRI data
-const vec = await NeuroVec.fromNifti('fmri.nii.gz');
+// Load 4D fMRI data (Node path; in the browser pass an ArrayBuffer)
+const vec = await readVec('fmri.nii.gz');
 
-// Apply detrending
-vec.detrend('linear');
-
-// Temporal filtering
-vec.temporalFilter({ type: 'bandpass', low: 0.01, high: 0.1 });
+// Inspect the time-series at a voxel
+const series = vec.getSeries(32, 32, 20);
 ```
+
+> Temporal preprocessing (`detrend`, `temporalFilter`) is available on the enhanced
+> vec classes (`EnhancedDenseNeuroVec`, `FileBackedNeuroVec`). See the
+> [docs](https://bbuchsbaum.github.io/neuroimjs/guide/concepts).
 
 ### Spatial Operations
 
@@ -167,7 +187,7 @@ See [Composable Views Guide](docs/COMPOSABLE_VIEWS.md) for detailed documentatio
 ### Display Components
 
 - [Composable Views Guide](docs/COMPOSABLE_VIEWS.md) - Custom layouts and coordination
-- [SimpleOrthogonalViewer](SimpleOrthogonalViewer_README.md) - Standard 3-view viewer
+- [SimpleOrthogonalViewer](docs/SimpleOrthogonalViewer.md) - Standard 3-view viewer
 
 ### Volume Processing
 
@@ -242,11 +262,17 @@ Requires:
 
 ## Contributing
 
-Contributions are welcome! Please see our contributing guidelines (coming soon).
+Contributions are welcome! To get started:
+
+1. Fork the repository and create a feature branch
+2. Install dependencies with `npm install`
+3. Make your changes and add tests where appropriate
+4. Run `npm test` and `npm run lint` to ensure everything passes
+5. Open a pull request describing your changes
 
 ## License
 
-ISC
+MIT
 
 ## Related Projects
 
@@ -257,10 +283,15 @@ ISC
 
 ## Citation
 
-If you use neuroimjs in your research, please cite:
+If you use neuroimjs in your research, please cite this repository:
 
-```
-[Citation information to be added]
+```bibtex
+@software{neuroimjs,
+  author = {Buchsbaum, Bradley},
+  title = {neuroimjs: A neuroimaging library for JavaScript},
+  url = {https://github.com/bbuchsbaum/neuroimjs},
+  license = {MIT}
+}
 ```
 
 ## Acknowledgments

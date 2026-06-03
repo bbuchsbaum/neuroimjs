@@ -120,13 +120,15 @@ export abstract class DenseNeuroVol implements NeuroVol {
 
     if (isIdentity && zlevel >= 0 && zlevel < this.dim[2]) {
 
-      // Compute offset and length for the subarray
+      // Compute offset and length for the slice
       const offset = zlevel * this.dim[0] * this.dim[1];
       const sliceLength = nx * ny;
 
-      // Create a subarray to avoid copying data
-      const sliceData = this.data.subarray(offset, offset + sliceLength);
-      
+      // Copy (not subarray): a view would alias the parent volume's buffer, so
+      // writing into an axial slice would silently mutate the source. Every other
+      // orientation branch allocates a fresh array; keep this one consistent.
+      const sliceData = this.data.slice(offset, offset + sliceLength);
+
 
       // Create and return the NeuroSlice using the subarray
       const slice = createNeuroSlice(
@@ -212,17 +214,11 @@ export abstract class DenseNeuroVol implements NeuroVol {
 
     for (let i = 0, len = data.length; i < len; i++) {
       const value = data[i];
-      // Assuming data contains only valid numbers
-      if (value < min) {
-        min = value;
-        // Early exit if minimum possible value is found
-        if (min === Number.MIN_VALUE) break;
-      }
-      if (value > max) {
-        max = value;
-        // Early exit if maximum possible value is found
-        if (max === Number.MAX_VALUE) break;
-      }
+      // Skip NaN: a single NaN would otherwise poison both comparisons (every
+      // `<`/`>` against NaN is false) and silently hide the true range.
+      if (Number.isNaN(value)) continue;
+      if (value < min) min = value;
+      if (value > max) max = value;
     }
 
     if (!isFinite(min) || !isFinite(max)) {
@@ -239,19 +235,22 @@ export abstract class DenseNeuroVol implements NeuroVol {
   ): NeuroSlice {
     const { space } = this;
     const reorientedSpace = space.reorient(outAxes);
-    const transformMatrix = space.getTransformationMatrixTo(reorientedSpace);
-    const coordHomogeneous = [...coord, 1];
-    const transformedCoord = transformMatrix.mmul(Matrix.columnVector(coordHomogeneous)).to1DArray();
-    const fixedAxisValue = transformedCoord[2];
+
+    // `coord` is a world coordinate. Locate it in the reoriented voxel grid to
+    // get the out-of-plane (third axis) index of the slice.
+    const fixedAxisValue = reorientedSpace.coordToGrid(coord)[2];
 
     const [nx, ny] = [reorientedSpace.dim[0], reorientedSpace.dim[1]];
     const sliceData = new (this.getDataConstructor())(nx * ny);
 
     for (let j = 0; j < ny; j++) {
       for (let i = 0; i < nx; i++) {
-        const sliceCoord = [i, j, fixedAxisValue, 1];
-        const volCoordHomogeneous = space.getTransformationMatrixTo(space).mmul(Matrix.columnVector(sliceCoord)).to1DArray();
-        const [x, y, z] = volCoordHomogeneous.slice(0, 3);
+        // Each slice pixel is a voxel in the reoriented grid. Map it to a world
+        // coordinate, then into the SOURCE volume's (possibly fractional) grid.
+        // Routing through world space applies the correct axis permutation/flip
+        // instead of the previous identity transform.
+        const worldPix = reorientedSpace.gridToCoord([i, j, fixedAxisValue]);
+        const [x, y, z] = space.coordToGrid(worldPix);
 
         let value = 0;
         if (interpolation === 'nearest') {

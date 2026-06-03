@@ -95,11 +95,13 @@ describe('DenseNeuroVol', () => {
       console.log("Slice origin:", slice.space.origin);
       
       // For a slice extracted from a reoriented volume:
-      // The original volume is RPI with origin [90, -126, -72] and dimensions [91, 109, 91]
-      // When reoriented to LPI, the x-axis is flipped (R->L becomes L->R)
-      // The new origin x-coordinate is calculated as: 90 + (91-1) * 2 = 270
-      // The y-coordinate remains unchanged at -126
-      expect(slice.space.origin[0]).toBe(270);
+      // The original volume is RPI with origin [90, -126, -72], dims [91,109,91],
+      // spacing 2. The source x-axis runs in the NEGATIVE world-x direction, so
+      // flipping R->L puts the new origin at the old far end's world coordinate:
+      //   90 + (91-1) * 2 * (-1) = -90   (world-preserving)
+      // The y-coordinate is unchanged at -126. (The previous value 270 used the
+      // wrong sign and did not preserve world geometry.)
+      expect(slice.space.origin[0]).toBe(-90);
       expect(slice.space.origin[1]).toBe(-126);
       
       // Verify the slice spacing is preserved

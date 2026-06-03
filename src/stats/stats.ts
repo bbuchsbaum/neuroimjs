@@ -886,29 +886,67 @@ export function centroids(
  * Common statistical reduction functions
  */
 export const StatFunctions = {
+  // NaN-skipping mean. Returns NaN if every value is NaN (no valid samples).
   mean: (values: Float32Array): number => {
-    return values.reduce((a, b) => a + b, 0) / values.length;
+    let sum = 0;
+    let count = 0;
+    for (let i = 0; i < values.length; i++) {
+      const v = values[i];
+      if (!Number.isNaN(v)) {
+        sum += v;
+        count++;
+      }
+    }
+    return count > 0 ? sum / count : NaN;
   },
-  
+
   sum: (values: Float32Array): number => {
     return values.reduce((a, b) => a + b, 0);
   },
-  
+
+  // NaN-safe min via a loop (avoids spreading large arrays as call arguments,
+  // which overflows the call stack for whole-brain ROIs).
   min: (values: Float32Array): number => {
-    return Math.min(...values);
+    let result = Infinity;
+    let found = false;
+    for (let i = 0; i < values.length; i++) {
+      const v = values[i];
+      if (!Number.isNaN(v) && v < result) {
+        result = v;
+        found = true;
+      }
+    }
+    return found ? result : NaN;
   },
-  
+
+  // NaN-safe max via a loop (see `min`).
   max: (values: Float32Array): number => {
-    return Math.max(...values);
+    let result = -Infinity;
+    let found = false;
+    for (let i = 0; i < values.length; i++) {
+      const v = values[i];
+      if (!Number.isNaN(v) && v > result) {
+        result = v;
+        found = true;
+      }
+    }
+    return found ? result : NaN;
   },
-  
+
+  // NaN-skipping sample standard deviation (divides by n-1 over valid samples).
   std: (values: Float32Array): number => {
     const mean = StatFunctions.mean(values);
-    const variance = values.reduce((sum, val) => {
-      const diff = val - mean;
-      return sum + diff * diff;
-    }, 0) / (values.length - 1);
-    return Math.sqrt(variance);
+    let sumSq = 0;
+    let count = 0;
+    for (let i = 0; i < values.length; i++) {
+      const v = values[i];
+      if (!Number.isNaN(v)) {
+        const diff = v - mean;
+        sumSq += diff * diff;
+        count++;
+      }
+    }
+    return count > 1 ? Math.sqrt(sumSq / (count - 1)) : NaN;
   },
   
   median: (values: Float32Array): number => {

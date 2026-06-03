@@ -118,6 +118,11 @@ type Disposer = IReactionDisposer | (() => void);
  * individual slice views (axial, sagittal, or coronal) that can be easily
  * composed into custom layouts.
  *
+ * **This is the recommended (canonical) composable view API.** For multi-view
+ * coordination, combine several `SingleSliceViewer`s with {@link ViewSynchronizer};
+ * for a batteries-included 3-up layout use {@link SimpleOrthogonalViewer}. See the
+ * architecture note on {@link SliceViewer} for how the viewer layers relate.
+ *
  * This class wraps SliceViewer and adds:
  * - Convenient factory methods for standard orientations
  * - Type-safe event system for coordination

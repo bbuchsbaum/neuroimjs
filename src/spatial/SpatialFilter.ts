@@ -23,11 +23,139 @@ export class SpatialFilter implements ISpatialFilter {
   }
 
   /**
-   * Apply Gaussian blur
+   * Apply Gaussian blur.
+   *
+   * A Gaussian kernel is separable (w3d = wx * wy * wz), so we apply three 1D
+   * passes (O(k) per voxel per axis) instead of one full 3D convolution
+   * (O(k^3) per voxel). The boundary handling matches the full-3D path exactly:
+   * the full-3D kernel clips its window independently per axis, so the in-bounds
+   * weight sum factorises and per-axis 1D renormalisation reproduces the same
+   * result. The 1D weight vectors are taken as the marginals of the same
+   * `Kernel3D.gaussian(sigma)` kernel, so output is identical to within fp error.
    */
   gaussianBlur(sigma: number | [number, number, number]): NeuroVol {
     const kernel = Kernel3D.gaussian(sigma);
-    return this.spatialFilter(kernel);
+    return this.separableConvolve(kernel);
+  }
+
+  /**
+   * Convolve with a separable kernel using three 1D passes.
+   *
+   * The 1D weight vectors are the per-axis marginals of the supplied 3D kernel.
+   * Each pass renormalises by the in-bounds weight sum, reproducing the
+   * boundary behaviour of the full-3D `spatialFilter` for separable kernels.
+   */
+  private separableConvolve(kernel: Kernel3D): NeuroVol {
+    const [dimX, dimY, dimZ] = this.volume.dim;
+    const [kSizeX, kSizeY, kSizeZ] = kernel.size;
+    const halfX = Math.floor(kSizeX / 2);
+    const halfY = Math.floor(kSizeY / 2);
+    const halfZ = Math.floor(kSizeZ / 2);
+
+    // Extract per-axis 1D weight vectors as marginals of the 3D kernel.
+    // For a separable kernel w[kx][ky][kz] = wx[kx]*wy[ky]*wz[kz], summing over
+    // the other two axes yields a vector proportional to the 1D component.
+    const wx = new Float64Array(kSizeX);
+    const wy = new Float64Array(kSizeY);
+    const wz = new Float64Array(kSizeZ);
+    for (let kx = 0; kx < kSizeX; kx++) {
+      let s = 0;
+      for (let ky = 0; ky < kSizeY; ky++) {
+        for (let kz = 0; kz < kSizeZ; kz++) s += kernel.getWeight(kx, ky, kz);
+      }
+      wx[kx] = s;
+    }
+    for (let ky = 0; ky < kSizeY; ky++) {
+      let s = 0;
+      for (let kx = 0; kx < kSizeX; kx++) {
+        for (let kz = 0; kz < kSizeZ; kz++) s += kernel.getWeight(kx, ky, kz);
+      }
+      wy[ky] = s;
+    }
+    for (let kz = 0; kz < kSizeZ; kz++) {
+      let s = 0;
+      for (let kx = 0; kx < kSizeX; kx++) {
+        for (let ky = 0; ky < kSizeY; ky++) s += kernel.getWeight(kx, ky, kz);
+      }
+      wz[kz] = s;
+    }
+
+    const n = dimX * dimY * dimZ;
+    const src = new Float64Array(n);
+    {
+      let idx = 0;
+      for (let k = 0; k < dimZ; k++) {
+        for (let j = 0; j < dimY; j++) {
+          for (let i = 0; i < dimX; i++) {
+            src[idx++] = this.volume.getAt(i, j, k);
+          }
+        }
+      }
+    }
+
+    const idxOf = (i: number, j: number, k: number) => i + j * dimX + k * dimX * dimY;
+
+    // --- X pass ---
+    const passX = new Float64Array(n);
+    for (let k = 0; k < dimZ; k++) {
+      for (let j = 0; j < dimY; j++) {
+        for (let i = 0; i < dimX; i++) {
+          let sum = 0;
+          let wsum = 0;
+          for (let kx = 0; kx < kSizeX; kx++) {
+            const ni = i + kx - halfX;
+            if (ni >= 0 && ni < dimX) {
+              const w = wx[kx];
+              sum += w * src[idxOf(ni, j, k)];
+              wsum += w;
+            }
+          }
+          passX[idxOf(i, j, k)] = wsum > 0 ? sum / wsum : src[idxOf(i, j, k)];
+        }
+      }
+    }
+
+    // --- Y pass ---
+    const passY = new Float64Array(n);
+    for (let k = 0; k < dimZ; k++) {
+      for (let j = 0; j < dimY; j++) {
+        for (let i = 0; i < dimX; i++) {
+          let sum = 0;
+          let wsum = 0;
+          for (let ky = 0; ky < kSizeY; ky++) {
+            const nj = j + ky - halfY;
+            if (nj >= 0 && nj < dimY) {
+              const w = wy[ky];
+              sum += w * passX[idxOf(i, nj, k)];
+              wsum += w;
+            }
+          }
+          passY[idxOf(i, j, k)] = wsum > 0 ? sum / wsum : passX[idxOf(i, j, k)];
+        }
+      }
+    }
+
+    // --- Z pass ---
+    const out = new Float32Array(n);
+    for (let k = 0; k < dimZ; k++) {
+      for (let j = 0; j < dimY; j++) {
+        for (let i = 0; i < dimX; i++) {
+          let sum = 0;
+          let wsum = 0;
+          for (let kz = 0; kz < kSizeZ; kz++) {
+            const nk = k + kz - halfZ;
+            if (nk >= 0 && nk < dimZ) {
+              const w = wz[kz];
+              sum += w * passY[idxOf(i, j, nk)];
+              wsum += w;
+            }
+          }
+          out[idxOf(i, j, k)] = wsum > 0 ? sum / wsum : passY[idxOf(i, j, k)];
+        }
+      }
+    }
+
+    return new FloatNeuroVol(this.volume.space, out);
   }
 
   /**
@@ -281,7 +409,13 @@ export class SpatialFilter implements ISpatialFilter {
             }
           }
 
-          result[idx++] = weightSum > 0 ? sum / weightSum : this.volume.getAt(i, j, k);
+          // Signed kernels (Sobel, Laplacian) have weights that sum to ~0. For
+          // those we must NOT normalise by weightSum (which is ~0) — instead use
+          // the raw weighted sum, which is the actual gradient/edge response.
+          // Only smoothing kernels (positive weights) get normalised so that
+          // boundary truncation does not bias the result.
+          result[idx++] =
+            Math.abs(weightSum) < 1e-8 ? sum : sum / weightSum;
         }
       }
     }
@@ -460,7 +594,13 @@ export class SpatialFilter implements ISpatialFilter {
     for (let k = 0; k < dimZ; k++) {
       for (let j = 0; j < dimY; j++) {
         for (let i = 0; i < dimX; i++) {
-          let value = operation === 'erode' ? Number.MAX_VALUE : Number.MIN_VALUE;
+          // Use +/-Infinity as the identity for min/max. Number.MIN_VALUE is the
+          // smallest POSITIVE double (~5e-324), which would clamp dilation of any
+          // volume containing negative values to ~0 and discard real maxima.
+          let value =
+            operation === 'erode'
+              ? Number.POSITIVE_INFINITY
+              : Number.NEGATIVE_INFINITY;
 
           // Apply kernel
           for (let kz = 0; kz < kSizeZ; kz++) {

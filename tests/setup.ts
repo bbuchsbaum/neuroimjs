@@ -27,9 +27,25 @@ vi.mock('pixi.js', () => {
   }
 
   class Graphics extends Container {
+    // PIXI v7 / legacy API
     lineStyle(_: number, __?: number, ___?: number) { return this; }
     moveTo(_: number, __: number) { return this; }
     lineTo(_: number, __: number) { return this; }
+    beginFill(_?: number, __?: number) { return this; }
+    drawRect(_: number, __: number, ___: number, ____: number) { return this; }
+    endFill() { return this; }
+    // PIXI v8 API
+    setStrokeStyle(_?: any) { return this; }
+    setFillStyle(_?: any) { return this; }
+    stroke(_?: any) { return this; }
+    fill(_?: any) { return this; }
+    rect(_: number, __: number, ___: number, ____: number) { return this; }
+    roundRect(_: number, __: number, ___: number, ____: number, _____?: number) { return this; }
+    circle(_: number, __: number, ___: number) { return this; }
+    ellipse(_: number, __: number, ___: number, ____: number) { return this; }
+    poly(_: number[]) { return this; }
+    arc(_: number, __: number, ___: number, ____: number, _____: number) { return this; }
+    closePath() { return this; }
   }
 
   class Sprite extends Container {

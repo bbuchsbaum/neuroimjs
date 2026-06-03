@@ -181,8 +181,10 @@ export class SearchlightWorkerPool {
 
 // Worker function to be injected
 function workerFunction() {
-  // This would contain the actual worker code
-  // For now, it's a placeholder that would be replaced with the actual worker script
+  // The browser Web Worker searchlight path is not implemented. Previously this
+  // was an empty placeholder, which caused the worker to silently produce no
+  // results. Throw a clear error instead so callers are not misled by empty output.
+  throw new Error('worker searchlight not implemented');
 }
 
 // Mock worker for Node.js environment

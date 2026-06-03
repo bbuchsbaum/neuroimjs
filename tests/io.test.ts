@@ -192,13 +192,14 @@ describe('Enhanced I/O', () => {
       
       // Write as INT16
       await writeVol(vol, filePath, { dataType: 'INT16' });
-      
+
       // Read back
       const readVol2 = await readVol(filePath);
       const readData = readVol2.getData();
-      
-      // Values should be truncated to integers
-      expect(readData[0]).toBe(1); // 1.5 truncated to 1
+
+      // Float values are rounded to nearest (not truncated toward zero) when
+      // downcast to an integer type.
+      expect(readData[0]).toBe(2); // 1.5 rounds to 2
     });
   });
   

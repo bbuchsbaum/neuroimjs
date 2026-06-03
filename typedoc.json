@@ -1,0 +1,21 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "entryPoints": ["src/index.ts"],
+  "tsconfig": "tsconfig.json",
+  "plugin": ["typedoc-plugin-markdown", "typedoc-vitepress-theme"],
+  "out": "docs/api",
+  "docsRoot": "docs",
+  "readme": "none",
+  "githubPages": false,
+  "skipErrorChecking": true,
+  "excludeInternal": true,
+  "excludePrivate": true,
+  "excludeProtected": true,
+  "hideBreadcrumbs": true,
+  "useCodeBlocks": true,
+  "sanitizeComments": true,
+  "useHTMLEncodedBrackets": true,
+  "sort": ["source-order"],
+  "categorizeByGroup": true,
+  "name": "neuroimjs API"
+}

@@ -2,7 +2,6 @@ import { defineConfig } from 'vite';
 import path from 'path';
 import dts from 'vite-plugin-dts';
 import process from 'process';
-import { viteStaticCopy } from 'vite-plugin-static-copy';
 
 export default defineConfig({
   test: {
@@ -21,6 +20,10 @@ export default defineConfig({
     },
   },
   build: {
+    // Do NOT wipe dist: the tsc CJS/ESM/types output (dist/cjs, dist/esm,
+    // dist/types) is produced by `npm run build` and the browser bundle is
+    // added on top by `vite build`.
+    emptyOutDir: false,
     lib: {
       // Use browser-safe entry for UMD/ES bundles
       entry: path.resolve(__dirname, 'src/browser.ts'),
@@ -50,14 +53,10 @@ export default defineConfig({
   },
   plugins: [
     dts(),
-    viteStaticCopy({
-      targets: [
-        {
-          src: 'node_modules/@shoelace-style/shoelace/dist/assets',
-          dest: 'shoelace',
-        },
-      ],
-    }),
+    // Note: previously copied @shoelace-style/shoelace assets into dist/shoelace,
+    // but shoelace is an optional peer dep (often not installed) and those assets
+    // are excluded from the published package anyway (`!dist/shoelace`). The copy
+    // only broke the browser build when shoelace was absent, so it was removed.
   ],
   resolve: {
     alias: {

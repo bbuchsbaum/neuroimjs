@@ -387,17 +387,19 @@ export class BigNeuroVec implements NeuroVec {
       this.space.origin.slice(1)
     );
     
-    const volData = new Float32Array(this.shape[1] * this.shape[2] * this.shape[3]);
-    let idx = 0;
-    
-    for (let i = 0; i < this.shape[1]; i++) {
-      for (let j = 0; j < this.shape[2]; j++) {
+    const nx = this.shape[1];
+    const ny = this.shape[2];
+    const volData = new Float32Array(nx * ny * this.shape[3]);
+
+    for (let i = 0; i < nx; i++) {
+      for (let j = 0; j < ny; j++) {
         for (let k = 0; k < this.shape[3]; k++) {
-          volData[idx++] = this.getAt(i, j, k, t);
+          // x-fastest layout to match FloatNeuroVol's indexing.
+          volData[i + j * nx + k * nx * ny] = this.getAt(i, j, k, t);
         }
       }
     }
-    
+
     return new FloatNeuroVol(volSpace, volData);
   }
   
@@ -439,12 +441,28 @@ export class BigNeuroVec implements NeuroVec {
   }
   
   /**
+   * Linear offset of voxel (i,j,k) at time t in the backing store.
+   *
+   * The data is laid out time-major with each volume stored x-fastest
+   * (`i + j*nx + k*nx*ny`). This matches DenseNeuroVol / NIfTI conventions and
+   * the order in which `bigNeuroVecSeq`, `readVec`, and the constructor copy
+   * volume data in, so no transpose occurs on extraction or I/O.
+   */
+  private _linearIndex(i: number, j: number, k: number, t: number): number {
+    const s = this._data.shape; // [T, X, Y, Z]
+    const nx = s[1];
+    const ny = s[2];
+    const volSize = s[1] * s[2] * s[3];
+    return t * volSize + i + j * nx + k * nx * ny;
+  }
+
+  /**
    * Get value at 4D index (interface uses i,j,k,t order)
    */
   getAt(i: number, j: number, k: number, t: number): number {
-    return this._data.getAt(t, i, j, k);
+    return this._data.get(this._linearIndex(i, j, k, t));
   }
-  
+
   /**
    * Set value at 4D index (interface uses i,j,k,t order)
    */
@@ -452,7 +470,7 @@ export class BigNeuroVec implements NeuroVec {
     if (this.mode === 'r') {
       throw new ValueError('Cannot modify read-only BigNeuroVec');
     }
-    this._data.setAt(t, i, j, k, value);
+    this._data.set(this._linearIndex(i, j, k, t), value);
   }
   
   series(x: number | number[][], y?: number, z?: number): TypedArray {
@@ -525,18 +543,20 @@ export class BigNeuroVec implements NeuroVec {
     
     const volumes: NeuroVol[] = [];
     
+    const nx = this.shape[1];
+    const ny = this.shape[2];
     for (const t of idxArray) {
-      const volData = new Float32Array(this.shape[1] * this.shape[2] * this.shape[3]);
-      let idx = 0;
-      
-      for (let i = 0; i < this.shape[1]; i++) {
-        for (let j = 0; j < this.shape[2]; j++) {
+      const volData = new Float32Array(nx * ny * this.shape[3]);
+
+      for (let i = 0; i < nx; i++) {
+        for (let j = 0; j < ny; j++) {
           for (let k = 0; k < this.shape[3]; k++) {
-            volData[idx++] = this.getAt(i, j, k, t);
+            // x-fastest layout to match FloatNeuroVol's indexing.
+            volData[i + j * nx + k * nx * ny] = this.getAt(i, j, k, t);
           }
         }
       }
-      
+
       volumes.push(new FloatNeuroVol(volSpace, volData));
     }
     
@@ -563,20 +583,23 @@ export class BigNeuroVec implements NeuroVec {
       const end = Math.min((i + 1) * chunkSize, this.shape[0]);
       const chunkLength = (end - start) * this.shape[1] * this.shape[2] * this.shape[3];
       
-      // Extract chunk data
+      // Extract chunk data (time-major, x-fastest within each volume).
       const chunk = new Float32Array(chunkLength);
-      let idx = 0;
-      
+      const nx = this.shape[1];
+      const ny = this.shape[2];
+      const volSize = nx * ny * this.shape[3];
+
       for (let t = start; t < end; t++) {
-        for (let x = 0; x < this.shape[1]; x++) {
-          for (let y = 0; y < this.shape[2]; y++) {
+        const base = (t - start) * volSize;
+        for (let x = 0; x < nx; x++) {
+          for (let y = 0; y < ny; y++) {
             for (let z = 0; z < this.shape[3]; z++) {
-              chunk[idx++] = this.getAt(x, y, z, t);
+              chunk[base + x + y * nx + z * nx * ny] = this.getAt(x, y, z, t);
             }
           }
         }
       }
-      
+
       results.push(func(chunk));
     }
     

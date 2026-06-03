@@ -287,13 +287,45 @@ describe('BigNeuroVec', () => {
         new NeuroSpace([2, 2, 2], [1, 1, 1], [0, 0, 0]),
         new Float32Array(8)
       );
-      
+
       const vol2 = new FloatNeuroVol(
         new NeuroSpace([3, 3, 3], [1, 1, 1], [0, 0, 0]),
         new Float32Array(27)
       );
-      
+
       expect(() => bigNeuroVecSeq([vol1, vol2])).toThrow('Volume 1 has inconsistent shape');
+    });
+  });
+
+  describe('non-cubic layout (transpose regression)', () => {
+    it('extracts volumes without transposing axes (nx != ny != nz)', () => {
+      // Distinct nx, ny, nz so any X<->Z transpose corrupts results.
+      const shape = [2, 2, 3, 4]; // [T, X, Y, Z]
+      const space = new NeuroSpace(shape, [1, 1, 1, 1], [0, 0, 0, 0]);
+      const vec = new BigNeuroVec(new Float32Array(2 * 2 * 3 * 4), space);
+      tempFiles.push(vec.filename);
+
+      // Encode each voxel's identity so a transpose is detectable.
+      const tag = (i: number, j: number, k: number, t: number) =>
+        t * 1000 + i * 100 + j * 10 + k;
+      for (let t = 0; t < 2; t++)
+        for (let i = 0; i < 2; i++)
+          for (let j = 0; j < 3; j++)
+            for (let k = 0; k < 4; k++) vec.setAt(i, j, k, t, tag(i, j, k, t));
+
+      const vols = vec.vols();
+      expect(vols[1].space.dim).toEqual([2, 3, 4]);
+      for (let t = 0; t < 2; t++) {
+        for (let i = 0; i < 2; i++) {
+          for (let j = 0; j < 3; j++) {
+            for (let k = 0; k < 4; k++) {
+              // The extracted volume must agree with the 4D accessor.
+              expect(vols[t].getAt(i, j, k)).toBe(tag(i, j, k, t));
+              expect(vec.getAt(i, j, k, t)).toBe(tag(i, j, k, t));
+            }
+          }
+        }
+      }
     });
   });
 });

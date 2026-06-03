@@ -85,8 +85,9 @@ describe('ImageLayer', () => {
 
   test('should create sprite from ImageData', () => {
     const imageData = new ImageData(10, 10);
-    const sprite = imageLayer.createSprite(imageData);
-    
+    // createSprite requires a cache key (used to key the texture cache).
+    const sprite = imageLayer.createSprite(imageData, 'test-sprite-key');
+
     expect(sprite).toBeDefined();
     // Canvas mocking is handled in setup.ts
   });

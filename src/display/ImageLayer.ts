@@ -296,13 +296,18 @@ export class ImageLayer implements SliceLayer {
    */
   private releaseActiveContainers(): void {
     this.activeContainers.forEach(container => {
-      // Release all child sprites back to pool
-      container.children.forEach(child => {
+      // Release all child sprites back to pool.
+      // Copy the children array first: SpritePool.release() calls
+      // sprite.parent.removeChild(sprite), which mutates container.children
+      // in place. Iterating the live array would skip every other sprite and
+      // leak roughly half of them back-pressure into the pool.
+      const childrenToRelease = [...container.children];
+      childrenToRelease.forEach(child => {
         if (child instanceof PIXI.Sprite) {
           this.spritePool.release(child);
         }
       });
-      
+
       // Release container back to pool
       this.containerPool.release(container);
     });

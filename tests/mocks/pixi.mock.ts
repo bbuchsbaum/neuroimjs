@@ -101,6 +101,7 @@ export function createPixiMock() {
 
   const mockGraphics = () => ({
     clear: vi.fn().mockReturnThis(),
+    // PIXI v7 / legacy API
     lineStyle: vi.fn().mockReturnThis(),
     moveTo: vi.fn().mockReturnThis(),
     lineTo: vi.fn().mockReturnThis(),
@@ -108,7 +109,19 @@ export function createPixiMock() {
     drawRect: vi.fn().mockReturnThis(),
     drawCircle: vi.fn().mockReturnThis(),
     endFill: vi.fn().mockReturnThis(),
-    position: { 
+    // PIXI v8 API
+    setStrokeStyle: vi.fn().mockReturnThis(),
+    setFillStyle: vi.fn().mockReturnThis(),
+    stroke: vi.fn().mockReturnThis(),
+    fill: vi.fn().mockReturnThis(),
+    rect: vi.fn().mockReturnThis(),
+    roundRect: vi.fn().mockReturnThis(),
+    circle: vi.fn().mockReturnThis(),
+    ellipse: vi.fn().mockReturnThis(),
+    poly: vi.fn().mockReturnThis(),
+    arc: vi.fn().mockReturnThis(),
+    closePath: vi.fn().mockReturnThis(),
+    position: {
       set: vi.fn(),
       x: 0,
       y: 0

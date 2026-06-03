@@ -2,12 +2,12 @@ import { ClusteredNeuroVol, LabelMap } from '../volume/ClusteredNeuroVol';
 import { LogicalNeuroVol } from '../volume/LogicalNeuroVol';
 import { NeuroVol } from '../volume/NeuroVol';
 import { NeuroSpace } from '../geometry/NeuroSpace';
-import { ROIVol } from '../roi/ROI';
+import { ROIVol } from '../roi/ROI_improved';
 import { Downloader } from '../utils/Downloader';
 import { Cache } from '../utils/Cache';
 import { TypedArray } from '../types';
 import { read_vol } from '../io/nifti'; // Ensure this import is correct
-import _ from 'lodash';
+import { deepEqual } from '../utils/deepEqual';
 
 /**
  * Interface for Atlas Metadata
@@ -92,7 +92,8 @@ export class NeuroAtlas {
 
     const data = new Float32Array(coords.length).fill(targetId);
 
-    return new ROIVol(this.atlas.space, coords, data);
+    // ROI_improved.ROIVol signature: (data, space, coords)
+    return new ROIVol(data, this.atlas.space, coords);
   }
 
   /**
@@ -100,9 +101,6 @@ export class NeuroAtlas {
    * @param otherAtlas The other NeuroAtlas to merge with.
    */
   public mergeAtlases(otherAtlas: NeuroAtlas): NeuroAtlas {
-    if (!_.isEqual(this.atlas.space, otherAtlas.atlas.space)) {
-      throw new Error('Atlases have different spatial dimensions.');
-    }
     if (!this.atlas.space.isEqualTo(otherAtlas.atlas.space)) {
       throw new Error('Atlases have different spatial dimensions.');
     }

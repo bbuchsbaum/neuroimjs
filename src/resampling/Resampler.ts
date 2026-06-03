@@ -122,16 +122,56 @@ export class Resampler implements IResampler {
   }
 
   /**
-   * Apply affine transformation
+   * Apply an affine transformation to the volume, resampling onto a grid of the
+   * same dimensions/spacing as the input.
+   *
+   * The transform is expressed in voxel (grid) coordinates. The forward map
+   * sends an input voxel `p` to an output voxel `q` via
+   *
+   *   q = M * (p - center) + center + translation
+   *
+   * where `M = R * S` (rotation composed with scale). Resampling fills each
+   * OUTPUT voxel `q` by mapping it back into the INPUT volume with the inverse
+   * transform and sampling there:
+   *
+   *   p = M^-1 * (q - center - translation) + center
    */
-  transform(options: TransformOptions): NeuroVol {
-    const matrix = this.buildTransformMatrix(options);
-    const transformedSpace = this.transformSpace(this.volume.space, matrix);
-    
-    return this.resample(transformedSpace, {
-      method: 'linear',
-      backgroundValue: 0
-    });
+  transform(options: TransformOptions, resampleOptions: ResampleOptions = {}): NeuroVol {
+    const { method = 'linear', backgroundValue = 0 } = resampleOptions;
+
+    // Build the forward 4x4 voxel-space matrix and invert it. We resample each
+    // output voxel by applying the inverse map and sampling the input volume.
+    const forward = this.buildTransformMatrix(options);
+    const inverse = this.invertMatrix4(forward);
+
+    const [dimX, dimY, dimZ] = this.volume.dim;
+    const result = new Float32Array(dimX * dimY * dimZ);
+
+    let idx = 0;
+    for (let k = 0; k < dimZ; k++) {
+      for (let j = 0; j < dimY; j++) {
+        for (let i = 0; i < dimX; i++) {
+          // Map this output voxel back into the input volume.
+          const sx =
+            inverse[0][0] * i + inverse[0][1] * j + inverse[0][2] * k + inverse[0][3];
+          const sy =
+            inverse[1][0] * i + inverse[1][1] * j + inverse[1][2] * k + inverse[1][3];
+          const sz =
+            inverse[2][0] * i + inverse[2][1] * j + inverse[2][2] * k + inverse[2][3];
+
+          result[idx++] = this.interpolate(
+            this.volume,
+            sx,
+            sy,
+            sz,
+            method,
+            backgroundValue
+          );
+        }
+      }
+    }
+
+    return new FloatNeuroVol(this.volume.space, result);
   }
 
   /**
@@ -381,9 +421,20 @@ export class Resampler implements IResampler {
           const wy = this.cubicWeight(fy - dj);
           const wz = this.cubicWeight(fz - dk);
           const weight = wx * wy * wz;
-          
+
           if (weight !== 0) {
-            const value = this.getVoxelSafe(volume, i, j, k, dimX, dimY, dimZ, backgroundValue);
+            // Out-of-bounds taps are filled by linear extrapolation from the
+            // nearest in-bounds samples rather than by the background value.
+            //
+            // The previous code added weight * backgroundValue to the numerator
+            // but still added weight to weightSum, biasing every sample within a
+            // kernel radius of an edge (e.g. the linear ramp f(i)=i interpolated
+            // at x=0.5 returned 0.4375 instead of 0.5). Simply dropping the taps
+            // and renormalizing is also biased (it yields 0.4118) because the
+            // cubic/Lanczos kernels only reproduce linear functions when given a
+            // full, symmetric set of taps. Distance-based linear extrapolation
+            // restores that and makes the ramp interpolate to its exact value.
+            const value = this.getVoxelExtrapolated(volume, i, j, k, dimX, dimY, dimZ);
             sum += weight * value;
             weightSum += weight;
           }
@@ -428,9 +479,14 @@ export class Resampler implements IResampler {
           const wy = this.lanczosWeight(fy - dj, a);
           const wz = this.lanczosWeight(fz - dk, a);
           const weight = wx * wy * wz;
-          
+
           if (weight !== 0) {
-            const value = this.getVoxelSafe(volume, i, j, k, dimX, dimY, dimZ, backgroundValue);
+            // Out-of-bounds taps are filled by linear extrapolation from the
+            // nearest in-bounds samples rather than the background value. See
+            // cubicInterpolation for the rationale: adding background to the
+            // numerator while keeping its weight in weightSum biases every
+            // sample near an edge.
+            const value = this.getVoxelExtrapolated(volume, i, j, k, dimX, dimY, dimZ);
             sum += weight * value;
             weightSum += weight;
           }
@@ -464,12 +520,12 @@ export class Resampler implements IResampler {
   }
 
   private getVoxelSafe(
-    volume: NeuroVol, 
-    i: number, 
-    j: number, 
+    volume: NeuroVol,
+    i: number,
+    j: number,
     k: number,
-    dimX: number, 
-    dimY: number, 
+    dimX: number,
+    dimY: number,
     dimZ: number,
     backgroundValue: number
   ): number {
@@ -477,6 +533,62 @@ export class Resampler implements IResampler {
       return backgroundValue;
     }
     return volume.getAt(i, j, k);
+  }
+
+  /**
+   * Sample a voxel, extrapolating linearly along any axis whose index is out of
+   * bounds. Extrapolation is performed independently per axis from the two
+   * nearest in-bounds planes, using the actual distance past the edge so that a
+   * locally linear field is continued exactly:
+   *
+   *   value(idx < 0)      = f(0)     + idx       * (f(1) - f(0))
+   *   value(idx > dim-1)  = f(dim-1) + (idx-(dim-1)) * (f(dim-1) - f(dim-2))
+   *
+   * This is what lets the cubic and Lanczos kernels reproduce linear ramps
+   * exactly right up to the volume boundary. Because callers only reach this
+   * code for points within half a voxel of the valid range (see interpolate()),
+   * the extrapolation always stays within a few voxels of an edge.
+   */
+  private getVoxelExtrapolated(
+    volume: NeuroVol,
+    i: number,
+    j: number,
+    k: number,
+    dimX: number,
+    dimY: number,
+    dimZ: number
+  ): number {
+    return this.extrapolateAxis(i, dimX, ci =>
+      this.extrapolateAxis(j, dimY, cj =>
+        this.extrapolateAxis(k, dimZ, ck => volume.getAt(ci, cj, ck))
+      )
+    );
+  }
+
+  /**
+   * Linearly extrapolate a single axis. `getValue` returns the field value at a
+   * valid integer index along this axis (with the other axes already fixed).
+   */
+  private extrapolateAxis(
+    idx: number,
+    dim: number,
+    getValue: (validIndex: number) => number
+  ): number {
+    if (idx >= 0 && idx < dim) {
+      return getValue(idx);
+    }
+    if (dim === 1) {
+      // Degenerate axis: no slope information, hold the single sample.
+      return getValue(0);
+    }
+    if (idx < 0) {
+      const f0 = getValue(0);
+      const f1 = getValue(1);
+      return f0 + idx * (f1 - f0);
+    }
+    const fn = getValue(dim - 1);
+    const fn1 = getValue(dim - 2);
+    return fn + (idx - (dim - 1)) * (fn - fn1);
   }
 
   private needsAntiAliasing(targetSpace: NeuroSpace): boolean {
@@ -504,76 +616,154 @@ export class Resampler implements IResampler {
     return filter.gaussianBlur(sigma as [number, number, number]);
   }
 
+  /**
+   * Build the forward affine matrix (in voxel/grid coordinates) from the
+   * supplied transform options. The composite map applied to a point `p` is
+   *
+   *   q = T(translation) * T(center) * R * S * T(-center) * p
+   *
+   * so that rotation and scale are applied about `center` (when provided) and
+   * the translation is applied in the (un-centered) grid frame afterwards. When
+   * `options.matrix` is supplied it is used verbatim.
+   */
   private buildTransformMatrix(options: TransformOptions): number[][] {
     if (options.matrix) {
-      return options.matrix;
+      return options.matrix.map(row => [...row]);
     }
 
-    // Build matrix from components
-    const matrix = [
+    const center = options.center || [0, 0, 0];
+
+    // Accumulator starts as identity. Because multiplyMatrices computes a = a*b,
+    // we right-multiply factors in the order they appear in the composition
+    // above (leftmost factor first).
+    let matrix = this.identityMatrix4();
+
+    // Outer translation (applied last to a point).
+    if (options.translation) {
+      this.multiplyMatrices(matrix, this.translationMatrix(
+        options.translation[0],
+        options.translation[1],
+        options.translation[2]
+      ));
+    }
+
+    // Move center to origin AFTER rotation/scale: T(center).
+    this.multiplyMatrices(matrix, this.translationMatrix(center[0], center[1], center[2]));
+
+    // Rotation (Z * Y * X intrinsic ordering, matching the original convention).
+    if (options.rotation) {
+      const cosX = Math.cos(options.rotation[0]);
+      const sinX = Math.sin(options.rotation[0]);
+      this.multiplyMatrices(matrix, [
+        [1, 0, 0, 0],
+        [0, cosX, -sinX, 0],
+        [0, sinX, cosX, 0],
+        [0, 0, 0, 1]
+      ]);
+
+      const cosY = Math.cos(options.rotation[1]);
+      const sinY = Math.sin(options.rotation[1]);
+      this.multiplyMatrices(matrix, [
+        [cosY, 0, sinY, 0],
+        [0, 1, 0, 0],
+        [-sinY, 0, cosY, 0],
+        [0, 0, 0, 1]
+      ]);
+
+      const cosZ = Math.cos(options.rotation[2]);
+      const sinZ = Math.sin(options.rotation[2]);
+      this.multiplyMatrices(matrix, [
+        [cosZ, -sinZ, 0, 0],
+        [sinZ, cosZ, 0, 0],
+        [0, 0, 1, 0],
+        [0, 0, 0, 1]
+      ]);
+    }
+
+    // Scale about the (already centered) origin.
+    if (options.scale) {
+      this.multiplyMatrices(matrix, [
+        [options.scale[0], 0, 0, 0],
+        [0, options.scale[1], 0, 0],
+        [0, 0, options.scale[2], 0],
+        [0, 0, 0, 1]
+      ]);
+    }
+
+    // Move origin back to center: T(-center) (applied first to a point).
+    this.multiplyMatrices(matrix, this.translationMatrix(-center[0], -center[1], -center[2]));
+
+    return matrix;
+  }
+
+  private identityMatrix4(): number[][] {
+    return [
       [1, 0, 0, 0],
       [0, 1, 0, 0],
       [0, 0, 1, 0],
       [0, 0, 0, 1]
     ];
+  }
 
-    const center = options.center || [0, 0, 0];
+  private translationMatrix(tx: number, ty: number, tz: number): number[][] {
+    return [
+      [1, 0, 0, tx],
+      [0, 1, 0, ty],
+      [0, 0, 1, tz],
+      [0, 0, 0, 1]
+    ];
+  }
 
-    // Translation
-    if (options.translation) {
-      matrix[0][3] = options.translation[0];
-      matrix[1][3] = options.translation[1];
-      matrix[2][3] = options.translation[2];
+  /**
+   * Invert a 4x4 affine matrix via Gauss-Jordan elimination with partial
+   * pivoting. Used to map output voxels back into the input volume.
+   */
+  private invertMatrix4(m: number[][]): number[][] {
+    // Augmented [m | I]
+    const a: number[][] = m.map((row, r) => [
+      ...row,
+      ...[0, 1, 2, 3].map(c => (c === r ? 1 : 0))
+    ]);
+
+    for (let col = 0; col < 4; col++) {
+      // Partial pivot: find the row with the largest magnitude in this column.
+      let pivot = col;
+      let maxAbs = Math.abs(a[col][col]);
+      for (let r = col + 1; r < 4; r++) {
+        const v = Math.abs(a[r][col]);
+        if (v > maxAbs) {
+          maxAbs = v;
+          pivot = r;
+        }
+      }
+      if (maxAbs < 1e-12) {
+        throw new Error('Resampler.transform: transform matrix is singular and cannot be inverted');
+      }
+      if (pivot !== col) {
+        const tmp = a[col];
+        a[col] = a[pivot];
+        a[pivot] = tmp;
+      }
+
+      // Normalize the pivot row.
+      const pivVal = a[col][col];
+      for (let c = 0; c < 8; c++) {
+        a[col][c] /= pivVal;
+      }
+
+      // Eliminate the column entry from all other rows.
+      for (let r = 0; r < 4; r++) {
+        if (r === col) continue;
+        const factor = a[r][col];
+        if (factor === 0) continue;
+        for (let c = 0; c < 8; c++) {
+          a[r][c] -= factor * a[col][c];
+        }
+      }
     }
 
-    // Scale
-    if (options.scale) {
-      const scaleMatrix = [
-        [options.scale[0], 0, 0, 0],
-        [0, options.scale[1], 0, 0],
-        [0, 0, options.scale[2], 0],
-        [0, 0, 0, 1]
-      ];
-      this.multiplyMatrices(matrix, scaleMatrix);
-    }
-
-    // Rotation
-    if (options.rotation) {
-      // Rotation around X
-      const cosX = Math.cos(options.rotation[0]);
-      const sinX = Math.sin(options.rotation[0]);
-      const rotX = [
-        [1, 0, 0, 0],
-        [0, cosX, -sinX, 0],
-        [0, sinX, cosX, 0],
-        [0, 0, 0, 1]
-      ];
-      this.multiplyMatrices(matrix, rotX);
-
-      // Rotation around Y
-      const cosY = Math.cos(options.rotation[1]);
-      const sinY = Math.sin(options.rotation[1]);
-      const rotY = [
-        [cosY, 0, sinY, 0],
-        [0, 1, 0, 0],
-        [-sinY, 0, cosY, 0],
-        [0, 0, 0, 1]
-      ];
-      this.multiplyMatrices(matrix, rotY);
-
-      // Rotation around Z
-      const cosZ = Math.cos(options.rotation[2]);
-      const sinZ = Math.sin(options.rotation[2]);
-      const rotZ = [
-        [cosZ, -sinZ, 0, 0],
-        [sinZ, cosZ, 0, 0],
-        [0, 0, 1, 0],
-        [0, 0, 0, 1]
-      ];
-      this.multiplyMatrices(matrix, rotZ);
-    }
-
-    return matrix;
+    // Extract the right half as the inverse.
+    return a.map(row => row.slice(4, 8));
   }
 
   private multiplyMatrices(a: number[][], b: number[][]): void {
@@ -600,11 +790,6 @@ export class Resampler implements IResampler {
     }
   }
 
-  private transformSpace(space: NeuroSpace, matrix: number[][]): NeuroSpace {
-    // For now, return the same space
-    // Full implementation would transform the space axes
-    return space;
-  }
 }
 
 /**

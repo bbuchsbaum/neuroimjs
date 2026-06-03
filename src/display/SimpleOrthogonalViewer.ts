@@ -25,6 +25,10 @@ export interface SimpleOrthogonalViewerOptions {
 /**
  * Simple wrapper around OrthogonalImageViewer that exposes a minimal, programmatic API
  * suitable for embedding in external applications without shipping UI widgets.
+ *
+ * **This is the recommended (canonical) high-level 3-up orthogonal viewer.** For
+ * custom layouts or finer control, compose {@link SingleSliceViewer} instances with
+ * {@link ViewSynchronizer} instead. See the architecture note on {@link SliceViewer}.
  */
 export class SimpleOrthogonalViewer {
   private root: HTMLElement;

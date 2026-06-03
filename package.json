@@ -1,32 +1,41 @@
 {
   "name": "neuroimjs",
-  "version": "0.0.1",
+  "version": "0.2.0",
   "description": "A neuroimaging library for JavaScript — volumetric data, NIfTI I/O, spatial transforms, and WebGL orthogonal viewers",
   "main": "./dist/cjs/index.js",
   "module": "./dist/esm/index.js",
   "types": "./dist/types/index.d.ts",
   "exports": {
     ".": {
-      "require": "./dist/cjs/index.js",
-      "import": "./dist/esm/index.js",
       "types": "./dist/types/index.d.ts",
-      "browser": "./dist/neuroimjs.es.js"
+      "browser": "./dist/neuroimjs.es.js",
+      "import": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js"
     },
     "./browser": {
+      "types": "./dist/types/index.d.ts",
       "import": "./dist/neuroimjs.es.js",
       "require": "./dist/neuroimjs.umd.js"
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "!dist/**/*.map",
+    "!dist/shoelace",
+    "!dist/**/__tests__/**",
+    "!dist/**/*.test.*",
+    "!dist/**/*.spec.*",
+    "!dist/**/testing/**",
+    "!dist/**/test-migration/**"
   ],
   "scripts": {
     "dev": "vite",
-    "build": "npm run build:cjs && npm run build:esm && npm run build:types",
+    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
+    "build": "npm run clean && npm run build:cjs && npm run build:esm && npm run build:types",
     "build:vite": "vite build",
-    "build:cjs": "tsc -p tsconfig.cjs.json",
-    "build:esm": "tsc -p tsconfig.esm.json",
-    "build:types": "tsc -p tsconfig.types.json",
+    "build:cjs": "tsc -p tsconfig.cjs.build.json && echo '{\"type\":\"commonjs\"}' > dist/cjs/package.json",
+    "build:esm": "tsc -p tsconfig.esm.build.json && node scripts/fix-esm-imports.js",
+    "build:types": "tsc -p tsconfig.types.build.json",
     "build:quick": "tsc -p tsconfig.cjs.build.json",
     "build:demo": "tsc -p tsconfig.build.json examples/orthogonal_slice_demo.ts --outDir dist/examples",
     "test": "vitest",
@@ -37,7 +46,11 @@
     "test:debug": "vitest run --reporter=verbose --no-coverage",
     "lint": "eslint src tests",
     "format": "prettier --write src tests",
-    "prepublishOnly": "npm run build",
+    "docs:api": "typedoc",
+    "docs:dev": "npm run docs:api && vitepress dev docs",
+    "docs:build": "npm run docs:api && vitepress build docs",
+    "docs:preview": "vitepress preview docs",
+    "prepublishOnly": "npm run build && npm run build:vite",
     "demo:ortho": "tsx examples/orthogonal_slice_demo.ts",
     "demo:extract": "tsx examples/extract_orthogonal_slices.ts",
     "demo:test-ortho": "tsx examples/test_orthogonal_slicing.ts",
@@ -80,53 +93,93 @@
     "node": ">=18"
   },
   "dependencies": {
-    "@lit/reactive-element": "^1.6.0",
-    "@shoelace-style/shoelace": "^2.17.1",
-    "@stdlib/ndarray": "^0.3.1",
     "axios": "^1.7.7",
     "buffer": "^6.0.3",
+    "nifti-reader-js": "^0.8.0",
+    "pako": "^2.1.0"
+  },
+  "peerDependencies": {
+    "@lit/reactive-element": "^1.6.0",
+    "@shoelace-style/shoelace": "^2.17.1",
     "chroma-js": "^3.1.1",
     "lit": "^3.2.1",
     "lit-element": "^4.1.1",
-    "lodash": "^4.17.21",
+    "mitt": "^3.0.1",
     "mobx": "^6.13.3",
     "nouislider": "^15.8.1",
-    "pako": "^2.1.0",
-    "pixi.js": "^8.4.1",
-    "process": "^0.11.10",
-    "split.js": "^1.6.5",
-    "static-kdtree": "^1.0.2",
-    "typed-emitter": "^2.1.0"
+    "pixi.js": "^8.4.1"
+  },
+  "peerDependenciesMeta": {
+    "@lit/reactive-element": {
+      "optional": true
+    },
+    "@shoelace-style/shoelace": {
+      "optional": true
+    },
+    "chroma-js": {
+      "optional": true
+    },
+    "lit": {
+      "optional": true
+    },
+    "lit-element": {
+      "optional": true
+    },
+    "mitt": {
+      "optional": true
+    },
+    "mobx": {
+      "optional": true
+    },
+    "nouislider": {
+      "optional": true
+    },
+    "pixi.js": {
+      "optional": true
+    }
   },
   "optionalDependencies": {
     "canvas": "^2.11.2",
     "opencv-ts": "^1.3.6"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.4",
+    "@lit/reactive-element": "^1.6.3",
     "@playwright/test": "^1.57.0",
     "@types/chroma-js": "^2.4.4",
-    "@types/lodash": "^4.17.10",
     "@types/node": "^18.19.118",
     "@types/pako": "^2.0.3",
     "@types/pixi.js": "^4.8.9",
     "autoprefixer": "^10.4.20",
-    "cypress": "^13.14.2",
+    "chroma-js": "^3.2.0",
+    "eslint": "^9.39.4",
+    "globals": "^17.6.0",
     "jsdom": "^26.0.0",
+    "lit": "^3.3.3",
+    "lit-element": "^4.2.2",
     "mitt": "^3.0.1",
     "ml-matrix": "^6.12.1",
-    "nifti-reader-js": "^0.8.0",
+    "mobx": "^6.15.4",
     "node-fetch": "^2.7.0",
+    "nouislider": "^15.8.1",
+    "pixi.js": "^8.18.1",
     "postcss": "^8.4.47",
     "tailwindcss": "^3.4.13",
     "terser": "^5.32.0",
     "ts-node": "^10.9.2",
     "tsx": "^4.20.3",
+    "typedoc": "^0.28.19",
+    "typedoc-plugin-markdown": "^4.12.0",
+    "typedoc-vitepress-theme": "^1.1.3",
     "typescript": "^5.6.2",
+    "typescript-eslint": "^8.60.1",
     "vite": "^5.4.4",
     "vite-plugin-checker": "^0.8.0",
     "vite-plugin-dts": "^3.0.0",
     "vite-plugin-static-copy": "^2.0.0",
-    "vitest": "^2.0.5"
+    "vitepress": "^1.6.4",
+    "vitest": "^2.0.5",
+    "vue": "^3.5.35"
   },
   "type": "module",
   "browser": "./dist/neuroimjs.es.js"

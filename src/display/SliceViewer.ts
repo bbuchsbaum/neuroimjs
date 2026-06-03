@@ -22,9 +22,21 @@ import { arraysNearlyEqual, COORDINATE_EPSILON } from './NumericalUtils';
  *  - Central control over the slice index and coordinate via the model.
  *  - Optionally, consumer-friendly methods like `setPosition(...)`, `handleResize(...)`.
  *
- * If the naming is confusing (with `SliceView` vs. `SliceViewer`), one might rename
- * `SliceViewer` to something like `OrthoViewer` or `ViewerFacade` to highlight
- * that it is a wrapper that initializes and binds the other components.
+ * Naming note (`SliceView` vs `SliceViewer`): `SliceView` is the PIXI renderer;
+ * `SliceViewer` is the facade that binds model/view/controller. They are distinct
+ * layers, not duplicates.
+ *
+ * VIEWER ARCHITECTURE — two stacks exist; prefer the composable one for new code:
+ *  - **Composable (recommended):** `SingleSliceViewer` (a single orientation with an
+ *    event API) composed via `ViewSynchronizer` for multi-view coordination.
+ *  - **High-level convenience:** `SimpleOrthogonalViewer` — a batteries-included
+ *    3-up orthogonal viewer (wraps `OrthogonalImageViewer`).
+ *  - **Building blocks (this class, `SliceView`, `SliceController`, `OrthogonalImageViewer`):**
+ *    lower-level primitives the above are built from. Use directly only for custom layouts.
+ *
+ * A future major version may unify the two coordination mechanisms (MobX reactions
+ * here vs. the EventEmitter used by `SingleSliceViewer`/`ViewSynchronizer`) into one;
+ * until then both are supported.
  */
 export class SliceViewer implements ViewerStateInfo {
   /**

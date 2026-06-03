@@ -1,5 +1,5 @@
 import { Matrix, inverse, determinant } from 'ml-matrix';
-import * as _ from 'lodash';
+import { deepEqual } from '../utils/deepEqual';
 import {
   AxisSet,
   AxisSet1D,
@@ -77,6 +77,22 @@ export class NeuroSpace {
         this.originValues = [];
         for (let i = 0; i < D; i++) {
           this.originValues[i] = this._trans.get(i, this._trans.columns - 1);
+        }
+      }
+
+      // Derive spacing from the affine column norms when not explicitly given.
+      // Otherwise `spacing` would stay [1,1,1] while the matrix encodes the real
+      // scale, desyncing every consumer that reads `space.spacing` (e.g. the
+      // mm-per-pixel display scale) from the actual geometry.
+      if (spacing == null) {
+        for (let i = 0; i < D; i++) {
+          let sumSq = 0;
+          for (let j = 0; j < D; j++) {
+            const v = this._trans.get(j, i);
+            sumSq += v * v;
+          }
+          const norm = Math.sqrt(sumSq);
+          this.spacingValues[i] = norm > 0 ? norm : 1;
         }
       }
 
@@ -414,15 +430,18 @@ export class NeuroSpace {
   }
 
   get origin(): number[] {
-    return this.originValues;
-  } 
+    // Return a copy: leaking the internal array lets callers mutate the space
+    // (and its cached transforms would NOT be recomputed). Mirrors `get dim`.
+    return [...this.originValues];
+  }
 
   /**
    * Gets the spacing values.
    * @returns An array of spacing values.
    */
   get spacing(): number[] {
-    return this.spacingValues;
+    // Return a copy (see `get origin`).
+    return [...this.spacingValues];
   }
 
   get axes(): Readonly<AxisSet> {
@@ -601,60 +620,39 @@ export class NeuroSpace {
     const newDim = perm.map((p) => this.dim[p]);
     const newSpacing = perm.map((p) => this.spacing[p]);
   
-    // Calculate the new origin
-    // We need to transform the corners of the original space to maintain the same physical bounds
-    const newOrigin = new Array(ndim).fill(0);
-    
-    // For each axis in the new orientation
+    // Build the index-permutation transform M that maps a NEW voxel coordinate
+    // back to the corresponding OLD voxel coordinate (in homogeneous form). For a
+    // flipped axis the old index runs in reverse: old = (dim - 1) - new.
+    const M = Matrix.zeros(ndim + 1, ndim + 1);
+    M.set(ndim, ndim, 1);
     for (let i = 0; i < ndim; i++) {
-      const sourceAxisIndex = perm[i];
-      
+      const src = perm[i];
       if (flip[i] === -1) {
-        // If the axis is flipped, the origin needs to be adjusted
-        // to maintain the same physical bounds
-        // The new origin is at the opposite end of the dimension
-        newOrigin[i] = this.origin[sourceAxisIndex] + (this.dim[sourceAxisIndex] - 1) * this.spacing[sourceAxisIndex];
+        M.set(src, i, -1);
+        M.set(src, ndim, this.dim[src] - 1);
       } else {
-        // If not flipped, keep the same origin value
-        newOrigin[i] = this.origin[sourceAxisIndex];
+        M.set(src, i, 1);
       }
     }
-  
-    // Create a new transformation matrix
-    const newTrans = Matrix.zeros(ndim + 1, ndim + 1);
-    
-    // Set the homogeneous coordinate
-    newTrans.set(ndim, ndim, 1);
-    
-    // Build the rotation-scaling part of the transformation matrix
-    const anatAxes = anat.axes();
+
+    // The reoriented affine is the original affine composed with M:
+    //   A_new * v_new = A * (M * v_new) = A * v_old
+    // so every voxel keeps its physical (world) coordinate. This preserves world
+    // geometry exactly — including translation and obliquity — by construction,
+    // rather than re-deriving the origin in the (sign-ambiguous) new frame.
+    const newTrans = this.trans.mmul(M);
+    const newOrigin = new Array(ndim);
     for (let i = 0; i < ndim; i++) {
-      const dir = anatAxes[i].direction;
-      for (let j = 0; j < ndim; j++) {
-        newTrans.set(j, i, dir[j] * newSpacing[i]);
-      }
+      newOrigin[i] = newTrans.get(i, ndim);
     }
-    
-    // Set the translation component
-    for (let i = 0; i < ndim; i++) {
-      newTrans.set(i, ndim, newOrigin[i]);
-    }
-  
-    
-    // Create and return the new NeuroSpace with the updated properties
-    const newSpace = new NeuroSpace(
+
+    return new NeuroSpace(
       newDim,
       newSpacing,
       newOrigin,
       anat,
       newTrans.to2DArray()
     );
-    
-    // Verify the bounds are preserved after reorientation
-    const [origMin, origMax] = this.bounds();
-    const [newMin, newMax] = newSpace.bounds();
-    
-    return newSpace;
   }
   
 
@@ -901,7 +899,7 @@ computeAxisPermutation(oldAxes: NamedAxis[], newAxes: NamedAxis[]): { perm: numb
    * @returns An array representing the origin.
    */
   getOrigin(): number[] {
-    return this.originValues;
+    return [...this.originValues];
   }
 
   /**
@@ -954,7 +952,7 @@ computeAxisPermutation(oldAxes: NamedAxis[], newAxes: NamedAxis[]): { perm: numb
    * @returns True if the objects are equal, false otherwise.
    */
   isEqualTo(other: NeuroSpace): boolean {
-    return _.isEqual(this, other);
+    return deepEqual(this, other);
   }
 
   /**

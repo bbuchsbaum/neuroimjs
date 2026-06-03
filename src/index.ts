@@ -201,7 +201,7 @@ export {
 
 export { SliceCoordinator } from './core/SliceCoordinator';
 
-// Test utilities
-export { TestVolumeFactory } from './testing/TestVolumeFactory';
+// Note: TestVolumeFactory (src/testing/) is intentionally NOT exported — it is a
+// test-only helper. Tests import it directly via relative path.
 
 // Add other exports as needed
