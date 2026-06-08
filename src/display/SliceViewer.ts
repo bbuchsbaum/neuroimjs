@@ -8,6 +8,7 @@ import { ViewerStateInfo } from './ViewerStateInfo';
 import { ISliceModel, ISliceView, ISliceController } from './interfaces';
 import { ViewerFactory } from './ViewerFactory';
 import { CrossHair } from './CrossHair';
+import { OrientationLabelLayer, OrientationLabelOptions } from './OrientationLabelLayer';
 import { arraysNearlyEqual, COORDINATE_EPSILON } from './NumericalUtils';
 
 /**
@@ -197,6 +198,36 @@ export class SliceViewer implements ViewerStateInfo {
     } else {
       if (typeof v.removeLayer === 'function') {
         v.removeLayer('crosshair');
+      }
+    }
+  }
+
+  /**
+   * Toggle anatomical orientation labels (L/R/A/P/S/I) at runtime for this view.
+   *
+   * Labels are drawn at a fixed screen size, pinned to the viewport edges, and
+   * the letter on each edge is derived from the live image orientation so it
+   * always matches what is displayed.
+   *
+   * @param visible - Whether the labels should be shown.
+   * @param options - Optional styling (font size, color, margin, outline).
+   */
+  public setOrientationLabelsVisible(visible: boolean, options?: OrientationLabelOptions): void {
+    const v = this.view as any;
+    if (visible) {
+      if (typeof v.addLayer === 'function') {
+        // Replace any existing instance so styling/options stay in sync.
+        if (typeof v.removeLayer === 'function') {
+          v.removeLayer('orientation-labels');
+        }
+        v.addLayer('orientation-labels', new OrientationLabelLayer(
+          this.imageLayer.neuroSpace,
+          options
+        ));
+      }
+    } else {
+      if (typeof v.removeLayer === 'function') {
+        v.removeLayer('orientation-labels');
       }
     }
   }

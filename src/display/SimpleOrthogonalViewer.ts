@@ -10,6 +10,7 @@ import { Matrix } from 'ml-matrix';
 import { resolveColorMap } from './ColorMapResolver';
 import { EventEmitter } from './EventEmitter';
 import type { SlicePointerEvent } from './types/display';
+import type { OrientationLabelOptions } from './OrientationLabelLayer';
 
 type LayoutMode = 'left-tall' | 'top-bottom';
 
@@ -19,7 +20,10 @@ export interface SimpleOrthogonalViewerOptions {
   showSlider?: boolean;
   gapPx?: number;
   showIntensityReadout?: boolean;
+  /** Show anatomical orientation labels (L/R/A/P/S/I) pinned to each view's edges. */
   showOrientationLabels?: boolean;
+  /** Styling for the orientation labels. Only used when showOrientationLabels is true. */
+  orientationLabelOptions?: OrientationLabelOptions;
 }
 
 /**
@@ -68,6 +72,8 @@ export class SimpleOrthogonalViewer {
         showCrosshair: options?.showCrosshair ?? true,
         showSlider: options?.showSlider ?? false,
         gapPx: options?.gapPx ?? 12,
+        showOrientationLabels: options?.showOrientationLabels ?? false,
+        orientationLabelOptions: options?.orientationLabelOptions,
       },
     });
     // Wire events for external integrations
@@ -267,6 +273,16 @@ export class SimpleOrthogonalViewer {
   // Set which view receives keyboard navigation input
   setFocusedView(view: 'axial' | 'sagittal' | 'coronal' | null): void {
     this.viewer.setFocusedView(view as any);
+  }
+
+  /**
+   * Toggle anatomical orientation labels (L/R/A/P/S/I) across all three views.
+   *
+   * @param visible - Whether the labels should be shown.
+   * @param options - Optional styling applied to every sub-view.
+   */
+  setOrientationLabelsVisible(visible: boolean, options?: OrientationLabelOptions): void {
+    this.viewer.setOrientationLabelsVisible(visible, options);
   }
 
   // Internal re-render hook

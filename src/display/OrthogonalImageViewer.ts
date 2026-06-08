@@ -1,6 +1,7 @@
 import { AxisSet3D } from '../geometry/Axis';
 import { SliceViewer } from './SliceViewer';
 import { ImageLayer } from './ImageLayer';
+import { OrientationLabelOptions } from './OrientationLabelLayer';
 import { observable, action, makeObservable, computed, reaction, IReactionDisposer, makeAutoObservable } from 'mobx';
 import { ViewerStateInfo } from './ViewerStateInfo';
 import { arraysNearlyEqual, COORDINATE_EPSILON } from './NumericalUtils';
@@ -35,6 +36,18 @@ interface OrthogonalImageViewerOptions {
    * Whether to display crosshair lines in the sub-viewers.
    */
   showCrosshair?: boolean;
+
+  /**
+   * Whether to display anatomical orientation labels (L/R/A/P/S/I) at the edges
+   * of each sub-view. Labels are fixed-size and pinned to the viewport.
+   */
+  showOrientationLabels?: boolean;
+
+  /**
+   * Styling for the orientation labels. Only used when
+   * {@link showOrientationLabels} is true.
+   */
+  orientationLabelOptions?: OrientationLabelOptions;
 
   /**
    * Whether to display a slider in each sub-viewer for changing slice indices.
@@ -341,13 +354,19 @@ export class OrthogonalImageViewer implements ViewerStateInfo {
         this.setFocusedView(view);
       });
 
-      // Optional: Add visual focus indicator styles
+      // Optional: Add visual focus indicator styles.
+      // Use a negative outline-offset so the ring is drawn *inside* the panel's
+      // edges. A plain outline sits outside the box and gets clipped by the
+      // surrounding container/card on whichever side is flush against it,
+      // leaving only three of the four sides visible.
       div.addEventListener('mouseenter', () => {
         div.style.outline = '2px solid rgba(100, 150, 255, 0.6)';
+        div.style.outlineOffset = '-2px';
       });
 
       div.addEventListener('mouseleave', () => {
         div.style.outline = '';
+        div.style.outlineOffset = '';
       });
     });
   }
@@ -383,6 +402,11 @@ export class OrthogonalImageViewer implements ViewerStateInfo {
         showSlider: this.options.showSlider,
       });
       this.sliceViewers[viewName] = viewer;
+
+      // Add orientation labels if requested
+      if (this.options.showOrientationLabels) {
+        viewer.setOrientationLabelsVisible(true, this.options.orientationLabelOptions);
+      }
 
       // Observe changes in each viewer's internal state
       this.setupViewerReactions(viewName, viewer);
@@ -547,6 +571,18 @@ export class OrthogonalImageViewer implements ViewerStateInfo {
   @action
   public setFocusedView(viewName: ViewName | null): void {
     this.focusedView = viewName;
+  }
+
+  /**
+   * Toggle anatomical orientation labels (L/R/A/P/S/I) across all three views.
+   *
+   * @param visible - Whether the labels should be shown.
+   * @param options - Optional styling applied to every sub-view.
+   */
+  public setOrientationLabelsVisible(visible: boolean, options?: OrientationLabelOptions): void {
+    Object.values(this.sliceViewers).forEach((viewer) => {
+      viewer.setOrientationLabelsVisible(visible, options);
+    });
   }
 
   private applyResponsiveLayout(): void {

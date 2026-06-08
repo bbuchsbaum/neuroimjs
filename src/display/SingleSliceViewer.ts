@@ -10,7 +10,7 @@ import { ICoordinateTransformer } from './interfaces/ICoordinateTransformer';
 import { PointerEventHandler } from './types/display';
 import { DepthEnhancedLayer, DepthEnhancedOptions } from './DepthEnhancedLayer';
 import { IntensityReadout } from './IntensityReadout';
-import { OrientationLabelLayer } from './OrientationLabelLayer';
+import { OrientationLabelOptions } from './OrientationLabelLayer';
 
 /**
  * Event types for SingleSliceViewer
@@ -95,6 +95,12 @@ export interface SingleSliceViewerOptions {
    * @default false
    */
   showOrientationLabels?: boolean;
+
+  /**
+   * Styling for the orientation labels (font size, color, margin, outline).
+   * Only used when {@link showOrientationLabels} is true.
+   */
+  orientationLabelOptions?: OrientationLabelOptions;
 
   /**
    * Enable depth-enhanced viewing with blur and parallax effects.
@@ -294,9 +300,8 @@ export class SingleSliceViewer {
     }
 
     // Add orientation labels if requested
-    if (options?.showOrientationLabels && sliceViewer.view.addLayer) {
-      const labelLayer = new OrientationLabelLayer(volStack.space);
-      sliceViewer.view.addLayer('orientation-labels', labelLayer);
+    if (options?.showOrientationLabels) {
+      sliceViewer.setOrientationLabelsVisible(true, options.orientationLabelOptions);
     }
 
     // Add intensity readout if requested
@@ -494,6 +499,16 @@ export class SingleSliceViewer {
    */
   public setCrosshairVisible(visible: boolean): void {
     this.viewer.setCrosshairVisible(visible);
+  }
+
+  /**
+   * Toggle anatomical orientation labels (L/R/A/P/S/I) at runtime.
+   *
+   * @param visible - Whether to show the labels
+   * @param options - Optional styling (font size, color, margin, outline)
+   */
+  public setOrientationLabelsVisible(visible: boolean, options?: OrientationLabelOptions): void {
+    this.viewer.setOrientationLabelsVisible(visible, options);
   }
 
   /**

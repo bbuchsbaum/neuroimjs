@@ -1,7 +1,7 @@
 // File: src/display/OrientationLabelLayer.ts
 
 import * as PIXI from 'pixi.js';
-import { SliceLayer } from './SliceLayer';
+import { SliceLayer, ScreenLayoutContext } from './SliceLayer';
 import { AxisSet3D } from '../geometry/Axis';
 import { NamedAxis } from '../geometry/Axis';
 import { NeuroSpace } from '../geometry/NeuroSpace';
@@ -11,10 +11,18 @@ import { SlicePointerEvent } from './types/display';
  * Options for orientation labels.
  */
 export interface OrientationLabelOptions {
+  /** Font size in screen pixels (labels do NOT scale with the image). */
   fontSize?: number;
+  /** Fill color of the letters (PIXI numeric color). */
   color?: number;
+  /** Font family. */
   fontFamily?: string;
+  /** Distance from the viewport edge, in screen pixels. */
   margin?: number;
+  /** Outline color drawn around the letters for contrast over bright/dark anatomy. */
+  strokeColor?: number;
+  /** Outline width in pixels. Set to 0 to disable. */
+  strokeWidth?: number;
 }
 
 /**
@@ -33,23 +41,53 @@ const AXIS_LABEL_MAP: Record<string, [string, string]> = {
 
 /**
  * OrientationLabelLayer renders anatomical direction labels (L/R/A/P/S/I)
- * at the edges of a slice view. The labels are derived from the viewAxes:
- * - viewAxes.i defines the horizontal axis (labels on left/right edges)
- * - viewAxes.j defines the vertical axis (labels on top/bottom edges)
+ * pinned to the four edges of the viewport, at a fixed screen size — exactly
+ * as typical neuroimaging viewers (FSLeyes, MRIcron) display them.
+ *
+ * ## Why this is a screen-space layer
+ * The slice image is rendered into a container that is scaled to fit and
+ * Y-flipped. Anything placed in that container scales and flips with the image.
+ * Orientation labels must instead stay a constant pixel size and stay pinned to
+ * the viewport edges through zoom/pan/resize, so this layer declares
+ * {@link screenSpace} and is rendered by {@link SliceView} into an unscaled,
+ * stage-level overlay container.
+ *
+ * ## How the letters are assigned to edges (correctness)
+ * The letters for the in-plane axes (`viewAxes.i`, `viewAxes.j`) come from the
+ * orientation, but *which screen edge* each letter belongs to is derived from
+ * the live image transform via {@link ScreenLayoutContext.project}. We project
+ * the endpoints of the i- and j-axes to screen pixels and assign each label to
+ * the edge it actually points to. This guarantees the labels can never disagree
+ * with the rendered image, regardless of axis flips, zoom, or pan — which is
+ * essential because mislabeling Left/Right is a serious error in neuroimaging.
  */
 export class OrientationLabelLayer implements SliceLayer {
+  public readonly screenSpace = true;
   public neuroSpace: NeuroSpace;
   private container: PIXI.Container;
-  private labels: PIXI.Text[] = [];
   private options: Required<OrientationLabelOptions>;
+
+  // One PIXI.Text per in-plane axis endpoint. Each keeps a fixed letter; only
+  // its screen position is updated in layoutScreen().
+  private textNegI: PIXI.Text | null = null; // negative i direction
+  private textPosI: PIXI.Text | null = null; // positive i direction
+  private textNegJ: PIXI.Text | null = null; // negative j direction
+  private textPosJ: PIXI.Text | null = null; // positive j direction
+
+  // Dimension indices and content extent for the current view, resolved in
+  // renderSlice() (where viewAxes is known) and consumed in layoutScreen().
+  private contentW = 1;
+  private contentH = 1;
 
   constructor(neuroSpace: NeuroSpace, options?: OrientationLabelOptions) {
     this.neuroSpace = neuroSpace;
     this.options = {
-      fontSize: options?.fontSize ?? 14,
+      fontSize: options?.fontSize ?? 16,
       color: options?.color ?? 0xffffff,
       fontFamily: options?.fontFamily ?? 'sans-serif',
       margin: options?.margin ?? 6,
+      strokeColor: options?.strokeColor ?? 0x000000,
+      strokeWidth: options?.strokeWidth ?? 3,
     };
     this.container = new PIXI.Container();
   }
@@ -62,66 +100,101 @@ export class OrientationLabelLayer implements SliceLayer {
     _sliceIndex: number,
     _coord: number[],
     viewAxes: AxisSet3D,
-    parentContainer: PIXI.Container
+    _parentContainer: PIXI.Container
   ): PIXI.Container | null {
-    // Clear previous labels
+    // Resolve the in-plane content extent (x spans the i-axis, y spans the j-axis).
+    this.contentW = this.neuroSpace.dim[this.neuroSpace.whichDim(viewAxes.i)];
+    this.contentH = this.neuroSpace.dim[this.neuroSpace.whichDim(viewAxes.j)];
+
+    // Rebuild the label texts from the current orientation. The four texts hold
+    // fixed letters; positioning happens in layoutScreen() once the viewport
+    // geometry is known.
     this.container.removeChildren();
-    this.labels = [];
 
-    // We need the parent container's content bounds to position labels.
-    // Use the parent's first child (the image sprite) for sizing.
-    // Since this container will be added to the same parent as the image,
-    // we need to estimate the content size from the neuroSpace dimensions.
-    const iDimIndex = this.neuroSpace.whichDim(viewAxes.i);
-    const jDimIndex = this.neuroSpace.whichDim(viewAxes.j);
-    const contentW = this.neuroSpace.dim[iDimIndex];
-    const contentH = this.neuroSpace.dim[jDimIndex];
-
-    // Get labels for the i-axis (horizontal: left/right edges)
-    const iLabels = this.getLabelsForAxis(viewAxes.i);
-    // Get labels for the j-axis (vertical: top/bottom edges)
+    const iLabels = this.getLabelsForAxis(viewAxes.i); // [positive, negative]
     const jLabels = this.getLabelsForAxis(viewAxes.j);
 
-    const textStyle = {
+    this.textNegI = this.makeLabel(iLabels[1]);
+    this.textPosI = this.makeLabel(iLabels[0]);
+    this.textNegJ = this.makeLabel(jLabels[1]);
+    this.textPosJ = this.makeLabel(jLabels[0]);
+
+    this.container.addChild(this.textNegI);
+    this.container.addChild(this.textPosI);
+    this.container.addChild(this.textNegJ);
+    this.container.addChild(this.textPosJ);
+
+    return this.container;
+  }
+
+  /**
+   * Pin the four labels to the viewport edges. The edge each label belongs to is
+   * derived from the live image transform so the labels always match the image.
+   */
+  layoutScreen(ctx: ScreenLayoutContext): void {
+    if (!this.textNegI || !this.textPosI || !this.textNegJ || !this.textPosJ) {
+      return;
+    }
+
+    const { width, height, project } = ctx;
+    const margin = this.options.margin;
+
+    // Project the endpoints of each in-plane axis to screen pixels.
+    const negI = project(0, this.contentH / 2);
+    const posI = project(this.contentW, this.contentH / 2);
+    const negJ = project(this.contentW / 2, 0);
+    const posJ = project(this.contentW / 2, this.contentH);
+
+    // The i-axis endpoints are horizontal on screen: the one with the smaller
+    // screen-x is the left edge, the other the right edge.
+    if (negI.x <= posI.x) {
+      this.placeLeft(this.textNegI, width, height, margin);
+      this.placeRight(this.textPosI, width, height, margin);
+    } else {
+      this.placeRight(this.textNegI, width, height, margin);
+      this.placeLeft(this.textPosI, width, height, margin);
+    }
+
+    // The j-axis endpoints are vertical on screen: smaller screen-y is the top.
+    if (negJ.y <= posJ.y) {
+      this.placeTop(this.textNegJ, width, margin);
+      this.placeBottom(this.textPosJ, width, height, margin);
+    } else {
+      this.placeBottom(this.textNegJ, width, height, margin);
+      this.placeTop(this.textPosJ, width, margin);
+    }
+  }
+
+  private placeLeft(t: PIXI.Text, _w: number, h: number, margin: number) {
+    t.anchor.set(0, 0.5);
+    t.position.set(margin, h / 2);
+  }
+  private placeRight(t: PIXI.Text, w: number, h: number, margin: number) {
+    t.anchor.set(1, 0.5);
+    t.position.set(w - margin, h / 2);
+  }
+  private placeTop(t: PIXI.Text, w: number, margin: number) {
+    t.anchor.set(0.5, 0);
+    t.position.set(w / 2, margin);
+  }
+  private placeBottom(t: PIXI.Text, w: number, h: number, margin: number) {
+    t.anchor.set(0.5, 1);
+    t.position.set(w / 2, h - margin);
+  }
+
+  private makeLabel(text: string): PIXI.Text {
+    const style: any = {
       fontSize: this.options.fontSize,
       fill: this.options.color,
       fontFamily: this.options.fontFamily,
       fontWeight: 'bold',
-    } as any;
-
-    const margin = this.options.margin;
-
-    // Left edge label (negative i direction)
-    const leftLabel = new PIXI.Text(iLabels[1], textStyle);
-    leftLabel.anchor.set(0, 0.5);
-    leftLabel.position.set(margin, contentH / 2);
-    this.container.addChild(leftLabel);
-    this.labels.push(leftLabel);
-
-    // Right edge label (positive i direction)
-    const rightLabel = new PIXI.Text(iLabels[0], textStyle);
-    rightLabel.anchor.set(1, 0.5);
-    rightLabel.position.set(contentW - margin, contentH / 2);
-    this.container.addChild(rightLabel);
-    this.labels.push(rightLabel);
-
-    // Note: The Y-axis is flipped in the container (scale.y is negative),
-    // so "top" in screen space corresponds to the positive j direction.
-    // Bottom edge label (negative j direction)
-    const bottomLabel = new PIXI.Text(jLabels[1], textStyle);
-    bottomLabel.anchor.set(0.5, 1);
-    bottomLabel.position.set(contentW / 2, contentH - margin);
-    this.container.addChild(bottomLabel);
-    this.labels.push(bottomLabel);
-
-    // Top edge label (positive j direction)
-    const topLabel = new PIXI.Text(jLabels[0], textStyle);
-    topLabel.anchor.set(0.5, 0);
-    topLabel.position.set(contentW / 2, margin);
-    this.container.addChild(topLabel);
-    this.labels.push(topLabel);
-
-    return this.container;
+    };
+    if (this.options.strokeWidth > 0) {
+      style.stroke = { color: this.options.strokeColor, width: this.options.strokeWidth };
+    }
+    const label = new PIXI.Text(text, style);
+    label.anchor.set(0.5, 0.5);
+    return label;
   }
 
   /**

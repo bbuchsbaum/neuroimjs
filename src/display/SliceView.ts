@@ -1,7 +1,7 @@
 // File: src/display/SliceView.ts
 
 import * as PIXI from 'pixi.js';
-import { SliceLayer } from './SliceLayer';
+import { SliceLayer, ScreenLayoutContext } from './SliceLayer';
 import { AxisSet3D } from '../geometry/Axis';
 import { ImageLayer } from './ImageLayer';
 import { CrossHair } from './CrossHair';  // note: updated CrossHair that requires a transformer
@@ -32,6 +32,10 @@ interface SliceViewOptions {
 export class SliceView implements ISliceView {
   public app!: PIXI.Application;
   public mainContainer!: PIXI.Container;
+  // Unscaled, stage-level container for screen-space overlays (e.g. orientation
+  // labels). It sits on top of mainContainer and is never scaled or Y-flipped,
+  // so its children are positioned directly in viewport pixel coordinates.
+  public overlayContainer!: PIXI.Container;
   private canvas: HTMLCanvasElement | null = null;
   public slider: HTMLInputElement | null = null;
   public coordinateTransformer!: CoordinateTransformer;
@@ -143,6 +147,12 @@ export class SliceView implements ISliceView {
     // 4) Main container for slices
     this.mainContainer = new PIXI.Container();
     this.app.stage.addChild(this.mainContainer);
+
+    // 4b) Overlay container for screen-space layers (orientation labels, etc.).
+    // Added after mainContainer so it renders on top, and left at the identity
+    // transform so its children live in viewport pixel coordinates.
+    this.overlayContainer = new PIXI.Container();
+    this.app.stage.addChild(this.overlayContainer);
 
     // 5) Container style - position: relative for slider absolute positioning
     this.domElement.style.position = 'relative';
@@ -289,6 +299,7 @@ export class SliceView implements ISliceView {
 
     // Clear old
     this.mainContainer.removeChildren();
+    this.overlayContainer.removeChildren();
 
     // Render main image
     const index = this.model.currentSliceIndex;
@@ -303,16 +314,19 @@ export class SliceView implements ISliceView {
       this.mainContainer.addChild(layerContent);
     }
 
-    // Render overlays
+    // Render overlays. Screen-space layers (e.g. orientation labels) go into the
+    // unscaled overlayContainer so they keep a fixed pixel size and are excluded
+    // from the image fit-bounds; all other layers render in image content space.
     this.layers.forEach(layer => {
+      const target = layer.screenSpace ? this.overlayContainer : this.mainContainer;
       const overlay = layer.renderSlice(
         index,
         this.model.currentCoord,
         this.viewAxes,
-        this.mainContainer
+        target
       );
       if (overlay) {
-        this.mainContainer.addChild(overlay);
+        target.addChild(overlay);
       }
     });
 
@@ -393,6 +407,41 @@ export class SliceView implements ISliceView {
     const targetWidth = Math.max(1, Math.round(availableWidth));
     const targetHeight = Math.max(1, Math.round(availableHeight));
     renderer.resize(targetWidth, targetHeight);
+
+    // Re-pin screen-space overlays (orientation labels, etc.) to the viewport.
+    // Done here so labels stay pinned through render, resize, zoom, and pan.
+    this.layoutScreenSpaceLayers(availableWidth, availableHeight);
+  }
+
+  /**
+   * Project a point from image-content space (the pre-scale coordinate space the
+   * slice sprite occupies) to screen pixels, using the live mainContainer
+   * transform. Mirrors PIXI's local→global mapping for an axis-aligned,
+   * possibly Y-flipped, scaled, and translated container.
+   */
+  private projectContentToScreen(contentX: number, contentY: number): { x: number; y: number } {
+    const c = this.mainContainer;
+    return {
+      x: (contentX - c.pivot.x) * c.scale.x + c.position.x,
+      y: (contentY - c.pivot.y) * c.scale.y + c.position.y,
+    };
+  }
+
+  /**
+   * Lay out all screen-space layers against the current viewport geometry.
+   */
+  private layoutScreenSpaceLayers(width: number, height: number): void {
+    if (!this.layers.length) return;
+    const ctx: ScreenLayoutContext = {
+      width,
+      height,
+      project: (cx: number, cy: number) => this.projectContentToScreen(cx, cy),
+    };
+    this.layers.forEach(layer => {
+      if (layer.screenSpace && typeof layer.layoutScreen === 'function') {
+        layer.layoutScreen(ctx);
+      }
+    });
   }
 
   /**

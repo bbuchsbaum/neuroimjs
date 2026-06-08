@@ -55,7 +55,11 @@ export type { ViewSynchronizerOptions } from './display/ViewSynchronizer';
 export type { ISliceModel, ISliceView, ISliceController, ICoordinateTransformer } from './display/interfaces';
 
 // Export SliceLayer interface for custom layer development (PUBLIC API)
-export type { SliceLayer } from './display/SliceLayer';
+export type { SliceLayer, ScreenLayoutContext } from './display/SliceLayer';
+
+// Orientation labels (L/R/A/P/S/I) overlay
+export { OrientationLabelLayer } from './display/OrientationLabelLayer';
+export type { OrientationLabelOptions } from './display/OrientationLabelLayer';
 
 // Export concrete classes for backward compatibility
 export { SliceModel } from './display/SliceModel';

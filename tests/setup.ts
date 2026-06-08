@@ -55,6 +55,28 @@ vi.mock('pixi.js', () => {
     constructor(texture?: any) { super(); if (texture) this.texture = texture; }
   }
 
+  class TextStyle {
+    constructor(public style: any = {}) { Object.assign(this, style); }
+  }
+
+  class Text extends Container {
+    text: string;
+    style: any;
+    anchor = { x: 0, y: 0, set: (x: number, y: number) => { this.anchor.x = x; this.anchor.y = y; } } as any;
+    // Support both the v8 options form `new Text({ text, style })` and the
+    // legacy positional form `new Text(text, style)` used throughout the code.
+    constructor(textOrOptions?: any, style?: any) {
+      super();
+      if (textOrOptions && typeof textOrOptions === 'object' && 'text' in textOrOptions) {
+        this.text = String(textOrOptions.text ?? '');
+        this.style = textOrOptions.style ?? {};
+      } else {
+        this.text = textOrOptions != null ? String(textOrOptions) : '';
+        this.style = style ?? {};
+      }
+    }
+  }
+
   class Application {
     renderer: any;
     stage: any;
@@ -78,7 +100,7 @@ vi.mock('pixi.js', () => {
     destroy(_: any = {}) {}
   }
 
-  return { Texture, Container, Graphics, Sprite, Application };
+  return { Texture, Container, Graphics, Sprite, Text, TextStyle, Application };
 });
 
 // Mock canvas module

@@ -155,4 +155,46 @@ export interface SliceLayer {
    * Optional method to handle layer-specific updates.
    */
   update?(params: any): void; // Generic update method for flexibility
+
+  /**
+   * If `true`, this layer renders in **screen-pixel space** rather than in the
+   * scaled/Y-flipped image content space.
+   *
+   * The container returned by {@link renderSlice} is added to a dedicated,
+   * unscaled overlay container that sits on top of the image. Such layers are
+   * excluded from the image's fit-to-screen bounds (so they never affect the
+   * image scale) and must position their content using viewport pixel
+   * coordinates via {@link layoutScreen}.
+   *
+   * Use this for overlays that should stay a constant size and stay pinned to
+   * the viewport (orientation labels, scale bars, fixed HUD text) instead of
+   * tracking the anatomy.
+   */
+  screenSpace?: boolean;
+
+  /**
+   * Called for {@link screenSpace} layers after every fit-to-screen pass (i.e.
+   * on render, resize, zoom, and pan) with the current viewport geometry.
+   * Implementations should (re)position their content in screen pixels here.
+   *
+   * @param ctx - Current viewport size and a projector from image-content
+   *              coordinates to screen pixels.
+   */
+  layoutScreen?(ctx: ScreenLayoutContext): void;
+}
+
+/**
+ * Geometry passed to a {@link SliceLayer.layoutScreen} implementation.
+ */
+export interface ScreenLayoutContext {
+  /** Viewport width in screen pixels. */
+  width: number;
+  /** Viewport height in screen pixels. */
+  height: number;
+  /**
+   * Projects a point from image-content space (the pre-scale coordinate space
+   * the slice sprite occupies: x along the i-axis, y along the j-axis) to
+   * screen pixels, accounting for the current scale, Y-flip, zoom, and pan.
+   */
+  project(contentX: number, contentY: number): { x: number; y: number };
 }

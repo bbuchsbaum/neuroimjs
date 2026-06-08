@@ -14,6 +14,9 @@ export { VolStack } from './display/VolStack';
 export { DepthEnhancedLayer } from './display/DepthEnhancedLayer';
 export type { DepthEnhancedOptions } from './display/DepthEnhancedLayer';
 
+export { OrientationLabelLayer } from './display/OrientationLabelLayer';
+export type { OrientationLabelOptions } from './display/OrientationLabelLayer';
+
 export { ColorMap } from './display/ColorMap';
 export { ColorMapFactory } from './display/ColorMapFactory';
 

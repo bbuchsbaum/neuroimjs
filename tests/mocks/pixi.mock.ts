@@ -131,18 +131,26 @@ export function createPixiMock() {
     destroy: vi.fn(),
   });
 
-  const mockText = () => ({
-    position: { 
-      set: vi.fn(),
-      x: 0,
-      y: 0
-    },
-    text: '',
-    style: {},
-    visible: true,
-    alpha: 1,
-    destroy: vi.fn(),
-  });
+  const mockText = (textOrOptions?: any, style?: any) => {
+    const obj: any = {
+      anchor: { x: 0, y: 0, set(x: number, y: number) { obj.anchor.x = x; obj.anchor.y = y; } },
+      position: { x: 0, y: 0, set(x: number, y: number) { obj.position.x = x; obj.position.y = y; } },
+      text: '',
+      style: {},
+      visible: true,
+      alpha: 1,
+      destroy: vi.fn(),
+    };
+    // Support both `new Text({ text, style })` (v8) and `new Text(text, style)`.
+    if (textOrOptions && typeof textOrOptions === 'object' && 'text' in textOrOptions) {
+      obj.text = String(textOrOptions.text ?? '');
+      obj.style = textOrOptions.style ?? {};
+    } else if (textOrOptions != null) {
+      obj.text = String(textOrOptions);
+      obj.style = style ?? {};
+    }
+    return obj;
+  };
 
   // Create the main Application mock as a class with proper prototype
   class MockApplication {
