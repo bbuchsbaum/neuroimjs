@@ -633,7 +633,8 @@ export function partition(
   x: NeuroVol,
   k: number,
   method: string = 'kmeans',
-  mask?: LogicalNeuroVol
+  mask?: LogicalNeuroVol,
+  seed: number = 1
 ): ClusteredNeuroVol {
   // Get mask - either provided or non-zero voxels
   let maskData: Uint8Array;
@@ -662,8 +663,8 @@ export function partition(
   }
 
   if (method === 'kmeans') {
-    // Simple k-means implementation
-    const labels = simpleKMeans(values, k);
+    // Simple k-means implementation (deterministic given the seed)
+    const labels = simpleKMeans(values, k, seed);
     
     // Create label array
     const labelArray = new Float32Array(x.space.size);
@@ -686,24 +687,72 @@ export function partition(
 }
 
 /**
- * Simple k-means clustering implementation.
- * For production use, consider using a proper ML library.
+ * Deterministic PRNG (mulberry32). Used so clustering is reproducible and
+ * independent of global `Math.random` state (and therefore of test ordering).
  */
-function simpleKMeans(values: number[], k: number): number[] {
+function mulberry32(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/**
+ * Simple k-means clustering implementation.
+ *
+ * Initialization uses seeded k-means++: the first center is chosen at random and
+ * each subsequent center is drawn with probability proportional to its squared
+ * distance from the nearest existing center. This spreads centers across the
+ * value range so distinct regions reliably land in distinct clusters, and — being
+ * seeded — the result is deterministic rather than dependent on global RNG state.
+ *
+ * @param values - Flat array of scalar values to cluster.
+ * @param k - Number of clusters.
+ * @param seed - PRNG seed for reproducible initialization.
+ */
+function simpleKMeans(values: number[], k: number, seed: number = 1): number[] {
   const n = values.length;
   const labels = new Array(n).fill(0);
-  
-  // Initialize centers randomly
+  const rand = mulberry32(seed);
+
+  // k-means++ initialization (seeded).
   const centers = new Float32Array(k);
-  const indices = new Set<number>();
-  while (indices.size < k) {
-    indices.add(Math.floor(Math.random() * n));
+  centers[0] = values[Math.floor(rand() * n)];
+  const dist2 = new Float64Array(n);
+  for (let c = 1; c < k; c++) {
+    let total = 0;
+    for (let p = 0; p < n; p++) {
+      let best = Infinity;
+      for (let j = 0; j < c; j++) {
+        const d = values[p] - centers[j];
+        const dd = d * d;
+        if (dd < best) best = dd;
+      }
+      dist2[p] = best;
+      total += best;
+    }
+    // Pick the next center proportional to squared distance; fall back to a
+    // uniform draw when every remaining point coincides with a chosen center.
+    let chosen: number;
+    if (total > 0) {
+      let target = rand() * total;
+      chosen = n - 1;
+      for (let p = 0; p < n; p++) {
+        target -= dist2[p];
+        if (target <= 0) {
+          chosen = p;
+          break;
+        }
+      }
+    } else {
+      chosen = Math.floor(rand() * n);
+    }
+    centers[c] = values[chosen];
   }
-  let i = 0;
-  for (const idx of indices) {
-    centers[i++] = values[idx];
-  }
-  
+
   // Iterate until convergence
   let changed = true;
   let iterations = 0;

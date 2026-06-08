@@ -6,11 +6,6 @@ import { VolLayer } from '../display/VolLayer';
 import { VolStack } from '../display/VolStack';
 import { Range, Threshold } from '../types';  // Import the types
 
-// Import Shoelace components
-import '@shoelace-style/shoelace/dist/components/select/select.js';
-import '@shoelace-style/shoelace/dist/components/option/option.js';
-import '@shoelace-style/shoelace/dist/components/input/input.js';
-import '@shoelace-style/shoelace/dist/components/range/range.js';
 import 'nouislider/dist/nouislider.css';
 // Import our custom RangeSlider
 import './RangeSlider2';
@@ -59,86 +54,148 @@ export class LayerControlPanel extends LitElement {
       --input-focus: #4dada7;
     }
 
-    :host([theme="dark"]) sl-select::part(listbox) {
-      background: #2a2a2a;
-    }
-
-    :host([theme="dark"]) sl-option::part(base) {
-      background: #2a2a2a;
-      color: #b0a89e;
-    }
-
-    :host([theme="dark"]) sl-option::part(base):hover {
-      background: #3a3a3a;
-    }
-
-    :host([theme="dark"]) sl-select::part(combobox),
-    :host([theme="dark"]) sl-input::part(base) {
-      color: #d0c8be;
-    }
-
     :host([theme="dark"]) .threshold-caption {
       color: rgba(180, 170, 160, 0.6);
     }
 
-    /* Scoped Shoelace design tokens */
-    :host {
-      --sl-color-primary-600: var(--accent-teal);
-      --sl-color-primary-500: var(--accent-teal);
-      --sl-input-border-color: var(--input-border);
-      --sl-input-border-color-focus: var(--input-focus);
-      --sl-input-background-color: var(--input-bg);
-      --sl-focus-ring-color: rgba(26, 95, 90, 0.3);
-      --sl-z-index-dropdown: 10000;
-      --sl-panel-background-color: #ffffff;
-      --sl-panel-border-color: var(--input-border);
+    /* Native form controls (self-contained; no Shoelace dependency) */
+    select.native-select {
+      display: block;
+      width: 100%;
+      margin-bottom: 16px;
+      padding: 7px 10px;
+      font-family: inherit;
+      font-size: 13px;
+      color: var(--label-color);
+      background: var(--input-bg);
+      border: 1px solid var(--input-border);
+      border-radius: 4px;
+      cursor: pointer;
     }
 
-    sl-select, sl-input, sl-range {
+    select.native-select:focus-visible {
+      outline: none;
+      border-color: var(--input-focus);
+      box-shadow: 0 0 0 2px rgba(26, 95, 90, 0.15);
+    }
+
+    input.native-range {
+      display: block;
+      width: 100%;
+      margin: 8px 0 16px;
+      height: 6px;
+      border-radius: 3px;
+      background: var(--input-border);
+      cursor: pointer;
+      -webkit-appearance: none;
+      appearance: none;
+    }
+
+    input.native-range:focus {
+      outline: none;
+    }
+
+    input.native-range:focus-visible {
+      box-shadow: 0 0 0 3px rgba(26, 95, 90, 0.25);
+    }
+
+    input.native-range::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: var(--accent-teal);
+      border: 2px solid #ffffff;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+      cursor: pointer;
+    }
+
+    input.native-range::-moz-range-thumb {
+      width: 16px;
+      height: 16px;
+      border: 2px solid #ffffff;
+      border-radius: 50%;
+      background: var(--accent-teal);
+      cursor: pointer;
+    }
+
+    input.native-range::-moz-range-track {
+      height: 6px;
+      border-radius: 3px;
+      background: var(--input-border);
+    }
+
+    /* Numeric entry boxes paired with sliders */
+    input.native-number {
+      width: 88px;
+      padding: 6px 8px;
+      font-family: inherit;
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
+      color: var(--label-color);
+      background: var(--input-bg);
+      border: 1px solid var(--input-border);
+      border-radius: 4px;
+      box-sizing: border-box;
+    }
+
+    input.native-number:focus-visible {
+      outline: none;
+      border-color: var(--input-focus);
+      box-shadow: 0 0 0 2px rgba(44, 111, 223, 0.18);
+    }
+
+    .value-inputs {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      margin-top: 8px;
       margin-bottom: 16px;
     }
 
-    /* Alpha slider track styling */
-    sl-range {
-      --track-color-active: var(--accent-teal);
-      --track-color-inactive: var(--input-border);
-      --track-height: 6px;
-      --thumb-size: 18px;
+    .alpha-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 16px;
     }
 
-    sl-range::part(base) {
-      padding: 8px 0;
+    .alpha-row input.native-range {
+      flex: 1 1 auto;
+      margin: 0;
     }
 
-    sl-range::part(input) {
-      height: var(--track-height);
-      background: var(--track-color-inactive);
-      border-radius: 3px;
+    .alpha-row input.native-number {
+      flex: 0 0 auto;
     }
 
-    sl-range::part(input)::-webkit-slider-runnable-track {
-      height: var(--track-height);
-      background: var(--track-color-inactive);
-      border-radius: 3px;
+    .reset-btn {
+      width: 100%;
+      margin-top: 4px;
+      padding: 9px 12px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      font-family: inherit;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--label-color);
+      background: var(--input-bg);
+      border: 1px solid var(--input-border);
+      border-radius: 6px;
+      cursor: pointer;
     }
 
-    sl-range::part(input)::-moz-range-track {
-      height: var(--track-height);
-      background: var(--track-color-inactive);
-      border-radius: 3px;
+    .reset-btn:hover {
+      border-color: var(--input-focus);
+      color: var(--input-focus);
     }
 
-    sl-range::part(input)::-webkit-slider-thumb {
-      margin-top: calc((var(--track-height) - var(--thumb-size)) / 2);
-    }
-
-    sl-select {
-      position: relative;
-      z-index: 100;
-    }
-
-    sl-select[open] {
-      z-index: 10000;
+    .reset-btn:focus-visible {
+      outline: none;
+      box-shadow: 0 0 0 2px rgba(44, 111, 223, 0.18);
     }
 
     .visibility-toggle {
@@ -161,53 +218,12 @@ export class LayerControlPanel extends LitElement {
       cursor: pointer;
     }
 
-    sl-select::part(combobox),
-    sl-input::part(base) {
-      background: var(--input-bg);
-      border: 1px solid var(--input-border);
-      border-radius: 4px;
-    }
-
-    sl-select::part(combobox):focus-within,
-    sl-input::part(base):focus-within {
-      border-color: var(--input-focus);
-      box-shadow: 0 0 0 2px rgba(26, 95, 90, 0.15);
-    }
-
-    /* Dropdown menu styling - ensure opaque background */
-    sl-select::part(listbox) {
-      background: #ffffff;
-      border: 1px solid var(--input-border);
-      border-radius: 4px;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-      z-index: 10000;
-    }
-
-    sl-select::part(popup) {
-      z-index: 10000;
-    }
-
-    sl-option::part(base) {
-      background: #ffffff;
-      color: var(--label-color);
-    }
-
-    sl-option::part(base):hover {
-      background: #f5f2ec;
-    }
-
-    sl-option[aria-selected="true"]::part(base) {
-      background: var(--accent-teal);
-      color: #ffffff;
-    }
-
     .label {
       display: block;
       margin-bottom: 8px;
-      font-size: 10px;
+      font-size: 13px;
       font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
+      letter-spacing: normal;
       color: var(--label-color);
     }
 
@@ -223,11 +239,6 @@ export class LayerControlPanel extends LitElement {
       display: flex;
       align-items: center;
       margin-bottom: 16px;
-    }
-
-    .range-slider sl-range {
-      flex-grow: 1;
-      margin-right: 16px;
     }
 
     .range-slider span {
@@ -262,8 +273,8 @@ export class LayerControlPanel extends LitElement {
     .threshold-caption {
       font-size: 11px;
       color: rgba(90, 82, 72, 0.7);
-      margin-top: -8px;
-      margin-bottom: 12px;
+      margin-top: 0;
+      margin-bottom: 16px;
       line-height: 1.4;
     }
 
@@ -332,6 +343,19 @@ export class LayerControlPanel extends LitElement {
   @state() private visible: boolean = true;
   private volLayer!: VolLayer;
 
+  // Per-layer defaults captured on load, used by "Reset to defaults".
+  private defaultRange: Range = [0, 10000];
+  private defaultThreshold: Threshold = [0, 0];
+  private defaultAlpha: number = 1;
+  private defaultColormap: string = 'Viridis';
+
+  private captureDefaults() {
+    this.defaultRange = [this.range[0], this.range[1]];
+    this.defaultThreshold = [this.threshold[0], this.threshold[1]];
+    this.defaultAlpha = this.alpha;
+    this.defaultColormap = this.selectedColormap;
+  }
+
   updated(changedProperties: Map<string, any>) {
     if (changedProperties.has('imageLayer') && this.imageLayer) {
       this.initializeFromImageLayer();
@@ -358,6 +382,7 @@ export class LayerControlPanel extends LitElement {
     // Get the volume's actual data range for display
     this.volumeRange = this.volLayer.getVolumeRange();
 
+    this.captureDefaults();
     this.requestUpdate();
   }
 
@@ -375,38 +400,39 @@ export class LayerControlPanel extends LitElement {
     this.visible = this.volLayer.visible;
     this.volumeRange = this.volLayer.getVolumeRange();
 
+    this.captureDefaults();
     this.requestUpdate();
   }
 
   render() {
     return html`
-      <div class="label">Select Layer:</div>
-      <sl-select @sl-change=${this.onLayerChange} value=${this.selectedLayerId}>
+      <div class="label">Select layer</div>
+      <select class="native-select" aria-label="Select layer" @change=${this.onLayerChange}>
         ${this.availableLayers.map(layer => html`
-          <sl-option value=${layer}>${layer}</sl-option>
+          <option value=${layer} ?selected=${layer === this.selectedLayerId}>${layer}</option>
         `)}
-      </sl-select>
+      </select>
 
       <div class="visibility-toggle">
         <input type="checkbox" id="visibility-check" ?checked=${this.visible} @change=${this.onVisibilityChange} />
         <label for="visibility-check">Visible</label>
       </div>
 
-      <div class="label">Colormap:</div>
-      <sl-select @sl-change=${this.onColormapChange} value=${this.selectedColormap}>
+      <div class="label">Colormap</div>
+      <select class="native-select" aria-label="Colormap" @change=${this.onColormapChange}>
         ${this.colormaps.map(colormap => html`
-          <sl-option value=${colormap}>${colormap}</sl-option>
+          <option value=${colormap} ?selected=${colormap === this.selectedColormap}>${colormap}</option>
         `)}
-      </sl-select>
+      </select>
 
       <div class="colorbar" style=${`background: linear-gradient(to right, ${this.getColormapGradient(this.selectedColormap)})`}></div>
 
-      <div class="label">Range:</div>
+      <div class="label">Range</div>
       <div class="range-slider-container">
         ${this.volumeRange ? html`
           <range-slider
             .min=${this.volumeRange[0]}
-            .max=${this.volumeRange[1]} 
+            .max=${this.volumeRange[1]}
             .start=${[this.range[0], this.range[1]]}
             @range-update=${this.onRangeUpdate}
           ></range-slider>
@@ -414,9 +440,14 @@ export class LayerControlPanel extends LitElement {
           <div>Loading range data...</div>
         `}
       </div>
+      <div class="value-inputs">
+        <input type="number" class="native-number" aria-label="Range low"
+               .value=${this.fmt(this.range[0])} @change=${this.onRangeLowInput} />
+        <input type="number" class="native-number" aria-label="Range high"
+               .value=${this.fmt(this.range[1])} @change=${this.onRangeHighInput} />
+      </div>
 
-      <div class="label">Threshold:</div>
-      <div class="threshold-caption">Values outside [low, high] are visible; values between are transparent.</div>
+      <div class="label">Threshold</div>
       <div class="range-slider-container">
         ${this.volumeRange ? html`
           <range-slider
@@ -429,14 +460,30 @@ export class LayerControlPanel extends LitElement {
           <div>Loading threshold data...</div>
         `}
       </div>
+      <div class="value-inputs">
+        <input type="number" class="native-number" aria-label="Threshold low"
+               .value=${this.fmt(this.threshold[0])} @change=${this.onThresholdLowInput} />
+        <input type="number" class="native-number" aria-label="Threshold high"
+               .value=${this.fmt(this.threshold[1])} @change=${this.onThresholdHighInput} />
+      </div>
+      <div class="threshold-caption">Values outside [low, high] are visible; values between are transparent.</div>
 
-      <div class="label">Alpha:</div>
-      <sl-range min="0" max="1" step="0.01" .value=${this.alpha} @sl-input=${this.onAlphaChange}></sl-range>
+      <div class="label">Alpha</div>
+      <div class="alpha-row">
+        <input class="native-range" type="range" min="0" max="1" step="0.01"
+               aria-label="Alpha" .value=${String(this.alpha)} @input=${this.onAlphaChange} />
+        <input type="number" class="native-number" min="0" max="1" step="0.01"
+               aria-label="Alpha value" .value=${this.alpha.toFixed(2)} @change=${this.onAlphaInput} />
+      </div>
+
+      <button class="reset-btn" type="button" @click=${this.onReset}>
+        <span aria-hidden="true">↺</span> Reset to defaults
+      </button>
     `;
   }
 
  
-  private onLayerChange(e: CustomEvent) {
+  private onLayerChange(e: Event) {
     this.selectedLayerId = (e.target as any).value;
     // Resolve the VolStack from either the direct volStack property or the imageLayer
     const stack = this._volStack ?? this.imageLayer?.getVolStack();
@@ -450,12 +497,13 @@ export class LayerControlPanel extends LitElement {
         this.threshold = selectedLayer.getThreshold();
         this.volumeRange = selectedLayer.getVolumeRange();
         this.visible = selectedLayer.visible;
+        this.captureDefaults();
         this.requestUpdate();
       }
     }
   }
 
-  private onColormapChange(e: CustomEvent) {
+  private onColormapChange(e: Event) {
     this.selectedColormap = (e.target as any).value;
     this.onColormapChanged();
     this.requestUpdate();
@@ -503,13 +551,95 @@ export class LayerControlPanel extends LitElement {
     this.requestUpdate();
   }
 
-  private onAlphaChange(e: CustomEvent) {
+  private onAlphaChange(e: Event) {
     this.alpha = parseFloat((e.target as any).value);
     if (this.volLayer) {
       this.volLayer.setOpacity(this.alpha);
       // Update all ImageLayers and force re-render
       this.updateAllImageLayers({ alpha: this.alpha });
     }
+  }
+
+  /** Format a numeric value for display in a number input. */
+  private fmt(v: number): string {
+    return Number.isFinite(v) ? v.toFixed(2) : '';
+  }
+
+  private applyRange() {
+    if (this.volLayer) {
+      this.volLayer.setRange(this.range);
+      this.updateAllImageLayers({ range: this.range });
+    }
+    this.requestUpdate();
+  }
+
+  private applyThreshold() {
+    if (this.volLayer) {
+      this.volLayer.setThreshold(this.threshold);
+      this.updateAllImageLayers({ threshold: this.threshold });
+    }
+    this.requestUpdate();
+  }
+
+  private onRangeLowInput(e: Event) {
+    const v = parseFloat((e.target as HTMLInputElement).value);
+    if (!Number.isFinite(v)) return;
+    this.range = [v, this.range[1]];
+    this.applyRange();
+  }
+
+  private onRangeHighInput(e: Event) {
+    const v = parseFloat((e.target as HTMLInputElement).value);
+    if (!Number.isFinite(v)) return;
+    this.range = [this.range[0], v];
+    this.applyRange();
+  }
+
+  private onThresholdLowInput(e: Event) {
+    const v = parseFloat((e.target as HTMLInputElement).value);
+    if (!Number.isFinite(v)) return;
+    this.threshold = [v, this.threshold[1]];
+    this.applyThreshold();
+  }
+
+  private onThresholdHighInput(e: Event) {
+    const v = parseFloat((e.target as HTMLInputElement).value);
+    if (!Number.isFinite(v)) return;
+    this.threshold = [this.threshold[0], v];
+    this.applyThreshold();
+  }
+
+  private onAlphaInput(e: Event) {
+    let v = parseFloat((e.target as HTMLInputElement).value);
+    if (!Number.isFinite(v)) return;
+    v = Math.max(0, Math.min(1, v));
+    this.alpha = v;
+    if (this.volLayer) {
+      this.volLayer.setOpacity(this.alpha);
+      this.updateAllImageLayers({ alpha: this.alpha });
+    }
+    this.requestUpdate();
+  }
+
+  private onReset() {
+    this.range = [this.defaultRange[0], this.defaultRange[1]];
+    this.threshold = [this.defaultThreshold[0], this.defaultThreshold[1]];
+    this.alpha = this.defaultAlpha;
+    this.selectedColormap = this.defaultColormap;
+    if (this.volLayer) {
+      const cmap = ColorMap.fromPreset(this.selectedColormap);
+      this.volLayer.setRange(this.range);
+      this.volLayer.setThreshold(this.threshold);
+      this.volLayer.setOpacity(this.alpha);
+      this.volLayer.setColormap(cmap);
+      this.updateAllImageLayers({
+        range: this.range,
+        threshold: this.threshold,
+        alpha: this.alpha,
+        colormap: cmap,
+      });
+    }
+    this.requestUpdate();
   }
 
   private onVisibilityChange(e: Event) {

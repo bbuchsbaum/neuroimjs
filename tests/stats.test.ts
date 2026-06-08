@@ -409,6 +409,28 @@ describe('Statistical Operations', () => {
       expect(nonZeroLabels.length).toBeGreaterThan(0);
     });
 
+    it('partitions deterministically and separates distinct regions (seeded k-means++)', () => {
+      // Three clearly separated value regions.
+      const data = new Float32Array(1000);
+      for (let i = 0; i < 300; i++) data[i] = 1;
+      for (let i = 300; i < 700; i++) data[i] = 5;
+      for (let i = 700; i < 1000; i++) data[i] = 10;
+      const vol = new FloatNeuroVol(space3d, data);
+
+      const a = Array.from(partition(vol, 3).asDense().getData());
+      const b = Array.from(partition(vol, 3).asDense().getData());
+
+      // Deterministic: identical labels across runs, independent of global RNG state.
+      expect(a).toEqual(b);
+
+      // k-means++ resolves the three distinct regions into three clusters,
+      // each region internally uniform.
+      expect(new Set(a).size).toBe(3);
+      expect(new Set(a.slice(0, 300)).size).toBe(1);
+      expect(new Set(a.slice(300, 700)).size).toBe(1);
+      expect(new Set(a.slice(700, 1000)).size).toBe(1);
+    });
+
     it('should respect mask when partitioning', () => {
       const mask = new LogicalNeuroVol(space3d);
       const maskData = mask.getData() as Uint8Array;
