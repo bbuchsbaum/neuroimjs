@@ -137,49 +137,56 @@ export class OrientationLabelLayer implements SliceLayer {
     }
 
     const { width, height, project } = ctx;
+    const insets = ctx.insets ?? { top: 0, right: 0, bottom: 0, left: 0 };
     const margin = this.options.margin;
 
-    // Project the endpoints of each in-plane axis to screen pixels.
-    const negI = project(0, this.contentH / 2);
-    const posI = project(this.contentW, this.contentH / 2);
-    const negJ = project(this.contentW / 2, 0);
-    const posJ = project(this.contentW / 2, this.contentH);
+    // Safe-area edges: keep labels clear of reserved UI (e.g. the slice slider).
+    const left = insets.left + margin;
+    const right = width - insets.right - margin;
+    const top = insets.top + margin;
+    const bottom = height - insets.bottom - margin;
+    const midX = insets.left + (width - insets.left - insets.right) / 2;
+    const midY = insets.top + (height - insets.top - insets.bottom) / 2;
 
     // The i-axis endpoints are horizontal on screen: the one with the smaller
     // screen-x is the left edge, the other the right edge.
+    const negI = project(0, this.contentH / 2);
+    const posI = project(this.contentW, this.contentH / 2);
     if (negI.x <= posI.x) {
-      this.placeLeft(this.textNegI, width, height, margin);
-      this.placeRight(this.textPosI, width, height, margin);
+      this.placeLeft(this.textNegI, left, midY);
+      this.placeRight(this.textPosI, right, midY);
     } else {
-      this.placeRight(this.textNegI, width, height, margin);
-      this.placeLeft(this.textPosI, width, height, margin);
+      this.placeRight(this.textNegI, right, midY);
+      this.placeLeft(this.textPosI, left, midY);
     }
 
     // The j-axis endpoints are vertical on screen: smaller screen-y is the top.
+    const negJ = project(this.contentW / 2, 0);
+    const posJ = project(this.contentW / 2, this.contentH);
     if (negJ.y <= posJ.y) {
-      this.placeTop(this.textNegJ, width, margin);
-      this.placeBottom(this.textPosJ, width, height, margin);
+      this.placeTop(this.textNegJ, midX, top);
+      this.placeBottom(this.textPosJ, midX, bottom);
     } else {
-      this.placeBottom(this.textNegJ, width, height, margin);
-      this.placeTop(this.textPosJ, width, margin);
+      this.placeBottom(this.textNegJ, midX, bottom);
+      this.placeTop(this.textPosJ, midX, top);
     }
   }
 
-  private placeLeft(t: PIXI.Text, _w: number, h: number, margin: number) {
+  private placeLeft(t: PIXI.Text, x: number, y: number) {
     t.anchor.set(0, 0.5);
-    t.position.set(margin, h / 2);
+    t.position.set(x, y);
   }
-  private placeRight(t: PIXI.Text, w: number, h: number, margin: number) {
+  private placeRight(t: PIXI.Text, x: number, y: number) {
     t.anchor.set(1, 0.5);
-    t.position.set(w - margin, h / 2);
+    t.position.set(x, y);
   }
-  private placeTop(t: PIXI.Text, w: number, margin: number) {
+  private placeTop(t: PIXI.Text, x: number, y: number) {
     t.anchor.set(0.5, 0);
-    t.position.set(w / 2, margin);
+    t.position.set(x, y);
   }
-  private placeBottom(t: PIXI.Text, w: number, h: number, margin: number) {
+  private placeBottom(t: PIXI.Text, x: number, y: number) {
     t.anchor.set(0.5, 1);
-    t.position.set(w / 2, h - margin);
+    t.position.set(x, y);
   }
 
   private makeLabel(text: string): PIXI.Text {

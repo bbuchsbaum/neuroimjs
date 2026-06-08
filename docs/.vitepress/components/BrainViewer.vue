@@ -79,24 +79,18 @@ onBeforeUnmount(() => {
   <figure class="brain-viewer">
     <div class="brain-viewer__stage" :style="{ height: `${height}px` }">
       <div ref="el" class="brain-viewer__canvas" />
-      <button
-        v-if="state === 'ready'"
-        type="button"
-        class="brain-viewer__toggle"
-        :class="{ 'is-on': labelsOn }"
-        :aria-pressed="labelsOn"
-        title="Toggle anatomical orientation labels (L/R/A/P/S/I)"
-        @click="toggleLabels"
-      >
-        <span class="brain-viewer__toggle-dot" />
-        Labels
-      </button>
       <div v-if="state !== 'ready'" class="brain-viewer__overlay" :class="state">
         <div v-if="state === 'loading'" class="brain-viewer__spinner" />
         <p>{{ state === 'error' ? '⚠ ' + message : message }}</p>
       </div>
     </div>
-    <figcaption v-if="caption">{{ caption }}</figcaption>
+    <figcaption class="brain-viewer__footer">
+      <span class="brain-viewer__caption">{{ caption }}</span>
+      <label v-if="state === 'ready'" class="brain-viewer__labels-toggle">
+        <input type="checkbox" :checked="labelsOn" @change="toggleLabels" />
+        <span>Orientation labels</span>
+      </label>
+    </figcaption>
   </figure>
 </template>
 
@@ -105,48 +99,39 @@ onBeforeUnmount(() => {
   position: relative;
 }
 
-.brain-viewer__toggle {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  z-index: 2;
+.brain-viewer__footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  margin-top: 8px;
+}
+
+/* Keep the caption centered under the stage; the toggle floats to the right
+   without pushing it off-center. */
+.brain-viewer__caption {
+  flex: 0 1 auto;
+}
+
+.brain-viewer__labels-toggle {
+  margin-left: auto;
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  padding: 5px 11px;
+  gap: 6px;
   font-size: 12px;
-  font-weight: 500;
-  font-family: inherit;
-  color: var(--vp-c-text-1);
-  background: var(--vp-c-bg-soft);
-  border: 1px solid var(--vp-c-divider);
-  border-radius: 999px;
+  color: var(--vp-c-text-2);
   cursor: pointer;
-  opacity: 0.55;
-  transition: opacity 0.15s ease, border-color 0.15s ease;
+  user-select: none;
+  opacity: 0.7;
+  transition: opacity 0.15s ease;
 }
 
-.brain-viewer__stage:hover .brain-viewer__toggle {
+.brain-viewer__labels-toggle:hover {
   opacity: 1;
 }
 
-.brain-viewer__toggle:hover {
-  border-color: var(--vp-c-brand-1);
-}
-
-.brain-viewer__toggle-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--vp-c-divider);
-  transition: background 0.15s ease;
-}
-
-.brain-viewer__toggle.is-on {
-  opacity: 1;
-}
-
-.brain-viewer__toggle.is-on .brain-viewer__toggle-dot {
-  background: var(--vp-c-brand-1);
+.brain-viewer__labels-toggle input {
+  accent-color: var(--vp-c-brand-1);
+  cursor: pointer;
 }
 </style>

@@ -432,9 +432,13 @@ export class SliceView implements ISliceView {
    */
   private layoutScreenSpaceLayers(width: number, height: number): void {
     if (!this.layers.length) return;
+    // Reserve the bottom band occupied by the slice slider (bottom: 8px,
+    // height: 20px) so screen-space overlays don't collide with it.
+    const SLIDER_RESERVED_PX = 34;
     const ctx: ScreenLayoutContext = {
       width,
       height,
+      insets: { top: 0, right: 0, bottom: this.slider ? SLIDER_RESERVED_PX : 0, left: 0 },
       project: (cx: number, cy: number) => this.projectContentToScreen(cx, cy),
     };
     this.layers.forEach(layer => {

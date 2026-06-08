@@ -192,6 +192,13 @@ export interface ScreenLayoutContext {
   /** Viewport height in screen pixels. */
   height: number;
   /**
+   * Pixels reserved on each edge by other UI (e.g. the slice slider along the
+   * bottom). Screen-space layers should keep their content inside the safe area
+   * `[left, width - right] × [top, height - bottom]` so it does not collide with
+   * those widgets. Always present; defaults to zero on every edge.
+   */
+  insets: { top: number; right: number; bottom: number; left: number };
+  /**
    * Projects a point from image-content space (the pre-scale coordinate space
    * the slice sprite occupies: x along the i-axis, y along the j-axis) to
    * screen pixels, accounting for the current scale, Y-flip, zoom, and pan.

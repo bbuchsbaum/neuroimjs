@@ -14,12 +14,13 @@ function layout(
   axes: AxisSet3D,
   width: number,
   height: number,
-  project: ScreenLayoutContext['project']
+  project: ScreenLayoutContext['project'],
+  insets: ScreenLayoutContext['insets'] = { top: 0, right: 0, bottom: 0, left: 0 }
 ): { left: any; right: any; top: any; bottom: any } {
   const space = new NeuroSpace([10, 12, 14], [1, 1, 1], [0, 0, 0], axes);
   const layer = new OrientationLabelLayer(space);
   const container = layer.renderSlice(0, [0, 0, 0], axes, new PIXI.Container())!;
-  layer.layoutScreen({ width, height, project });
+  layer.layoutScreen({ width, height, insets, project });
 
   const byEdge: any = { left: null, right: null, top: null, bottom: null };
   for (const child of container.children as any[]) {
@@ -96,5 +97,25 @@ describe('OrientationLabelLayer', () => {
     expect(e.top.position.x).toBe(W / 2);
     expect(e.top.position.y).toBe(margin);
     expect(e.bottom.position.y).toBe(H - margin);
+  });
+
+  it('keeps labels inside the safe area when an edge is inset (e.g. the slider)', () => {
+    const margin = 6;
+    const W = 300;
+    const H = 240;
+    const bottomInset = 34;
+    const e = layout(AxisSet3D.AXIAL_LPI, W, H, FLIP_Y, {
+      top: 0,
+      right: 0,
+      bottom: bottomInset,
+      left: 0,
+    });
+    // Bottom label sits above the reserved band, not at the very bottom edge.
+    expect(e.bottom.position.y).toBe(H - bottomInset - margin);
+    // Side labels recenter within the (shorter) safe area rather than the full height.
+    expect(e.left.position.y).toBe((H - bottomInset) / 2);
+    expect(e.right.position.y).toBe((H - bottomInset) / 2);
+    // Top is unaffected (no top inset).
+    expect(e.top.position.y).toBe(margin);
   });
 });
