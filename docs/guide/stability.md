@@ -1,6 +1,6 @@
 # Stability & Roadmap
 
-neuroimjs is **`0.1.0`** — pre-1.0, and actively hardening toward 1.0. This page is the single source of truth for what you can build on. Unlike a static changelog, the statuses below were **verified against the current source and test suite** (930 passing tests at the time of writing), not just an audit snapshot.
+neuroimjs is **`0.1.0`** — pre-1.0, and actively hardening toward 1.0. This page is the single source of truth for what you can build on. Unlike a static changelog, the statuses below were **verified against the current source and a fully green test suite** (962 passing at the time of writing), not just an audit snapshot.
 
 Legend:
 
@@ -86,21 +86,19 @@ These appear in some older README snippets but **do not exist** — use the alte
 
 ## Polish in progress (not user-facing correctness)
 
-The unit suite is essentially green (**961 passing**). What remains is hardening and cleanup, not behavioural correctness:
+The unit suite is **fully green (962 passing)**. What remains is structural cleanup, not behavioural correctness:
 
-- **One flaky test** — a k-means `partition` test passes in isolation but can fail in a full-suite run because of shared RNG state. The fix is a seeded RNG; it does not affect the `partition` API itself.
 - **Consolidation** — some duplicate NIfTI / viewer / ROI implementations from earlier accretion still coexist. They work; they'll be merged behind the current APIs.
 - **Perf & hygiene** — a separable Gaussian optimization and dead-code removal are planned.
 
-Packaging and test-runner integrity (e2e excluded from the unit run, test files kept out of the published tarball, `TestVolumeFactory` no longer exported, types-first `exports`, lint restored) are **done**.
+Packaging and test-runner integrity (e2e excluded from the unit run, test files kept out of the published tarball, `TestVolumeFactory` no longer exported, types-first `exports`, lint restored) and clustering determinism (k-means now uses a seeded k-means++ initialization) are **done**.
 
 ## Roadmap
 
 In priority order:
 
-1. **Determinism** — seed the clustering RNG so the full suite is 100% green.
-2. **Consolidation** — merge the duplicate NIfTI / viewer / ROI implementations.
-3. **Hygiene & perf** — separable Gaussian, dead-code removal.
+1. **Consolidation** — merge the duplicate NIfTI / viewer / ROI implementations.
+2. **Hygiene & perf** — separable Gaussian, dead-code removal.
 
 ::: tip Found something off?
 If a feature marked <span class="stability-badge stable">stable</span> misbehaves, please [open an issue](https://github.com/bbuchsbaum/neuroimjs/issues) with a minimal repro — that's exactly what moves us to 1.0.

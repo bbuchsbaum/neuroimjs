@@ -69,5 +69,5 @@ await SimpleOrthogonalViewer.create(document.getElementById('viewer'), stack, {
 ```
 
 ::: tip Pre-1.0 — and actively hardening
-neuroimjs is at `0.1.0`. The viewer stack, core data structures, NIfTI I/O, geometry, processing, and analysis primitives are covered by a passing test suite. Current hardening is focused on test/packaging cleanup and consolidation. The **[Stability matrix](/guide/stability)** lists the verified, up-to-date status of every feature.
+neuroimjs is at `0.1.0`. The viewer stack, core data structures, NIfTI I/O, geometry, processing, and analysis primitives are covered by a fully green test suite. Remaining pre-1.0 work is structural consolidation — merging a few duplicate implementations behind the existing APIs. The **[Stability matrix](/guide/stability)** lists the verified, up-to-date status of every feature.
 :::
