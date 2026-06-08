@@ -28,6 +28,15 @@ export interface LoadedVolume {
 export interface MountOptions {
   crosshair?: boolean
   showSlider?: boolean
+  /** Show anatomical orientation labels (L/R/A/P/S/I) pinned to the viewport edges. */
+  orientationLabels?: boolean
+}
+
+/** Handle returned by {@link mountViewer}. */
+export interface ViewerHandle {
+  destroy(): void
+  /** Toggle the anatomical orientation labels at runtime. */
+  setOrientationLabels(visible: boolean): void
 }
 
 /**
@@ -93,7 +102,7 @@ export async function mountViewer(
   mode: ViewerMode,
   loaded: LoadedVolume,
   opts: MountOptions = {},
-): Promise<{ destroy(): void }> {
+): Promise<ViewerHandle> {
   const { vol, range } = loaded
   const grayscale = ColorMapFactory.createGrayscale({ range })
   const layer = new VolLayer('volume', vol, grayscale, range)
@@ -101,14 +110,19 @@ export async function mountViewer(
 
   const crosshair = opts.crosshair ?? true
   const showSlider = opts.showSlider ?? false
+  const orientationLabels = opts.orientationLabels ?? false
 
   if (mode === 'ortho') {
     const viewer = await SimpleOrthogonalViewer.create(el, stack, {
       layout: 'top-bottom',
       showCrosshair: crosshair,
       showSlider,
+      showOrientationLabels: orientationLabels,
     })
-    return { destroy: () => (viewer as any).destroy?.() }
+    return {
+      destroy: () => (viewer as any).destroy?.(),
+      setOrientationLabels: (v: boolean) => viewer.setOrientationLabelsVisible(v),
+    }
   }
 
   const width = el.clientWidth || 512
@@ -119,6 +133,15 @@ export async function mountViewer(
     sagittal: SingleSliceViewer.createSagittal,
   }[mode]
 
-  const viewer = await factory(el, stack, { showCrosshair: crosshair, showSlider, width, height })
-  return { destroy: () => (viewer as any).destroy?.() }
+  const viewer = await factory(el, stack, {
+    showCrosshair: crosshair,
+    showSlider,
+    width,
+    height,
+    showOrientationLabels: orientationLabels,
+  })
+  return {
+    destroy: () => (viewer as any).destroy?.(),
+    setOrientationLabels: (v: boolean) => viewer.setOrientationLabelsVisible(v),
+  }
 }

@@ -42,6 +42,12 @@ jobs:
       - name: Configure Pages
         uses: actions/configure-pages@v5
 
+      # The live <BrainViewer /> embeds import the published package entry
+      # (dist/neuroimjs.es.js via the "browser" export), so the library bundle
+      # must be rebuilt from src before VitePress bundles the docs.
+      - name: Build library bundle
+        run: npm run build:vite
+
       - name: Build docs (TypeDoc + VitePress)
         run: npm run docs:build
 
