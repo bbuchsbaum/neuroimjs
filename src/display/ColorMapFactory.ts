@@ -1,15 +1,16 @@
 import chroma from 'chroma-js';
 import { ColorMap } from './ColorMap';
+import type { Color } from './ColorMap';
 
-/**
- * Type for color representation
- */
-type Color = [number, number, number] | [number, number, number, number];
+/** Convert the normalized RGB(A) tuples used by ColorMap into chroma's GL color space. */
+function tupleToHex(color: Color): string {
+  return chroma.gl(color[0], color[1], color[2], color[3] ?? 1).hex();
+}
 
 /**
  * Configuration for creating preset color maps
  */
-interface PresetConfig {
+export interface PresetConfig {
   name: string;
   range?: [number, number];
   threshold?: [number, number];
@@ -175,8 +176,8 @@ export class ColorMapFactory {
     steps: number = 256,
     config?: Partial<PresetConfig>
   ): ColorMap {
-    const start = typeof startColor === 'string' ? startColor : chroma(startColor).hex();
-    const end = typeof endColor === 'string' ? endColor : chroma(endColor).hex();
+    const start = typeof startColor === 'string' ? startColor : tupleToHex(startColor);
+    const end = typeof endColor === 'string' ? endColor : tupleToHex(endColor);
     
     const colors: Color[] = chroma.scale([start, end]).mode('lch').colors(steps).map(hex => {
       const rgb = chroma(hex).rgb();
@@ -200,7 +201,7 @@ export class ColorMapFactory {
     config?: Partial<PresetConfig>
   ): ColorMap {
     const hexStops = colorStops.map(color => 
-      typeof color === 'string' ? color : chroma(color).hex()
+      typeof color === 'string' ? color : tupleToHex(color)
     );
     
     const colors: Color[] = chroma.scale(hexStops).mode('lch').colors(steps).map(hex => {
@@ -259,9 +260,9 @@ export class ColorMapFactory {
     steps: number = 256,
     config?: Partial<PresetConfig>
   ): ColorMap {
-    const neg = typeof negativeColor === 'string' ? negativeColor : chroma(negativeColor).hex();
-    const neu = typeof neutralColor === 'string' ? neutralColor : chroma(neutralColor).hex();
-    const pos = typeof positiveColor === 'string' ? positiveColor : chroma(positiveColor).hex();
+    const neg = typeof negativeColor === 'string' ? negativeColor : tupleToHex(negativeColor);
+    const neu = typeof neutralColor === 'string' ? neutralColor : tupleToHex(neutralColor);
+    const pos = typeof positiveColor === 'string' ? positiveColor : tupleToHex(positiveColor);
     
     const colors: Color[] = chroma.scale([neg, neu, pos])
       .mode('lch')

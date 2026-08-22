@@ -1,7 +1,8 @@
 import { FloatNeuroVol } from '../volume/DenseNeuroVol';
 import { NeuroSpace } from '../geometry/NeuroSpace';
 
-type KernelFn = (distSq: number, params: Record<string, any>) => number;
+export type ScatterKernelParameters = Readonly<Record<string, number>>;
+export type ScatterKernel = (distSq: number, params: ScatterKernelParameters) => number;
 
 export interface ScatterPoint {
   x: number;
@@ -13,11 +14,13 @@ export interface ScatterPoint {
 export interface ScatterFieldOptions {
   space: NeuroSpace;
   points: ScatterPoint[];
-  kernel?: KernelFn;
-  kernelParams?: Record<string, any>;
+  kernel?: ScatterKernel;
+  kernelParams?: ScatterKernelParameters;
   cutoffMm?: number;                 // radial cutoff in mm
   combine?: 'max' | 'sum';
   reuseBuffer?: Float32Array | null; // optional target buffer to reuse/zero
+  /** Maximum worker execution time for buildScatterFieldAsync. Default: 120 seconds. */
+  workerTimeoutMs?: number;
 }
 
 export interface ScatterFieldResult {
@@ -27,20 +30,35 @@ export interface ScatterFieldResult {
   nonZeroCount: number;
 }
 
+export interface ScatterFieldSpaceMetadata {
+  dim: number[];
+  spacing: number[];
+  origin: number[];
+  axisNames: [string, string, string];
+  affine: number[][];
+}
+
+export interface ScatterFieldWorkerRequest {
+  spaceMeta: ScatterFieldSpaceMetadata;
+  points: ScatterPoint[];
+  kernelParams: ScatterKernelParameters;
+  cutoffMm?: number;
+  combine?: 'max' | 'sum';
+}
+
 export interface ScatterFieldMessage {
-  volumeMeta: {
-    dim: number[];
-    spacing: number[];
-    origin: number[];
-    axesId: string;
-  };
+  volumeMeta: ScatterFieldSpaceMetadata;
   data: Float32Array;
   maxValue: number;
   nonZeroCount: number;
 }
 
-const defaultKernel: KernelFn = (distSq, params) => {
-  const sigma: number = params?.sigma ?? 1;
+function kernelSigma(params: ScatterKernelParameters): number {
+  return typeof params.sigma === 'number' ? params.sigma : 1;
+}
+
+const defaultKernel: ScatterKernel = (distSq, params) => {
+  const sigma = kernelSigma(params);
   const sigmaSq = sigma * sigma;
   return Math.exp(-distSq / (2 * sigmaSq));
 };
@@ -56,7 +74,7 @@ export function buildScatterField(opts: ScatterFieldOptions): ScatterFieldResult
     points,
     kernel = defaultKernel,
     kernelParams = {},
-    cutoffMm = 3 * (kernelParams.sigma ?? 1),
+    cutoffMm = 3 * kernelSigma(kernelParams),
     combine = 'max',
     reuseBuffer = null,
   } = opts;

@@ -5,7 +5,7 @@ import { SliceModel } from './SliceModel';
 import { SliceView } from './SliceView';
 import { NeuroSpace } from '../geometry/NeuroSpace';
 import { AxisSet3D } from '../geometry/Axis';
-import { ISliceController } from './interfaces';
+import { ISliceController } from './interfaces/index';
 import { rafThrottle } from './utils/debounce';
 import { SlicePointerEvent } from './types/display';
 

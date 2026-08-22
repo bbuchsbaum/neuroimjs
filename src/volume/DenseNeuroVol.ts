@@ -31,8 +31,18 @@ export abstract class DenseNeuroVol implements NeuroVol {
     if (!(space instanceof NeuroSpace)) {
       throw new TypeError('space must be an instance of NeuroSpace');
     }
+    if (space.dim.length !== 3) {
+      throw new Error('DenseNeuroVol requires a 3-dimensional NeuroSpace');
+    }
     this.space = space;
-    this.data = initialData || new dataConstructor(length || this.length);
+    const expectedLength = length ?? this.length;
+    if (expectedLength !== this.length) {
+      throw new Error(`Volume length mismatch: expected ${this.length}, got ${expectedLength}`);
+    }
+    if (initialData && initialData.length !== expectedLength) {
+      throw new Error(`Data length mismatch: expected ${expectedLength}, got ${initialData.length}`);
+    }
+    this.data = initialData ?? new dataConstructor(expectedLength);
   }
 
   get length(): number {
@@ -68,17 +78,32 @@ export abstract class DenseNeuroVol implements NeuroVol {
   }
 
   get(index: number): number {
+    if (!Number.isInteger(index) || index < 0 || index >= this.length) {
+      throw new RangeError(`Volume index ${index} is out of bounds`);
+    }
     return this.data[index];
   }
 
   getAt(i: number, j: number, k: number): number {
+    this.assertCoordinates(i, j, k);
     const index = i + j * this.space.dim[0] + k * this.space.dim[0] * this.space.dim[1];
     return this.data[index];
   }
 
   setAt(i: number, j: number, k: number, value: number): void {
+    this.assertCoordinates(i, j, k);
     const index = i + j * this.space.dim[0] + k * this.space.dim[0] * this.space.dim[1];
     this.data[index] = value;
+  }
+
+  private assertCoordinates(i: number, j: number, k: number): void {
+    const [nx, ny, nz] = this.space.dim;
+    if (
+      !Number.isInteger(i) || !Number.isInteger(j) || !Number.isInteger(k) ||
+      i < 0 || i >= nx || j < 0 || j >= ny || k < 0 || k >= nz
+    ) {
+      throw new RangeError(`Voxel coordinates [${i}, ${j}, ${k}] are out of bounds`);
+    }
   }
 
   isIdentityMatrix(matrix: Matrix): boolean {
@@ -216,7 +241,7 @@ export abstract class DenseNeuroVol implements NeuroVol {
       const value = data[i];
       // Skip NaN: a single NaN would otherwise poison both comparisons (every
       // `<`/`>` against NaN is false) and silently hide the true range.
-      if (Number.isNaN(value)) continue;
+      if (!Number.isFinite(value)) continue;
       if (value < min) min = value;
       if (value > max) max = value;
     }

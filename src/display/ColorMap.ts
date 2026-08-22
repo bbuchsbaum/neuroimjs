@@ -4,7 +4,7 @@ import chroma from 'chroma-js';
 /**
  * Configuration options for creating or modifying a ColorMap.
  */
-interface ColorMapOptions {
+export interface ColorMapOptions {
   /**
    * The numerical range of the data that will be mapped to the color scale.
    * Values below the minimum map to the first color, and values above the
@@ -46,7 +46,7 @@ interface ColorMapOptions {
  *   - [R, G, B, A]
  * with components in the range [0..1].
  */
-type Color = [number, number, number] | [number, number, number, number];
+export type Color = [number, number, number] | [number, number, number, number];
 
 /**
  * Events that can be emitted by the ColorMap class, for reactive updates:
@@ -54,7 +54,7 @@ type Color = [number, number, number] | [number, number, number, number];
  *   - "thresholdChanged": fired after setThreshold() calls
  *   - "alphaChanged": fired after setAlpha() calls
  */
-type ColorMapEvents = {
+export type ColorMapEvents = {
   rangeChanged: [number, number];
   thresholdChanged: [number, number];
   alphaChanged: [boolean];
@@ -63,7 +63,7 @@ type ColorMapEvents = {
 /**
  * Numeric arrays that this class can handle for colorization, e.g. in fillImageData().
  */
-type NumericTypedArray =
+export type NumericTypedArray =
   | Int8Array
   | Uint8Array
   | Uint8ClampedArray

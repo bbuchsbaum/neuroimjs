@@ -1,58 +1,102 @@
-import type { ScatterFieldOptions, ScatterFieldResult, ScatterFieldMessage } from './ScatterFieldBuilder';
+import type {
+  ScatterFieldMessage,
+  ScatterFieldOptions,
+  ScatterFieldResult,
+  ScatterFieldWorkerRequest,
+} from './ScatterFieldBuilder';
 import { buildScatterField } from './ScatterFieldBuilder';
-
-// Fallback inline builder if Worker is unavailable (e.g., Node tests)
-const supportsWorker = typeof Worker !== 'undefined';
+import { FloatNeuroVol } from '../volume/DenseNeuroVol';
+import { NeuroSpace } from '../geometry/NeuroSpace';
+import { AxisSet3D, matchAxis } from '../geometry/Axis';
 
 /**
  * Build scatter field off the main thread when possible.
  * Returns the same shape as buildScatterField.
  */
 export function buildScatterFieldAsync(opts: ScatterFieldOptions): Promise<ScatterFieldResult> {
-  if (!supportsWorker || opts.reuseBuffer) {
-    // If reuseBuffer is provided, transferring its backing buffer would break it; do sync
+  if (typeof Worker === 'undefined' || opts.reuseBuffer || opts.kernel) {
+    // Reused buffers and callback kernels cannot be safely transferred to a worker.
     const res = buildScatterField(opts);
     return Promise.resolve(res);
   }
 
+  const workerTimeoutMs = opts.workerTimeoutMs ?? 120_000;
+  if (!Number.isFinite(workerTimeoutMs) || workerTimeoutMs <= 0) {
+    return Promise.reject(new RangeError('workerTimeoutMs must be a positive finite number'));
+  }
+
   return new Promise((resolve, reject) => {
+    let worker: Worker | undefined;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+
+    const cleanup = (): void => {
+      if (timeout !== undefined) clearTimeout(timeout);
+      worker?.terminate();
+    };
+
     try {
       // @ts-ignore import.meta is only valid in ESM builds; CJS builds will hit the catch and fall back
-      const worker = new Worker(new URL('./ScatterFieldWorker.ts', import.meta.url), { type: 'module' });
+      worker = new Worker(new URL('./ScatterFieldWorker.ts', import.meta.url), { type: 'module' });
       worker.onmessage = (ev: MessageEvent<ScatterFieldMessage>) => {
-        const msg = ev.data;
-        // Rehydrate NeuroSpace + volume
-        // Note: we keep a simple FloatNeuroVol reconstruction to match buildScatterField output
-        // Re-import lazily to avoid circular deps on non-worker paths
-        import('../volume/DenseNeuroVol').then(({ FloatNeuroVol }) => {
-          import('../geometry/NeuroSpace').then(({ NeuroSpace }) => {
-            import('../geometry/Axis').then(({ AxisSet3D }) => {
-              const axes = AxisSet3D.fromStr(msg.volumeMeta.axesId) ?? AxisSet3D.AXIAL_LPI;
-              const space = new NeuroSpace(
-                msg.volumeMeta.dim as any,
-                msg.volumeMeta.spacing as any,
-                msg.volumeMeta.origin as any,
-                axes
-              );
-              const volume = new FloatNeuroVol(space, msg.data);
-              const result: ScatterFieldResult = {
-                volume,
-                data: msg.data,
-                maxValue: msg.maxValue,
-                nonZeroCount: msg.nonZeroCount,
-              };
-              worker.terminate();
-              resolve(result);
-            });
+        try {
+          const msg = ev.data;
+          const axes = new AxisSet3D(...msg.volumeMeta.axisNames.map(matchAxis) as [
+            ReturnType<typeof matchAxis>,
+            ReturnType<typeof matchAxis>,
+            ReturnType<typeof matchAxis>,
+          ]);
+          const space = new NeuroSpace(
+            msg.volumeMeta.dim,
+            msg.volumeMeta.spacing,
+            msg.volumeMeta.origin,
+            axes,
+            msg.volumeMeta.affine
+          );
+          const volume = new FloatNeuroVol(space, msg.data);
+          resolve({
+            volume,
+            data: msg.data,
+            maxValue: msg.maxValue,
+            nonZeroCount: msg.nonZeroCount,
           });
-        });
+        } catch (error) {
+          reject(error);
+        } finally {
+          cleanup();
+        }
       };
-      worker.onerror = (err) => {
-        worker.terminate();
-        reject(err);
+      worker.onerror = (event) => {
+        cleanup();
+        reject(event.error ?? new Error(event.message || 'Scatter field worker failed'));
       };
-      worker.postMessage(opts);
-    } catch (err) {
+      worker.onmessageerror = () => {
+        cleanup();
+        reject(new Error('Scatter field worker returned an unreadable message'));
+      };
+      const axisNames = opts.space.axes.names();
+      if (axisNames.length !== 3) {
+        throw new Error(`Scatter fields require exactly 3 axes, received ${axisNames.length}`);
+      }
+      const request: ScatterFieldWorkerRequest = {
+        spaceMeta: {
+          dim: opts.space.dim.slice(),
+          spacing: opts.space.spacing.slice(),
+          origin: opts.space.origin.slice(),
+          axisNames: axisNames as [string, string, string],
+          affine: opts.space.trans.to2DArray(),
+        },
+        points: opts.points,
+        kernelParams: opts.kernelParams ?? {},
+        cutoffMm: opts.cutoffMm,
+        combine: opts.combine,
+      };
+      timeout = setTimeout(() => {
+        cleanup();
+        reject(new Error(`Scatter field worker timed out after ${workerTimeoutMs} ms`));
+      }, workerTimeoutMs);
+      worker.postMessage(request);
+    } catch {
+      cleanup();
       // Fallback to sync build if worker construction fails
       try {
         const res = buildScatterField(opts);

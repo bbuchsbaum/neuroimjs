@@ -74,9 +74,8 @@ describe('orthogonalSlices', () => {
     it('should throw error for non-3D volume', () => {
       const space4D = new NeuroSpace([10, 10, 10, 5], [1, 1, 1, 1], [0, 0, 0, 0]);
       const data4D = new Float32Array(10 * 10 * 10 * 5);
-      const vol4D = new FloatNeuroVol(space4D, data4D);
-      
-      expect(() => extractOrthogonalSlices(vol4D, [5, 5, 5])).toThrow('Volume must be 3-dimensional');
+
+      expect(() => new FloatNeuroVol(space4D, data4D)).toThrow(/3-dimensional/);
     });
 
     it('should throw error for invalid world point dimensions', () => {

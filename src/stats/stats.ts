@@ -78,16 +78,16 @@ function clusteredNeuroVolFromDense(
  * @returns List of blocks, one for each unique block ID
  */
 export function splitBlocks(
-  x: NeuroVol | NeuroVec,
+  x: NeuroVol | NeuroVec | SparseNeuroVec,
   indices: Uint32Array | Int32Array,
   blockIds: Int32Array
-): Array<NeuroVol | NeuroVec> {
+): Array<NeuroVol | NeuroVec | SparseNeuroVec> {
   if (indices.length !== blockIds.length) {
     throw new ValueError('indices and blockIds must have same length');
   }
 
   const uniqueBlocks = Array.from(new Set(blockIds));
-  const blocks: Array<NeuroVol | NeuroVec> = [];
+  const blocks: Array<NeuroVol | NeuroVec | SparseNeuroVec> = [];
 
   for (const blockId of uniqueBlocks) {
     // Get indices for this block
@@ -100,7 +100,7 @@ export function splitBlocks(
 
     if ('getVolume' in x) {
       // NeuroVec case
-      const vec = x as NeuroVec;
+      const vec = x as NeuroVec | SparseNeuroVec;
       
       // Create array to hold time series for this block
       const nTimepoints = vec.dim[3]; // Time is the 4th dimension (X,Y,Z,T)
@@ -131,7 +131,7 @@ export function splitBlocks(
         maskData[idx] = 1;
       }
       
-      const maskSpace = new NeuroSpace(spatialDims, vec.spacing.slice(1), vec.origin.slice(1));
+      const maskSpace = vec.space.withDimensions(spatialDims);
       const mask = new LogicalNeuroVol(maskSpace, maskData);
       
       // Create SparseNeuroVec for this block
@@ -146,9 +146,12 @@ export function splitBlocks(
       }
       
       const blockVec = new SparseNeuroVec(
-        new NeuroSpace([spatialDims[0], spatialDims[1], spatialDims[2], nTimepoints], 
-                       [...vec.spacing.slice(1), vec.spacing[0]], 
-                       [...vec.origin.slice(1), vec.origin[0]]),
+        vec.space.withDimensions([
+          spatialDims[0],
+          spatialDims[1],
+          spatialDims[2],
+          nTimepoints,
+        ]),
         voxelDataMap
       );
       
@@ -290,9 +293,9 @@ export function splitClusters(
  * @returns Dictionary mapping factor levels to NeuroVec objects
  */
 export function splitFill(
-  x: NeuroVec,
+  x: NeuroVec | SparseNeuroVec,
   fac: Int32Array | Float32Array
-): Map<number, NeuroVec> {
+): Map<number, NeuroVec | SparseNeuroVec> {
   const nVolumes = x.dim[3]; // Time is the 4th dimension (X,Y,Z,T)
   
   if (fac.length !== nVolumes) {
@@ -300,7 +303,7 @@ export function splitFill(
   }
 
   const levels = Array.from(new Set(fac));
-  const result = new Map<number, NeuroVec>();
+  const result = new Map<number, NeuroVec | SparseNeuroVec>();
 
   for (const level of levels) {
     // Get indices for this level
@@ -317,7 +320,7 @@ export function splitFill(
       // For sparse vectors, we need to handle the Map-based data structure
       // Create new space with updated time dimension (X,Y,Z,T ordering)
       const newDim = [...x.dim.slice(0, 3), nLevelVolumes];
-      const newSpace = new NeuroSpace(newDim, x.spacing, x.origin);
+      const newSpace = x.space.withDimensions(newDim);
       
       // Convert to Map format for SparseNeuroVec
       const voxelDataMap = new Map<number, number[]>();
@@ -354,7 +357,7 @@ export function splitFill(
 
       // Create new space with updated time dimension (X,Y,Z,T ordering)
       const newDim = [...x.dim.slice(0, 3), nLevelVolumes];
-      const newSpace = new NeuroSpace(newDim, x.spacing, x.origin);
+      const newSpace = x.space.withDimensions(newDim);
       
       const levelVec = new Float32NeuroVec(newSpace, subsetData);
       result.set(level, levelVec);
@@ -492,11 +495,11 @@ export function splitReduce(
  * @returns Scaled NeuroVec
  */
 export function splitScale(
-  x: NeuroVec,
+  x: NeuroVec | SparseNeuroVec,
   fac: Int32Array | Float32Array,
   center: boolean = true,
   scale: boolean = true
-): NeuroVec {
+): NeuroVec | SparseNeuroVec {
   const nVolumes = x.dim[3]; // Time is the 4th dimension (X,Y,Z,T)
   
   if (fac.length !== nVolumes) {
@@ -506,7 +509,7 @@ export function splitScale(
   // Get unique levels
   const uniqueLevels = Array.from(new Set(fac));
   
-  if ('getData' in x && x.getData && !('voxelData' in x)) { // Check if it's a dense vector
+  if (!(x instanceof SparseNeuroVec)) {
     // Copy data
     const srcData = x.getData();
     const scaledData = new Float32Array(srcData);

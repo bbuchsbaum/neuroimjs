@@ -208,17 +208,14 @@ describe('CoordinateValidator', () => {
     });
   });
 
-  describe('Performance', () => {
-    it('should handle large coordinate arrays efficiently', () => {
+  describe('Large inputs', () => {
+    it('validates every coordinate in a large array', () => {
       const largeCoord = new Array(1000).fill(50);
       const largeDims = new Array(1000).fill(100);
-      
-      const start = performance.now();
       const result = CoordinateValidator.validateVoxelCoord(largeCoord, largeDims);
-      const duration = performance.now() - start;
-      
+
       expect(result.isValid).toBe(true);
-      expect(duration).toBeLessThan(10); // Should complete in less than 10ms
+      expect(result.errors).toEqual([]);
     });
   });
 });

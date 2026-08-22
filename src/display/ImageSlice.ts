@@ -15,7 +15,7 @@ import { AxisSet2D } from '../geometry/Axis';
 /**
  * An interface describing the real-world bounding box of this 2D slice.
  */
-interface BoundingBox {
+export interface BoundingBox {
   /** The minimum X coordinate (left) in real units (e.g., mm). */
   xMin: number;
   /** The maximum X coordinate (right) in real units. */

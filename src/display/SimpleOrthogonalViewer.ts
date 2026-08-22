@@ -12,7 +12,7 @@ import { EventEmitter } from './EventEmitter';
 import type { SlicePointerEvent } from './types/display';
 import type { OrientationLabelOptions } from './OrientationLabelLayer';
 
-type LayoutMode = 'left-tall' | 'top-bottom';
+export type LayoutMode = 'left-tall' | 'top-bottom';
 
 export interface SimpleOrthogonalViewerOptions {
   layout?: LayoutMode;
@@ -207,14 +207,12 @@ export class SimpleOrthogonalViewer {
       ? resolveColorMap(opts.colormap as any)
       : opts?.colormap;
 
-    // Use the main imageLayer directly (same as addLayer/removeLayer)
-    // This ensures we update the shared volumeStack, not per-view layers
-    this.imageLayer.replaceVolume(layerId, volume, {
+    this.viewer.applyToImageLayers(layer => layer.replaceVolume(layerId, volume, {
       range: opts?.range ?? null,
       threshold: opts?.threshold,
       alpha: opts?.alpha,
       colormap,
-    });
+    }));
     this.redraw();
     this.emitter.emit('layerUpdated', { id: layerId });
   }

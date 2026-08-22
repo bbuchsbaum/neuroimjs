@@ -25,7 +25,7 @@ export interface MappedNeuroVecOptions {
  */
 export class MappedNeuroVec implements INeuroVec {
   readonly space: NeuroSpace;
-  private buffer: ArrayBuffer;
+  private buffer: ArrayBufferLike;
   private view: DataView;
   private dtype: 'float32' | 'float64' | 'int16' | 'uint8';
   private bytesPerElement: number;
@@ -34,7 +34,7 @@ export class MappedNeuroVec implements INeuroVec {
 
   constructor(
     space: NeuroSpace,
-    buffer: ArrayBuffer,
+    buffer: ArrayBufferLike,
     options: MappedNeuroVecOptions = {}
   ) {
     if (space.dim.length !== 4) {
@@ -91,7 +91,7 @@ export class MappedNeuroVec implements INeuroVec {
     return this.space.origin;
   }
 
-  getData(): ArrayBuffer {
+  getData(): ArrayBufferLike {
     return this.buffer;
   }
 
@@ -133,12 +133,7 @@ export class MappedNeuroVec implements INeuroVec {
       volumeData[i] = this.getValueAt(startIndex + i);
     }
 
-    const volumeSpace = new NeuroSpace(
-      [dimX, dimY, dimZ],
-      this.spacing.slice(0, 3),
-      this.origin.slice(0, 3),
-      this.space.axes
-    );
+    const volumeSpace = this.space.withDimensions([dimX, dimY, dimZ]);
 
     return new FloatNeuroVol(volumeSpace, volumeData);
   }
@@ -205,12 +200,7 @@ export class MappedNeuroVec implements INeuroVec {
 
   temporalMean(): NeuroVol {
     const [dimX, dimY, dimZ, dimT] = this.space.dim;
-    const volumeSpace = new NeuroSpace(
-      [dimX, dimY, dimZ],
-      this.spacing.slice(0, 3),
-      this.origin.slice(0, 3),
-      this.space.axes
-    );
+    const volumeSpace = this.space.withDimensions([dimX, dimY, dimZ]);
 
     const meanData = new Float32Array(this.volumeSize);
     
@@ -231,12 +221,7 @@ export class MappedNeuroVec implements INeuroVec {
     const meanData = (mean as FloatNeuroVol).getData();
     
     const [dimX, dimY, dimZ, dimT] = this.space.dim;
-    const volumeSpace = new NeuroSpace(
-      [dimX, dimY, dimZ],
-      this.spacing.slice(0, 3),
-      this.origin.slice(0, 3),
-      this.space.axes
-    );
+    const volumeSpace = this.space.withDimensions([dimX, dimY, dimZ]);
 
     const stdData = new Float32Array(this.volumeSize);
     
@@ -301,12 +286,7 @@ export class MappedNeuroVec implements INeuroVec {
     }
 
     const newDimT = endTime - startTime;
-    const newSpace = new NeuroSpace(
-      [dimX, dimY, dimZ, newDimT],
-      this.spacing,
-      this.origin,
-      this.space.axes
-    );
+    const newSpace = this.space.withDimensions([dimX, dimY, dimZ, newDimT]);
 
     // Create new buffer for sliced data
     const newLength = this.volumeSize * newDimT;
@@ -384,12 +364,7 @@ export class MappedNeuroVec implements INeuroVec {
 
   private temporalReduce(reducer: (values: number[]) => number): NeuroVol {
     const [dimX, dimY, dimZ, dimT] = this.space.dim;
-    const volumeSpace = new NeuroSpace(
-      [dimX, dimY, dimZ],
-      this.spacing.slice(0, 3),
-      this.origin.slice(0, 3),
-      this.space.axes
-    );
+    const volumeSpace = this.space.withDimensions([dimX, dimY, dimZ]);
 
     const resultData = new Float32Array(this.volumeSize);
 

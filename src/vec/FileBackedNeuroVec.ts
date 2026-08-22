@@ -131,12 +131,7 @@ export class FileBackedNeuroVec implements INeuroVec {
     }
 
     const volData = this.getVolumeData(t);
-    const volumeSpace = new NeuroSpace(
-      [dimX, dimY, dimZ],
-      this.spacing.slice(0, 3),
-      this.origin.slice(0, 3),
-      this.space.axes
-    );
+    const volumeSpace = this.space.withDimensions([dimX, dimY, dimZ]);
 
     return new FloatNeuroVol(volumeSpace, volData);
   }
@@ -210,12 +205,7 @@ export class FileBackedNeuroVec implements INeuroVec {
   temporalMean(): NeuroVol {
     // Implement directly to avoid loading all data
     const [dimX, dimY, dimZ, dimT] = this.space.dim;
-    const volumeSpace = new NeuroSpace(
-      [dimX, dimY, dimZ],
-      this.spacing.slice(0, 3),
-      this.origin.slice(0, 3),
-      this.space.axes
-    );
+    const volumeSpace = this.space.withDimensions([dimX, dimY, dimZ]);
 
     const meanData = new Float32Array(dimX * dimY * dimZ);
     
@@ -241,12 +231,7 @@ export class FileBackedNeuroVec implements INeuroVec {
     const meanData = (mean as FloatNeuroVol).getData();
     
     const [dimX, dimY, dimZ, dimT] = this.space.dim;
-    const volumeSpace = new NeuroSpace(
-      [dimX, dimY, dimZ],
-      this.spacing.slice(0, 3),
-      this.origin.slice(0, 3),
-      this.space.axes
-    );
+    const volumeSpace = this.space.withDimensions([dimX, dimY, dimZ]);
 
     const varData = new Float32Array(dimX * dimY * dimZ);
     
@@ -313,12 +298,7 @@ export class FileBackedNeuroVec implements INeuroVec {
     }
 
     const newDimT = endTime - startTime;
-    const newSpace = new NeuroSpace(
-      [dimX, dimY, dimZ, newDimT],
-      this.spacing,
-      this.origin,
-      this.space.axes
-    );
+    const newSpace = this.space.withDimensions([dimX, dimY, dimZ, newDimT]);
 
     // Create new data getter that adjusts time indices
     const slicedGetter = (t: number) => {
@@ -387,12 +367,7 @@ export class FileBackedNeuroVec implements INeuroVec {
 
   private temporalReduce(reducer: (values: number[]) => number): NeuroVol {
     const [dimX, dimY, dimZ, dimT] = this.space.dim;
-    const volumeSpace = new NeuroSpace(
-      [dimX, dimY, dimZ],
-      this.spacing.slice(0, 3),
-      this.origin.slice(0, 3),
-      this.space.axes
-    );
+    const volumeSpace = this.space.withDimensions([dimX, dimY, dimZ]);
 
     const resultData = new Float32Array(dimX * dimY * dimZ);
     const voxelSize = dimX * dimY * dimZ;

@@ -195,8 +195,8 @@ export class WorkerService {
     // Extract results in order
     return requests.map(req => {
       const result = results.get(req.id);
-      if (!result || result instanceof Error) {
-        throw result || new Error('No result returned');
+      if (!result) {
+        throw new Error('No result returned');
       }
       return result.imageData;
     });

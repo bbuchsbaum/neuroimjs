@@ -10,7 +10,7 @@ import { ImageLayer } from './ImageLayer';
 import { OrthogonalImageViewer } from './OrthogonalImageViewer';
 import { AxisSet3D } from '../geometry/Axis';
 import { NeuroSpace } from '../geometry/NeuroSpace';
-import { ISliceModel, ISliceView, ISliceController } from './interfaces';
+import { ISliceModel, ISliceView, ISliceController } from './interfaces/index';
 
 export interface ViewerOptions {
   width?: number;

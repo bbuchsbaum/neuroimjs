@@ -212,37 +212,3 @@ export class TemplateFlow {
     }
   }
 }
-
-// Example usage:
-
-(async () => {
-  const tf = new TemplateFlow(); // Uses default cache directory (~/.templateflow)
-
-  try {
-    // Example 1: List all available templates
-    const templates = await tf.listTemplates();
-    console.log('Available Templates:', templates);
-
-    // Example 2: Download MNI152Lin with resolution 1 and suffix T1w
-    const filePath1 = await tf.downloadTemplate('MNI152Lin', { resolution: 1, suffix: 'T1w' });
-    console.log(`Downloaded to: ${filePath1}`);
-
-    // Example 3: Download fsLR with hemisphere 'L', density '32k', and suffix 'sphere'
-    const filePath2 = await tf.downloadTemplate('fsLR', {
-      hemi: 'L',
-      density: '32k',
-      suffix: 'sphere',
-      extension: 'surf.gii',
-    });
-    console.log(`Downloaded to: ${filePath2}`);
-
-    // Example 4: Attempt to download the same template again (should use cache)
-    const filePath3 = await tf.downloadTemplate('MNI152Lin', { resolution: 1, suffix: 'T1w' });
-    console.log(`Downloaded to: ${filePath3}`);
-
-    // Example 5: Clear the cache
-    // await tf.clearCache();
-  } catch (error: any) {
-    console.error(error.message);
-  }
-})();

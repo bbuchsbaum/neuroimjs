@@ -2,12 +2,12 @@
  * 3D Kernel implementation for spatial convolution operations
  */
 
-import { Kernel3D as IKernel3D } from './ISpatialFilter';
+import { Kernel3DLike } from './ISpatialFilter';
 
 /**
  * Implementation of 3D kernel for convolution operations
  */
-export class Kernel3D implements IKernel3D {
+export class Kernel3D implements Kernel3DLike {
   data: number[][][];
   size: [number, number, number];
 

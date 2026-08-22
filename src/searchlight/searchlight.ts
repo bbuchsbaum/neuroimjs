@@ -10,8 +10,7 @@
 
 import { NeuroVol } from '../volume/NeuroVol';
 import { LogicalNeuroVol } from '../volume/LogicalNeuroVol';
-import { NeuroSpace } from '../geometry/NeuroSpace';
-import { ROIVolWindow, ROIVol, ROICoords } from '../roi/ROI_improved';
+import { ROIVolWindow } from '../roi/ROI_improved';
 import { sphericalROI } from '../roi/ROI_factories';
 import { LazyList } from '../utils/LazyList';
 import { SearchlightWorkerPool } from './WorkerPool';
@@ -28,6 +27,23 @@ export interface SearchlightOptions {
   cores?: number;
   /** Progress callback */
   onProgress?: (progress: number) => void;
+}
+
+function validateSearchlightArguments(radius: number, cores = 0): void {
+  if (!Number.isFinite(radius) || radius < 0) {
+    throw new RangeError('radius must be a finite, non-negative number');
+  }
+  if (!Number.isSafeInteger(cores) || cores < 0) {
+    throw new RangeError('cores must be a non-negative integer');
+  }
+}
+
+function unflattenCoordinates(flat: Int32Array): number[][] {
+  const coordinates = new Array<number[]>(flat.length / 3);
+  for (let i = 0, outputIndex = 0; i < flat.length; i += 3, outputIndex++) {
+    coordinates[outputIndex] = [flat[i], flat[i + 1], flat[i + 2]];
+  }
+  return coordinates;
 }
 
 /**
@@ -61,6 +77,7 @@ export function searchlightIterator(
   options: SearchlightOptions = {}
 ): LazyList<ROIVolWindow> | ROIVolWindow[] | Promise<ROIVolWindow[]> {
   const { eager = false, nonzero = false, cores = 0, onProgress } = options;
+  validateSearchlightArguments(radius, cores);
 
   // Convert to LogicalNeuroVol if needed
   const logicalMask = ensureLogicalMask(mask);
@@ -87,7 +104,7 @@ export function searchlightIterator(
 
   const generateSearchlight = (idx: number): ROIVolWindow => {
     // Get the center voxel index
-    const centerIdx = nonzero ? indices[idx] : idx;
+    const centerIdx = indices[idx];
 
     // Get grid coordinates of center
     const centerGrid = logicalMask.space.indexToGrid(centerIdx);
@@ -149,6 +166,7 @@ export async function searchlightCoords(
   options: SearchlightOptions = {}
 ): Promise<LazyList<Float32Array>> {
   const { nonzero = false, cores = 0 } = options;
+  validateSearchlightArguments(radius, cores);
 
   // Convert to LogicalNeuroVol if needed
   const logicalMask = ensureLogicalMask(mask);
@@ -169,7 +187,7 @@ export async function searchlightCoords(
 
   const generateCoords = (idx: number): Float32Array => {
     // Get the center voxel index
-    const centerIdx = nonzero ? indices[idx] : idx;
+    const centerIdx = indices[idx];
 
     // Get grid coordinates of center
     const centerGrid = logicalMask.space.indexToGrid(centerIdx);
@@ -227,6 +245,7 @@ export function randomSearchlight(
   mask: NeuroVol | LogicalNeuroVol,
   radius: number
 ): ROIVolWindow[] {
+  validateSearchlightArguments(radius);
   // Convert to LogicalNeuroVol if needed
   const logicalMask = ensureLogicalMask(mask);
 
@@ -290,6 +309,7 @@ export function clusteredSearchlight(
   mask: NeuroVol,
   radius: number
 ): ROIVolWindow[] {
+  validateSearchlightArguments(radius);
   const results: ROIVolWindow[] = [];
   const data = mask.getData();
   
@@ -329,8 +349,6 @@ export function clusteredSearchlight(
       
       // Create spherical ROI around cluster center
       const roi = sphericalROI(mask, centerGrid, radius);
-      const centerIdx = mask.space.gridToIndex(centerGrid);
-      
       // sphericalROI already returns a ROIVolWindow
       const window = roi;
       results.push(window);
@@ -356,6 +374,10 @@ export function bootstrapSearchlight(
   radius: number = 8,
   iter: number = 100
 ): ROIVolWindow[] {
+  validateSearchlightArguments(radius);
+  if (!Number.isSafeInteger(iter) || iter < 0) {
+    throw new RangeError('iter must be a non-negative integer');
+  }
   // Convert to LogicalNeuroVol if needed
   const logicalMask = ensureLogicalMask(mask);
 
@@ -369,6 +391,10 @@ export function bootstrapSearchlight(
   }
 
   const results: ROIVolWindow[] = [];
+
+  if (iter > 0 && maskIndices.length === 0) {
+    throw new Error('Cannot bootstrap searchlights from an empty mask');
+  }
 
   // Sample with replacement
   for (let i = 0; i < iter; i++) {
@@ -422,24 +448,18 @@ async function computeSearchlightsParallel(
 
   try {
     // Initialize workers
-    await pool.initialize(mask, radius, nonzero);
+    await pool.initialize(mask, radius);
 
     // Compute searchlights in parallel
     const results = await pool.computeSearchlights(
-      Array.from({ length: indices.length }, (_, i) => i)
+      indices
     );
 
     // Convert results to ROIVolWindow objects
     return results.map(result => {
-      const space = new NeuroSpace(
-        result.space.dim,
-        result.space.spacing,
-        result.space.origin
-      );
-
       return new ROIVolWindow(
-        space,
-        result.coords,
+        mask.space,
+        unflattenCoordinates(result.coords),
         result.data,
         result.centerIdx
       );
@@ -461,7 +481,7 @@ function computeSearchlightsSequential(
 ): ROIVolWindow[] {
   const results: ROIVolWindow[] = [];
   for (let i = 0; i < indices.length; i++) {
-    const centerIdx = nonzero ? indices[i] : i;
+    const centerIdx = indices[i];
     const centerGrid = mask.space.indexToGrid(centerIdx);
     
     // Ensure centerGrid is a 3-element array
@@ -529,15 +549,15 @@ async function computeCoordsParallel(
 
   try {
     // Initialize workers
-    await pool.initialize(mask, radius, nonzero);
+    await pool.initialize(mask, radius);
 
     // Compute coordinates in parallel
     const results = await pool.computeSearchlights(
-      Array.from({ length: indices.length }, (_, i) => i)
+      indices
     );
 
     // Extract just the coordinates
-    return results.map(result => result.coords);
+    return results.map(result => Float32Array.from(result.coords));
   } finally {
     pool.terminate();
   }

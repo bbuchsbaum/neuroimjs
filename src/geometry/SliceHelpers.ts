@@ -9,7 +9,7 @@ import { NeuroSpace } from './NeuroSpace';
  * Extract a slice space for a specific view orientation
  * @param space The 3D NeuroSpace to extract from
  * @param sliceIndex The index of the slice to extract
- * @param viewAxis The viewing orientation
+ * @param _viewAxis The viewing orientation (retained for API consistency)
  * @returns A 2D NeuroSpace representing the slice
  */
 export function extractSliceForView(
@@ -24,7 +24,7 @@ export function extractSliceForView(
 
 /**
  * Get the axis index that should be used for slicing in a given view
- * @param viewAxis The viewing orientation
+ * @param _viewAxis The viewing orientation (retained for API consistency)
  * @returns The axis index (0=X, 1=Y, 2=Z) to slice along
  */
 export function getSliceAxisIndex(_viewAxis: AxisSet3D): number {

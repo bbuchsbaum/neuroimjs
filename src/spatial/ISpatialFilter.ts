@@ -7,10 +7,10 @@ import { NeuroVol } from '../volume/NeuroVol';
 /**
  * Kernel for 3D convolution operations
  */
-export interface Kernel3D {
+export interface Kernel3DLike {
   data: number[][][];
   size: [number, number, number];
-  normalize(): Kernel3D;
+  normalize(): Kernel3DLike;
   getWeight(i: number, j: number, k: number): number;
 }
 
@@ -63,7 +63,7 @@ export interface ISpatialFilter {
    * Apply a custom 3D kernel
    * @param kernel The 3D convolution kernel
    */
-  spatialFilter(kernel: Kernel3D): NeuroVol;
+  spatialFilter(kernel: Kernel3DLike): NeuroVol;
 
   /**
    * Apply median filter

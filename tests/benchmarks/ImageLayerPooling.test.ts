@@ -30,7 +30,7 @@ describe('ImageLayer Pooling Performance', () => {
     space = new NeuroSpace([64, 64, 32], [2, 2, 3], [0, 0, 0]);
     const data = new Float32Array(64 * 64 * 32);
     for (let i = 0; i < data.length; i++) {
-      data[i] = Math.random() * 100;
+      data[i] = i % 101;
     }
     volume = new FloatNeuroVol(space, data);
     
@@ -66,7 +66,6 @@ describe('ImageLayer Pooling Performance', () => {
     
     // Now test pooling efficiency
     const iterations = 100;
-    const startTime = performance.now();
     let currentContainer: PIXI.Container | null = null;
     
     for (let i = 0; i < iterations; i++) {
@@ -84,15 +83,8 @@ describe('ImageLayer Pooling Performance', () => {
       currentContainer = imageLayer.renderSlice(sliceIndex, [32, 32, sliceIndex], viewAxes, parentContainer);
     }
     
-    const endTime = performance.now();
-    const duration = endTime - startTime;
-    
     // Get final pool statistics
     const stats = imageLayer.getPoolStats();
-    
-    console.log(`Rendered ${iterations} slices in ${duration.toFixed(2)}ms`);
-    console.log('Sprite Pool Stats:', stats.spritePool);
-    console.log('Container Pool Stats:', stats.containerPool);
     
     // Verify pooling is working
     // Note: In the mock environment, sprite instanceof checks may not work properly,

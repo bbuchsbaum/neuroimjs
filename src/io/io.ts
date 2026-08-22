@@ -1,4 +1,3 @@
-import * as nifti from 'nifti-reader-js';
 import * as pako from 'pako';
 import { NeuroVol } from '../volume/NeuroVol';
 import { NeuroVec } from '../vec/NeuroVec';
@@ -12,6 +11,33 @@ import { Matrix } from 'ml-matrix';
 import { createNeuroVol } from '../volume/NeuroIm';
 import { ValueError, TypeError as TypeErrorType, SliceTypedArrayType, TypedArray } from '../types';
 import { FileFormat, NIFTIFormat, findDescriptor, getFormat } from './formats';
+
+type NiftiReaderModule = typeof import('nifti-reader-js');
+
+// Keep the ESM-only nifti-reader-js dependency lazy so the CommonJS package
+// entry can still be loaded. `new Function` intentionally preserves native
+// dynamic import when this source is compiled with TypeScript's CommonJS mode.
+const importEsm = new Function(
+  'specifier',
+  'return import(specifier)'
+) as (specifier: string) => Promise<NiftiReaderModule>;
+let niftiReaderPromise: Promise<NiftiReaderModule> | undefined;
+
+function loadNiftiReader(): Promise<NiftiReaderModule> {
+  niftiReaderPromise ??= importEsm('nifti-reader-js');
+  return niftiReaderPromise;
+}
+
+/** Return an exact, standalone ArrayBuffer for a possibly shared Uint8Array view. */
+function toArrayBuffer(data: Uint8Array): ArrayBuffer {
+  if (data.buffer instanceof ArrayBuffer) {
+    return data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
+  }
+
+  const copy = new Uint8Array(data.byteLength);
+  copy.set(data);
+  return copy.buffer;
+}
 
 /**
  * Options for reading volumes.
@@ -67,6 +93,7 @@ export async function readVol(
   options: ReadVolOptions = {}
 ): Promise<NeuroVol> {
   const { index = 0, onProgress } = options;
+  const nifti = await loadNiftiReader();
   
   try {
     let buffer: ArrayBuffer;
@@ -85,7 +112,7 @@ export async function readVol(
       const data = await fs.readFile(input);
       onProgress?.(0.3);
       
-      buffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
+      buffer = toArrayBuffer(data);
       
       // Handle compression based on format
       if (format.headerEncoding === 'gzip') {
@@ -93,15 +120,12 @@ export async function readVol(
         try {
           const compressed = new Uint8Array(buffer);
           const decompressed = pako.ungzip(compressed);
-          buffer = decompressed.buffer.slice(
-            decompressed.byteOffset,
-            decompressed.byteOffset + decompressed.byteLength
-          );
+          buffer = toArrayBuffer(decompressed);
           onProgress?.(0.5);
         } catch (err) {
           // If pako fails, try nifti-reader decompression
           if (nifti.isCompressed(buffer)) {
-            buffer = nifti.decompress(buffer);
+            buffer = toArrayBuffer(new Uint8Array(nifti.decompress(buffer)));
             onProgress?.(0.5);
           } else {
             throw err;
@@ -114,7 +138,7 @@ export async function readVol(
       // An ArrayBuffer passed directly may still be gzip-compressed (e.g. raw
       // bytes of a .nii.gz downloaded over the network). Decompress if needed.
       if (nifti.isCompressed(buffer)) {
-        buffer = nifti.decompress(buffer);
+        buffer = toArrayBuffer(new Uint8Array(nifti.decompress(buffer)));
         onProgress?.(0.5);
       }
     }
@@ -219,6 +243,7 @@ export async function writeVol(
  * Read header information from neuroimaging file.
  */
 export async function readHeader(fileName: string): Promise<HeaderInfo> {
+  const nifti = await loadNiftiReader();
   const fs = await import('fs/promises');
   
   // Determine format
@@ -229,13 +254,13 @@ export async function readHeader(fileName: string): Promise<HeaderInfo> {
   
   // Read file
   let data = await fs.readFile(fileName);
-  let buffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
+  let buffer = toArrayBuffer(data);
   
   // Handle compression
   if (format.headerEncoding === 'gzip') {
     const compressed = new Uint8Array(buffer);
     const decompressed = pako.ungzip(compressed);
-    buffer = decompressed.buffer;
+    buffer = toArrayBuffer(decompressed);
   }
   
   if (!nifti.isNIFTI(buffer)) {

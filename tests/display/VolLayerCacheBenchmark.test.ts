@@ -26,17 +26,17 @@ vi.stubGlobal('ImageData', class {
   }
 });
 
-describe('VolLayer Cache Performance Benchmark', () => {
+describe('VolLayer cache behavior', () => {
   beforeAll(() => {
     setupConsoleMocks();
   });
 
-  it('should demonstrate cache performance improvements', () => {
+  it('avoids repeated slice extraction for cached keys', () => {
     // Create test volume
     const space = new NeuroSpace([50, 50, 50], [1, 1, 1], [0, 0, 0]);
     const data = new Float32Array(50 * 50 * 50);
     for (let i = 0; i < data.length; i++) {
-      data[i] = Math.random();
+      data[i] = (i % 101) / 100;
     }
     const volume = new FloatNeuroVol(space, data);
     
@@ -59,60 +59,34 @@ describe('VolLayer Cache Performance Benchmark', () => {
       NamedAxis.INF_SUP
     );
     
-    // Benchmark with cache
     const slicesToAccess = [10, 15, 20, 25, 30, 15, 20, 25, 10, 15, 20, 25, 30];
-    
-    // Warm up
-    for (const slice of slicesToAccess) {
-      volLayerWithCache.getSlice(slice, axialAxes);
-      volLayerNoCache.getSlice(slice, axialAxes);
-    }
-    
-    // Clear caches and stats
-    volLayerWithCache.setRange([0, 1]); // This clears the cache
-    volLayerNoCache.setRange([0, 1]);
-    
-    // Benchmark with cache
-    const startWithCache = performance.now();
+    const extractionSpy = vi.spyOn(volume, 'getSlice');
+
     for (let i = 0; i < 10; i++) {
       for (const slice of slicesToAccess) {
         volLayerWithCache.getSlice(slice, axialAxes);
       }
     }
-    const durationWithCache = performance.now() - startWithCache;
-    
-    // Benchmark without cache (effective)
-    const startNoCache = performance.now();
+    const cachedExtractions = extractionSpy.mock.calls.length;
+    extractionSpy.mockClear();
+
     for (let i = 0; i < 10; i++) {
       for (const slice of slicesToAccess) {
         volLayerNoCache.getSlice(slice, axialAxes);
       }
     }
-    const durationNoCache = performance.now() - startNoCache;
+    const singleEntryExtractions = extractionSpy.mock.calls.length;
     
     // Get cache stats
     const statsWithCache = volLayerWithCache.getCacheStats();
     const statsNoCache = volLayerNoCache.getCacheStats();
     
-    console.log('\nPerformance Benchmark Results:');
-    console.log('===============================');
-    console.log(`With Cache (size ${statsWithCache.capacity}):`, durationWithCache.toFixed(2), 'ms');
-    console.log(`  Hit ratio: ${(statsWithCache.hitRatio * 100).toFixed(1)}%`);
-    console.log(`  Hits: ${statsWithCache.hits}, Misses: ${statsWithCache.misses}`);
-    console.log(`  Evictions: ${statsWithCache.evictions}`);
-    
-    console.log(`\nWithout Cache (size ${statsNoCache.capacity}):`, durationNoCache.toFixed(2), 'ms');
-    console.log(`  Hit ratio: ${(statsNoCache.hitRatio * 100).toFixed(1)}%`);
-    console.log(`  Hits: ${statsNoCache.hits}, Misses: ${statsNoCache.misses}`);
-    console.log(`  Evictions: ${statsNoCache.evictions}`);
-    
-    const improvement = ((durationNoCache - durationWithCache) / durationNoCache * 100);
-    console.log(`\nPerformance improvement: ${improvement.toFixed(1)}%`);
-    
-    // Assertions
-    expect(statsWithCache.hitRatio).toBeGreaterThan(0.5); // Should have good hit ratio
-    expect(durationWithCache).toBeLessThan(durationNoCache); // Should be faster with cache
-    expect(improvement).toBeGreaterThan(20); // Should be at least 20% faster
+    expect(cachedExtractions).toBe(5);
+    expect(singleEntryExtractions).toBe(130);
+    expect(statsWithCache.hits).toBe(125);
+    expect(statsWithCache.misses).toBe(5);
+    expect(statsNoCache.hits).toBe(0);
+    expect(statsNoCache.misses).toBe(130);
   });
 
   it('should show memory boundedness with different cache sizes', () => {
@@ -156,14 +130,6 @@ describe('VolLayer Cache Performance Benchmark', () => {
         evictions: stats.evictions
       });
     }
-    
-    console.log('\nCache Size Analysis:');
-    console.log('====================');
-    results.forEach(result => {
-      console.log(`Cache size ${result.size}:`);
-      console.log(`  Hit ratio: ${(result.hitRatio * 100).toFixed(1)}%`);
-      console.log(`  Evictions: ${result.evictions}`);
-    });
     
     // Assertions
     expect(results[0].hitRatio).toBeLessThan(results[4].hitRatio); // Larger cache = better hit ratio

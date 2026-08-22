@@ -18,7 +18,7 @@ import * as PIXI from 'pixi.js';
 import { AxisSet3D } from '../geometry/Axis';
 import { NeuroSpace } from '../geometry/NeuroSpace';
 import { SliceTransform } from './SliceTransform';
-import { ICoordinateTransformer } from './interfaces';
+import { ICoordinateTransformer } from './interfaces/index';
 import { CoordinateValidator, ValidationOptions } from './CoordinateValidation';
 
 /**
@@ -213,7 +213,7 @@ export class CoordinateTransformer implements ICoordinateTransformer {
 
   /**
    * Safe version of sliceToVolumeCoord with validation
-   * @param slicePt - The local slice coordinate
+   * @param imagePt - The local image coordinate in pixels
    * @param options - Validation options
    * @returns A 3-element array or null if invalid
    */

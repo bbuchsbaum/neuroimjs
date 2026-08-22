@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Scatter field worker parity</title>
+  </head>
+  <body>
+    <div id="status">running</div>
+    <script type="module">
+      import {
+        NeuroSpace,
+        buildScatterField,
+        buildScatterFieldAsync,
+      } from '../../src/browser';
+
+      const status = document.querySelector('#status');
+      const affine = [
+        [1, 0.25, 0, 11],
+        [0, 2, 0.1, -7],
+        [0, 0, 3, 4],
+        [0, 0, 0, 1],
+      ];
+      const space = new NeuroSpace(
+        [5, 4, 3],
+        [1, 2, 3],
+        [11, -7, 4],
+        undefined,
+        affine,
+      );
+      const options = {
+        space,
+        points: [
+          { x: 13.25, y: -4.9, z: 7, weight: 2 },
+          { x: 11, y: -7, z: 4, weight: 0.5 },
+        ],
+        kernelParams: { sigma: 1.2 },
+        cutoffMm: 3.6,
+        combine: 'sum',
+        workerTimeoutMs: 10_000,
+      };
+
+      try {
+        if (typeof Worker === 'undefined') throw new Error('Worker is unavailable');
+        const sequential = buildScatterField(options);
+        const parallel = await buildScatterFieldAsync(options);
+        const sameData = parallel.data.length === sequential.data.length &&
+          parallel.data.every((value, index) => value === sequential.data[index]);
+        const sameAffine = JSON.stringify(parallel.volume.space.trans.to2DArray()) ===
+          JSON.stringify(affine);
+
+        if (!sameData) throw new Error('Worker data differ from the sequential oracle');
+        if (!sameAffine) throw new Error('Worker result did not preserve the affine');
+        if (parallel.maxValue !== sequential.maxValue ||
+            parallel.nonZeroCount !== sequential.nonZeroCount) {
+          throw new Error('Worker summary differs from the sequential oracle');
+        }
+
+        window.scatterFieldWorkerResult = {
+          maxValue: parallel.maxValue,
+          nonZeroCount: parallel.nonZeroCount,
+          workerSupported: true,
+        };
+        status.textContent = 'passed';
+      } catch (error) {
+        window.scatterFieldWorkerResult = { error: String(error) };
+        status.textContent = 'failed';
+      }
+    </script>
+  </body>
+</html>

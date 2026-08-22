@@ -8,7 +8,7 @@ import { AxisSet3D } from '../geometry/Axis';
  * SparseNeuroVec class representing a sparse 4D neuroimaging dataset.
  * Implements the NeuroVec interface.
  */
-export class SparseNeuroVec implements NeuroVec {
+export class SparseNeuroVec implements NeuroVec<Map<number, number[]>> {
   readonly space: NeuroSpace;
   private voxelData: Map<number, number[]>; // Maps voxel linear indices to time series data
   private defaultValue: number;
@@ -110,12 +110,7 @@ export class SparseNeuroVec implements NeuroVec {
       }
     }
 
-    const volumeSpace = new NeuroSpace(
-      [dimX, dimY, dimZ],
-      this.space.spacing.slice(0, 3),
-      this.space.origin.slice(0, 3),
-      this.space.axes
-    );
+    const volumeSpace = this.space.withDimensions([dimX, dimY, dimZ]);
 
     return new FloatNeuroVol(volumeSpace, volData);
   }

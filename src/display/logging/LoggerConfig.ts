@@ -42,12 +42,16 @@ export const LogCategories = {
 
 export type LogCategory = typeof LogCategories[keyof typeof LogCategories];
 
+function environmentVariable(name: string): string | undefined {
+  return typeof process === 'undefined' ? undefined : process.env[name];
+}
+
 /**
  * Initialize logger with environment-specific settings
  */
 export function initializeLogger(): void {
-  const isDevelopment = process.env.NODE_ENV === 'development';
-  const logLevel = process.env.LOG_LEVEL as keyof typeof LogLevel;
+  const isDevelopment = environmentVariable('NODE_ENV') === 'development';
+  const logLevel = environmentVariable('LOG_LEVEL') as keyof typeof LogLevel | undefined;
   
   Logger.getInstance({
     level: logLevel ? LogLevel[logLevel] : (isDevelopment ? LogLevel.DEBUG : LogLevel.INFO),
@@ -163,7 +167,7 @@ export function createDebugLogger(category: LogCategory): {
   time: <T>(label: string, fn: () => T | Promise<T>) => Promise<T>;
 } {
   const logger = getCategoryLogger(category);
-  const isDevelopment = process.env.NODE_ENV === 'development';
+  const isDevelopment = environmentVariable('NODE_ENV') === 'development';
   
   return {
     debug: isDevelopment ? logger.debug.bind(logger) : () => {},

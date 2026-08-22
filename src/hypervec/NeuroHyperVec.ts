@@ -168,7 +168,7 @@ export class DenseNeuroHyperVec implements INeuroHyperVec {
         }
       }
       
-      return new FloatNeuroVol(this.space, volData);
+      return new FloatNeuroVol(this.space.withDimensions(this.spatialDim), volData);
     }
     
     // Extract 4D data (NeuroVec)
@@ -192,12 +192,7 @@ export class DenseNeuroHyperVec implements INeuroHyperVec {
     }
     
     // Create a 4D space for NeuroVec
-    const space4D = new NeuroSpace(
-      [...this.spatialDim, timeIndices.length],
-      [...this.space.spacing, 1], // TR=1 for now
-      [...this.space.origin, 0],
-      this.space.axes
-    );
+    const space4D = this.space.withDimensions([...this.spatialDim, timeIndices.length]);
     
     // Create data array for NeuroVec
     const volumeSize = this.spatialDim[0] * this.spatialDim[1] * this.spatialDim[2];

@@ -39,7 +39,7 @@ test.describe('Multi-layer viewer demo', () => {
     await expect(panel).toBeVisible();
 
     // The layer selector should have two options
-    const options = panel.locator('sl-select sl-option');
+    const options = panel.locator('select[aria-label="Select layer"] option');
     await expect(options).toHaveCount(2);
 
     // Check layer names
@@ -52,23 +52,18 @@ test.describe('Multi-layer viewer demo', () => {
   test('layer selection switches control values', async ({ page }) => {
     const panel = page.locator('layer-control-panel');
 
-    // Get the layer selector (first sl-select)
-    const layerSelect = panel.locator('sl-select').first();
+    const layerSelect = panel.getByLabel('Select layer');
 
     // Read the initial alpha value (T1-background should be opacity=1)
-    const alphaSlider = panel.locator('sl-range');
-    const initialAlpha = await alphaSlider.evaluate((el: any) => el.value);
+    const alphaSlider = panel.getByLabel('Alpha', { exact: true });
+    await expect(alphaSlider).toHaveValue('1');
 
     // Select the activation layer
-    await layerSelect.click();
-    await page.waitForTimeout(300);
-    const activationOption = panel.locator('sl-option').filter({ hasText: 'activation' });
-    await activationOption.click();
-    await page.waitForTimeout(500);
+    await layerSelect.selectOption('activation');
 
     // Alpha should now be 0.7 for the activation layer
-    const newAlpha = await alphaSlider.evaluate((el: any) => el.value);
-    expect(parseFloat(newAlpha)).toBeCloseTo(0.7, 1);
+    await expect(alphaSlider).toHaveValue('0.7');
+    await expect(panel.getByLabel('Colormap')).toHaveValue('Hot');
   });
 
   test('sync toggle works', async ({ page }) => {

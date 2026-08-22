@@ -9,9 +9,12 @@ const VIEWS: Record<string, AxisSet3D> = {
   coronal: new AxisSet3D(NamedAxis.LEFT_RIGHT, NamedAxis.INF_SUP, NamedAxis.POST_ANT),
 };
 
-function randomWorld(space: any): number[] {
+function sampledWorld(space: any, sample: number): number[] {
   const [min, max] = space.bounds();
-  return [0, 1, 2].map(i => min[i] + Math.random() * (max[i] - min[i]));
+  const fractions = [0.137, 0.419, 0.733];
+  return [0, 1, 2].map(i =>
+    min[i] + ((fractions[i] * (sample + 1)) % 1) * (max[i] - min[i])
+  );
 }
 
 describe('SliceTransform mapping properties', () => {
@@ -24,7 +27,7 @@ describe('SliceTransform mapping properties', () => {
     it(`round-trip consistency: world→pixel→world (${name})`, () => {
       const space = vol.space;
       for (let n = 0; n < 10; n++) {
-        const world = randomWorld(space);
+        const world = sampledWorld(space, n);
 
         // Get slice index from original space - use the pinned dimension for this view
         const grid = space.coordToGrid(world);

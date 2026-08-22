@@ -44,10 +44,20 @@ export class WorkerPool {
   private readonly logger = getCategoryLogger(LogCategories.WORKER);
   
   constructor(options: WorkerPoolOptions = {}) {
+    const hardwareConcurrency =
+      typeof navigator !== 'undefined' ? navigator.hardwareConcurrency : undefined;
+    const maxWorkers = options.maxWorkers ?? hardwareConcurrency ?? 4;
+    if (!Number.isSafeInteger(maxWorkers) || maxWorkers < 1) {
+      throw new RangeError('maxWorkers must be a positive integer');
+    }
+    const idleTimeout = options.idleTimeout ?? 30000;
+    if (!Number.isFinite(idleTimeout) || idleTimeout < 0) {
+      throw new RangeError('idleTimeout must be a finite, non-negative number');
+    }
     this.options = {
-      maxWorkers: options.maxWorkers || navigator.hardwareConcurrency || 4,
-      workerUrl: options.workerUrl || '/workers/SliceWorker.js',
-      idleTimeout: options.idleTimeout || 30000, // 30 seconds
+      maxWorkers,
+      workerUrl: options.workerUrl ?? '/workers/SliceWorker.js',
+      idleTimeout,
       reuseWorkers: options.reuseWorkers !== false
     };
     
@@ -111,16 +121,11 @@ export class WorkerPool {
     
     await Promise.all(
       requests.map(async (request) => {
-        try {
-          const result = await this.execute<T>(
-            request,
-            onProgress ? (progress) => onProgress(request.id, progress) : undefined
-          );
-          results.set(request.id, result);
-        } catch (error) {
-          // Store error in results
-          results.set(request.id, error as T);
-        }
+        const result = await this.execute<T>(
+          request,
+          onProgress ? (progress) => onProgress(request.id, progress) : undefined
+        );
+        results.set(request.id, result);
       })
     );
     
@@ -131,7 +136,7 @@ export class WorkerPool {
    * Get an available worker from the pool
    */
   private getAvailableWorker(): PooledWorker<unknown> | null {
-    return this.workers.find(w => !w.busy && !this.isTerminated(w.worker)) || null;
+    return this.workers.find(w => !w.busy) || null;
   }
   
   /**
@@ -239,6 +244,10 @@ export class WorkerPool {
     pooledWorker.busy = false;
     pooledWorker.currentTask = undefined;
     pooledWorker.lastUsed = Date.now();
+
+    if (!this.options.reuseWorkers) {
+      this.removeWorker(pooledWorker);
+    }
     
     // Process next queued task
     this.processNextTask();
@@ -254,10 +263,12 @@ export class WorkerPool {
     
     const availableWorker = this.getAvailableWorker();
     
-    if (availableWorker) {
-      const task = this.taskQueue.shift()!;
-      this.assignTask(availableWorker, task);
-    }
+    const worker = availableWorker ??
+      (this.workers.length < this.options.maxWorkers ? this.createWorker() : null);
+    if (!worker) return;
+
+    const task = this.taskQueue.shift()!;
+    this.assignTask(worker, task);
   }
   
   /**
@@ -271,7 +282,7 @@ export class WorkerPool {
       
       try {
         pooledWorker.worker.terminate();
-      } catch (error) {
+      } catch {
         // Ignore termination errors
       }
     }
@@ -301,19 +312,6 @@ export class WorkerPool {
   }
   
   /**
-   * Check if a worker is terminated
-   */
-  private isTerminated(worker: Worker): boolean {
-    try {
-      // Try to post a message to check if worker is alive
-      worker.postMessage({ type: 'ping' });
-      return false;
-    } catch {
-      return true;
-    }
-  }
-  
-  /**
    * Get pool statistics
    */
   getStats(): {
@@ -339,7 +337,7 @@ export class WorkerPool {
     this.terminated = true;
     
     // Stop idle checking
-    if (this.idleCheckInterval) {
+    if (this.idleCheckInterval !== undefined) {
       clearInterval(this.idleCheckInterval);
       this.idleCheckInterval = undefined;
     }
@@ -358,7 +356,7 @@ export class WorkerPool {
       
       try {
         pooledWorker.worker.terminate();
-      } catch (error) {
+      } catch {
         // Ignore termination errors
       }
     });
@@ -370,7 +368,10 @@ export class WorkerPool {
    * Set maximum number of workers
    */
   setMaxWorkers(max: number): void {
-    this.options.maxWorkers = Math.max(1, max);
+    if (!Number.isSafeInteger(max) || max < 1) {
+      throw new RangeError('maxWorkers must be a positive integer');
+    }
+    this.options.maxWorkers = max;
     
     // Remove excess idle workers if needed
     while (this.workers.length > this.options.maxWorkers) {

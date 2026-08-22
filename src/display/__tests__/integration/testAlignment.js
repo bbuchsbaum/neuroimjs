@@ -94,4 +94,4 @@ console.log('                    Aligned center\n');
 
 console.log('✓ Test calculations complete!');
 console.log('\nTo run the full visual test, use:');
-console.log('  npx ts-node runAlignmentTest.ts --visual --output ./alignment-output');
+console.log('  npx tsx runAlignmentTest.ts --visual --output ./alignment-output');

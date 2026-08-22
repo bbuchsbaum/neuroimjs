@@ -98,37 +98,18 @@ describe('ImageLayer with Pooling', () => {
     expect(stats.reuseRatio).toBeGreaterThan(0.85); // >85% reuse rate
   });
 
-  it('should show performance comparison with and without pooling', () => {
-    // Without pooling
-    const startNoPool = performance.now();
-    const spritesNoPool: any[] = [];
-    
-    for (let i = 0; i < 1000; i++) {
-      spritesNoPool.push(new (PIXI.Sprite as any)());
-    }
-    
-    const durationNoPool = performance.now() - startNoPool;
-    
-    // With pooling
+  it('reuses one released sprite across repeated acquire/release cycles', () => {
     const pool = new SpritePool(50);
-    const startWithPool = performance.now();
-    
+
     for (let i = 0; i < 1000; i++) {
       const sprite = pool.acquire();
       pool.release(sprite);
     }
-    
-    const durationWithPool = performance.now() - startWithPool;
-    
-    console.log('Performance comparison:');
-    console.log('  Without pooling:', durationNoPool.toFixed(2), 'ms');
-    console.log('  With pooling:', durationWithPool.toFixed(2), 'ms');
-    console.log('  Improvement:', ((1 - durationWithPool/durationNoPool) * 100).toFixed(1), '%');
-    
+
     const stats = pool.getStats();
-    console.log('Pool stats:', stats);
-    
-    // With pooling should be faster
-    expect(durationWithPool).toBeLessThan(durationNoPool);
+    expect(stats.createCount).toBe(1);
+    expect(stats.reuseCount).toBe(999);
+    expect(stats.activeCount).toBe(0);
+    expect(stats.poolSize).toBe(1);
   });
 });

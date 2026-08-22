@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Command-line utility to run multi-layer alignment test
- * Usage: npx ts-node runAlignmentTest.ts [--visual] [--output ./output-dir]
+ * Usage: npx tsx runAlignmentTest.ts [--visual] [--output ./output-dir]
  */
 
 import { ImageLayer } from '../../ImageLayer.js';

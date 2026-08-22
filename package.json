@@ -8,14 +8,13 @@
   "exports": {
     ".": {
       "types": "./dist/types/index.d.ts",
-      "browser": "./dist/neuroimjs.es.js",
       "import": "./dist/esm/index.js",
       "require": "./dist/cjs/index.js"
     },
     "./browser": {
-      "types": "./dist/types/index.d.ts",
+      "types": "./dist/types/browser.d.ts",
       "import": "./dist/neuroimjs.es.js",
-      "require": "./dist/neuroimjs.umd.js"
+      "default": "./dist/neuroimjs.es.js"
     }
   },
   "files": [
@@ -32,10 +31,10 @@
     "dev": "vite",
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "build": "npm run clean && npm run build:cjs && npm run build:esm && npm run build:types",
-    "build:vite": "vite build",
-    "build:cjs": "tsc -p tsconfig.cjs.build.json && echo '{\"type\":\"commonjs\"}' > dist/cjs/package.json",
+    "build:vite": "node scripts/clean-browser-build.mjs && vite build",
+    "build:cjs": "tsc -p tsconfig.cjs.build.json && node scripts/write-cjs-package.mjs",
     "build:esm": "tsc -p tsconfig.esm.build.json && node scripts/fix-esm-imports.js",
-    "build:types": "tsc -p tsconfig.types.build.json",
+    "build:types": "tsc -p tsconfig.types.build.json && node scripts/fix-esm-imports.js",
     "build:quick": "tsc -p tsconfig.cjs.build.json",
     "build:demo": "tsc -p tsconfig.build.json examples/orthogonal_slice_demo.ts --outDir dist/examples",
     "test": "vitest",
@@ -45,12 +44,13 @@
     "test:alignment": "vitest run src/display/__tests__/integration/MultiLayerAlignment",
     "test:debug": "vitest run --reporter=verbose --no-coverage",
     "lint": "eslint src tests",
+    "lint:ci": "eslint src tests --max-warnings 608",
     "format": "prettier --write src tests",
     "docs:api": "typedoc",
     "docs:dev": "npm run docs:api && vitepress dev docs",
     "docs:build": "npm run docs:api && vitepress build docs",
     "docs:preview": "vitepress preview docs",
-    "prepublishOnly": "npm run build && npm run build:vite",
+    "prepublishOnly": "npm run verify:release",
     "demo:ortho": "tsx examples/orthogonal_slice_demo.ts",
     "demo:extract": "tsx examples/extract_orthogonal_slices.ts",
     "demo:test-ortho": "tsx examples/test_orthogonal_slicing.ts",
@@ -62,11 +62,16 @@
     "demo:two-view": "vite --open /examples/two-view-sync.html",
     "demo:multi-panel": "vite --open /examples/multi-panel-custom-layout.html",
     "demo:multi-layer": "vite --open /examples/multi-layer-viewer.html",
+    "demo:overlay-review": "vite --open /examples/overlay-review-demo.html",
     "demo:composable": "vite --open /examples/composable-views-index.html",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:headed": "playwright test --headed",
-    "test:e2e:update": "playwright test --update-snapshots"
+    "test:e2e:update": "playwright test --update-snapshots",
+    "test:package": "node scripts/verify-package.mjs",
+    "check:bundle-size": "node scripts/check-bundle-size.mjs",
+    "audit:prod": "npm audit --omit=dev --audit-level=high",
+    "verify:release": "npm run test:types && npm run lint:ci && npm test -- --run --silent && npm run build && npm run build:vite && npm run check:bundle-size && npm run test:package && npm run docs:api && npm run audit:prod"
   },
   "keywords": [
     "neuroimaging",
@@ -90,97 +95,46 @@
     "url": "https://github.com/bbuchsbaum/neuroimjs/issues"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20.19"
   },
   "dependencies": {
-    "axios": "^1.7.7",
+    "axios": "^1.19.0",
     "buffer": "^6.0.3",
-    "nifti-reader-js": "^0.8.0",
-    "pako": "^2.1.0"
-  },
-  "peerDependencies": {
-    "@lit/reactive-element": "^1.6.0",
-    "@shoelace-style/shoelace": "^2.17.1",
-    "chroma-js": "^3.1.1",
-    "lit": "^3.2.1",
-    "lit-element": "^4.1.1",
+    "chroma-js": "^3.2.0",
+    "lit": "^3.3.3",
     "mitt": "^3.0.1",
-    "mobx": "^6.13.3",
+    "ml-matrix": "^6.15.0",
+    "mobx": "^6.16.1",
+    "nifti-reader-js": "^0.8.0",
     "nouislider": "^15.8.1",
-    "pixi.js": "^8.4.1"
-  },
-  "peerDependenciesMeta": {
-    "@lit/reactive-element": {
-      "optional": true
-    },
-    "@shoelace-style/shoelace": {
-      "optional": true
-    },
-    "chroma-js": {
-      "optional": true
-    },
-    "lit": {
-      "optional": true
-    },
-    "lit-element": {
-      "optional": true
-    },
-    "mitt": {
-      "optional": true
-    },
-    "mobx": {
-      "optional": true
-    },
-    "nouislider": {
-      "optional": true
-    },
-    "pixi.js": {
-      "optional": true
-    }
-  },
-  "optionalDependencies": {
-    "canvas": "^2.11.2",
-    "opencv-ts": "^1.3.6"
+    "pixi.js": "^8.20.0",
+    "pako": "^2.2.0"
   },
   "devDependencies": {
-    "@eslint/js": "^9.39.4",
-    "@lit/reactive-element": "^1.6.3",
-    "@playwright/test": "^1.57.0",
-    "@types/chroma-js": "^2.4.4",
-    "@types/node": "^18.19.118",
-    "@types/pako": "^2.0.3",
-    "@types/pixi.js": "^4.8.9",
-    "autoprefixer": "^10.4.20",
-    "chroma-js": "^3.2.0",
-    "eslint": "^9.39.4",
-    "globals": "^17.6.0",
+    "@eslint/js": "^9.39.5",
+    "@playwright/test": "^1.62.1",
+    "@types/chroma-js": "^3.1.2",
+    "@types/node": "^20.19.0",
+    "@types/pako": "^2.0.4",
+    "autoprefixer": "^10.5.4",
+    "canvas": "^3.2.3",
+    "eslint": "^9.39.5",
+    "globals": "^17.11.0",
     "jsdom": "^26.0.0",
-    "lit": "^3.3.3",
-    "lit-element": "^4.2.2",
-    "mitt": "^3.0.1",
-    "ml-matrix": "^6.12.1",
-    "mobx": "^6.15.4",
-    "node-fetch": "^2.7.0",
-    "nouislider": "^15.8.1",
-    "pixi.js": "^8.18.1",
-    "postcss": "^8.4.47",
-    "tailwindcss": "^3.4.13",
-    "terser": "^5.32.0",
-    "ts-node": "^10.9.2",
-    "tsx": "^4.20.3",
-    "typedoc": "^0.28.19",
+    "opencv-ts": "^1.3.6",
+    "postcss": "^8.5.26",
+    "tailwindcss": "^3.4.19",
+    "terser": "^5.50.0",
+    "tsx": "^4.23.12",
+    "typedoc": "^0.28.20",
     "typedoc-plugin-markdown": "^4.12.0",
     "typedoc-vitepress-theme": "^1.1.3",
-    "typescript": "^5.6.2",
-    "typescript-eslint": "^8.60.1",
-    "vite": "^5.4.4",
-    "vite-plugin-checker": "^0.8.0",
-    "vite-plugin-dts": "^3.0.0",
-    "vite-plugin-static-copy": "^2.0.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.67.0",
+    "vite": "^7.3.6",
     "vitepress": "^1.6.4",
-    "vitest": "^2.0.5",
-    "vue": "^3.5.35"
+    "vitest": "^3.2.7",
+    "vue": "^3.5.41"
   },
-  "type": "module",
-  "browser": "./dist/neuroimjs.es.js"
+  "type": "module"
 }

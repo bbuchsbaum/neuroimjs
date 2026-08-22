@@ -3,6 +3,8 @@
  * to support UI components like the StatusBar. This allows components to access
  * essential viewer state without depending on specific viewer implementations.
  */
+import type { AxisSet3D } from '../geometry/Axis';
+
 export interface ViewerStateInfo {
   /**
    * Current 3D coordinate position in the volume.
@@ -41,7 +43,7 @@ export interface ViewerStateInfo {
    * For SliceViewer, this is a single AxisSet3D.
    * For OrthogonalImageViewer, this could be a record of orientations by view name.
    */
-  readonly viewOrientation?: any; // Using 'any' temporarily as AxisSet3D might not be appropriate here
+  readonly viewOrientation?: AxisSet3D | Record<string, AxisSet3D>;
   
   /**
    * The current scaling/zoom level of the viewer(s).
@@ -65,4 +67,4 @@ export interface ViewerStateInfo {
     visible: boolean;
     opacity?: number;
   }>;
-} 
+}

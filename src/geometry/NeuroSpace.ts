@@ -29,18 +29,28 @@ export class NeuroSpace {
    * @param transform - Optional transformation matrix. If not provided, an identity matrix is used.
    */
   constructor(
-    dim: number[],
-    spacing?: number[],
-    origin?: number[],
+    dim: readonly number[],
+    spacing?: readonly number[],
+    origin?: readonly number[],
     axes?: AxisSet,
-    transform?: number[][]
+    transform?: Matrix | readonly (readonly number[])[]
   ) {
-    // Check for non-positive dimensions
-    if (dim.some(d => d <= 0)) {
-      throw new Error('All dimension values must be positive');
+    if (dim.length === 0) {
+      throw new Error('NeuroSpace requires at least one dimension');
+    }
+    if (dim.some(d => !Number.isSafeInteger(d) || d <= 0)) {
+      throw new Error('All dimension values must be positive safe integers');
     }
 
-    this.dimValues = dim;
+    const size = dim.reduce((product, value) => product * value, 1);
+    if (!Number.isSafeInteger(size)) {
+      throw new Error('NeuroSpace size exceeds JavaScript safe integer range');
+    }
+
+    // NeuroSpace is immutable from the caller's perspective. Keep defensive
+    // copies so later mutations of constructor arguments cannot desynchronize
+    // dimensions, metadata, and the cached inverse affine.
+    this.dimValues = [...dim];
     const D = Math.min(dim.length, 3);
 
     // Check if spacing and origin lengths match
@@ -48,29 +58,48 @@ export class NeuroSpace {
       throw new Error('Spacing and origin lengths must match');
     }
 
+    const validMetadataLength = (length: number): boolean =>
+      length === D || (dim.length > 3 && length === dim.length);
+    if (spacing && !validMetadataLength(spacing.length)) {
+      throw new Error(`Spacing must contain ${D} spatial values${dim.length > 3 ? ` or ${dim.length} dimension values` : ''}`);
+    }
+    if (origin && !validMetadataLength(origin.length)) {
+      throw new Error(`Origin must contain ${D} spatial values${dim.length > 3 ? ` or ${dim.length} dimension values` : ''}`);
+    }
+
     // Initialize spacingValues to an array of ones
-    this.spacingValues = Array(D).fill(1);
+    this.spacingValues = spacing ? [...spacing] : Array(D).fill(1);
     if (spacing != null) {
       // Check for non-positive spacing - still require positive spacing even if dimensions can be zero
-      if (spacing.some(s => s <= 0)) {
-        throw new Error('All spacing values must be positive');
-      }
-      for (let i = 0; i < Math.min(spacing.length, D); i++) {
-        this.spacingValues[i] = spacing[i];
+      if (spacing.some(s => !Number.isFinite(s) || s <= 0)) {
+        throw new Error('All spacing values must be finite and positive');
       }
     }
 
     // Initialize originValues to an array of zeros
-    this.originValues = Array(D).fill(0);
+    this.originValues = origin ? [...origin] : Array(D).fill(0);
     if (origin != null) {
-      for (let i = 0; i < Math.min(origin.length, D); i++) {
-        this.originValues[i] = origin[i];
+      if (origin.some(value => !Number.isFinite(value))) {
+        throw new Error('All origin values must be finite');
       }
     }
 
     if (transform) {
+      const transformValues = transform instanceof Matrix
+        ? transform.to2DArray()
+        : transform.map(row => [...row]);
+      const expectedSize = D + 1;
+      if (
+        transformValues.length !== expectedSize ||
+        transformValues.some(row => row.length !== expectedSize) ||
+        transformValues.some(row => row.some(value => !Number.isFinite(value)))
+      ) {
+        throw new Error(
+          `Transformation matrix must be a finite ${expectedSize}x${expectedSize} matrix`
+        );
+      }
       // Use the provided transformation matrix
-      this._trans = new Matrix(transform);
+      this._trans = new Matrix(transformValues);
 
       // Only overwrite originValues if origin is not provided
       if (origin == null) {
@@ -97,11 +126,19 @@ export class NeuroSpace {
       }
 
       if (axes) {
+        if (axes.axes().length !== D) {
+          throw new Error(`Axis count ${axes.axes().length} does not match spatial rank ${D}`);
+        }
         this._axes = axes;
       } else {
-        this._axes = nearestAnatomy(this._trans);
+        this._axes = D === 1
+          ? new AxisSet1D(NamedAxis.LEFT_RIGHT)
+          : nearestAnatomy(this._trans);
       }
     } else if (axes) {
+      if (axes.axes().length !== D) {
+        throw new Error(`Axis count ${axes.axes().length} does not match spatial rank ${D}`);
+      }
       // Build the transformation matrix from axes, spacing, and origin
       this._axes = axes;
       this._trans = Matrix.zeros(D + 1, D + 1);
@@ -124,9 +161,11 @@ export class NeuroSpace {
       this._trans.set(D, D, 1);
     } else {
       // Neither transform nor axes provided, use default axes and identity transform
-      this._axes = D === 2 
-        ? new AxisSet2D(NamedAxis.LEFT_RIGHT, NamedAxis.POST_ANT)
-        : new AxisSet3D(NamedAxis.LEFT_RIGHT, NamedAxis.POST_ANT, NamedAxis.INF_SUP);
+      this._axes = D === 1
+        ? new AxisSet1D(NamedAxis.LEFT_RIGHT)
+        : D === 2
+          ? new AxisSet2D(NamedAxis.LEFT_RIGHT, NamedAxis.POST_ANT)
+          : new AxisSet3D(NamedAxis.LEFT_RIGHT, NamedAxis.POST_ANT, NamedAxis.INF_SUP);
 
       this._trans = Matrix.zeros(D + 1, D + 1);
       const axesArray = this._axes.axes();
@@ -457,12 +496,61 @@ export class NeuroSpace {
   }
 
   get trans(): Matrix {
-    return this._trans;
+    return this._trans.clone();
   }
 
   get inverseTrans(): Matrix {
-    return this._inverseTrans;
+    return this._inverseTrans.clone();
   } 
+
+  /**
+   * Create a space with different logical dimensions but identical spatial
+   * geometry. This is intended for 3D volume <-> 4D vector conversions, where
+   * the complete affine (including obliquity/shear) must be retained.
+   */
+  withDimensions(dim: readonly number[]): NeuroSpace {
+    if (Math.min(dim.length, 3) !== Math.min(this.ndim(), 3)) {
+      throw new Error('New dimensions must have the same spatial rank');
+    }
+    const spatialRank = Math.min(dim.length, 3);
+    const metadataLength = dim.length > 3 && this.spacingValues.length > 3
+      ? dim.length
+      : spatialRank;
+    return new NeuroSpace(
+      dim,
+      this.spacingValues.slice(0, metadataLength),
+      this.originValues.slice(0, metadataLength),
+      this._axes,
+      this._trans.to2DArray()
+    );
+  }
+
+  /** Compare complete spatial geometry using a scale-aware affine tolerance. */
+  isSpatiallyCompatibleWith(other: NeuroSpace, tolerance = 1e-6): boolean {
+    if (!Number.isFinite(tolerance) || tolerance < 0) {
+      throw new Error('Geometry tolerance must be finite and non-negative');
+    }
+
+    const rank = Math.min(this.ndim(), 3);
+    if (rank !== Math.min(other.ndim(), 3)) return false;
+    if (this.dimValues.slice(0, rank).some((value, i) => value !== other.dimValues[i])) {
+      return false;
+    }
+    if (!this._axes.equals(other._axes)) return false;
+    if (this._trans.rows !== other._trans.rows || this._trans.columns !== other._trans.columns) {
+      return false;
+    }
+
+    for (let row = 0; row < this._trans.rows; row++) {
+      for (let column = 0; column < this._trans.columns; column++) {
+        const a = this._trans.get(row, column);
+        const b = other._trans.get(row, column);
+        const scale = Math.max(1, Math.abs(a), Math.abs(b));
+        if (Math.abs(a - b) > tolerance * scale) return false;
+      }
+    }
+    return true;
+  }
 
   /**
    * Calculates the bounds of the NeuroSpace.
@@ -496,9 +584,7 @@ export class NeuroSpace {
   indexToCoord(idx: number): number[] {
     const d = Math.min(3, this.ndim());
     const grid = this.indexToGrid(idx);
-    const extendedGrid = [...grid.slice(0, d), 1];
-    const res = this.trans.mmul(Matrix.columnVector(extendedGrid));
-    return res.getColumn(0).slice(0, d);
+    return this.applyAffine(this._trans, grid.slice(0, d));
   }
 
   /**
@@ -507,8 +593,8 @@ export class NeuroSpace {
    * @returns The corresponding linear index.
    */
   coordToIndex(coords: number[]): number {
-    const grid = this._inverseTrans.mmul(Matrix.columnVector([...coords, 1])).to1DArray();
-    return gridToIndex(this.dim, grid.slice(0, this.ndim()));
+    const grid = this.applyAffine(this._inverseTrans, coords, true);
+    return gridToIndex(this.dim, grid);
   }
 
   /**
@@ -517,8 +603,7 @@ export class NeuroSpace {
    * @returns An array representing grid coordinates.
    */
   coordToGrid(coords: number[]): number[] {
-    const grid = this._inverseTrans.mmul(Matrix.columnVector([...coords, 1])).to1DArray();
-    return grid.slice(0, this.ndim());
+    return this.applyAffine(this._inverseTrans, coords, true);
   }
 
   containsCoord(coords: number[]): boolean {
@@ -575,15 +660,31 @@ export class NeuroSpace {
    * @returns An array representing real-world coordinates.
    */
   gridToCoord(coords: number[]): number[] {
-    const requiredSize = this.trans.rows;
-    const paddingSize = requiredSize - coords.length - 1; // Subtracting 1 for the homogeneous coordinate
-    if (paddingSize < 0) {
-      throw new Error('Too many coordinates provided for gridToCoord.');
+    return this.applyAffine(this._trans, coords);
+  }
+
+  private applyAffine(matrix: Matrix, coords: readonly number[], requireFullRank = false): number[] {
+    const rank = Math.min(this.ndim(), 3);
+    if (coords.length > rank || (requireFullRank && coords.length !== rank)) {
+      throw new Error(
+        requireFullRank
+          ? `Expected ${rank} coordinates, received ${coords.length}`
+          : 'Too many coordinates provided for affine transform.'
+      );
     }
-    const extendedCoords = [...coords, ...Array(paddingSize).fill(0), 1];
-    const ret = this.trans.mmul(Matrix.columnVector(extendedCoords)).to1DArray();
-    const md = Math.min(this.ndim(), 3);
-    return ret.slice(0, md);
+    if (coords.some(value => !Number.isFinite(value))) {
+      throw new Error('Coordinates must be finite');
+    }
+
+    const result = new Array<number>(rank);
+    for (let row = 0; row < rank; row++) {
+      let value = matrix.get(row, rank);
+      for (let column = 0; column < rank; column++) {
+        value += matrix.get(row, column) * (coords[column] ?? 0);
+      }
+      result[row] = value;
+    }
+    return result;
   }
 
   /**
@@ -640,7 +741,7 @@ export class NeuroSpace {
     // so every voxel keeps its physical (world) coordinate. This preserves world
     // geometry exactly — including translation and obliquity — by construction,
     // rather than re-deriving the origin in the (sign-ambiguous) new frame.
-    const newTrans = this.trans.mmul(M);
+    const newTrans = this._trans.mmul(M);
     const newOrigin = new Array(ndim);
     for (let i = 0; i < ndim; i++) {
       newOrigin[i] = newTrans.get(i, ndim);
@@ -915,7 +1016,7 @@ computeAxisPermutation(oldAxes: NamedAxis[], newAxes: NamedAxis[]): { perm: numb
    * @returns The transformation Matrix.
    */
   getTrans(): Matrix {
-    return this.trans;
+    return this._trans.clone();
   }
 
   /**
@@ -923,7 +1024,7 @@ computeAxisPermutation(oldAxes: NamedAxis[], newAxes: NamedAxis[]): { perm: numb
    * @returns The inverse transformation Matrix.
    */
   getInverseTrans(): Matrix {
-    return this._inverseTrans;
+    return this._inverseTrans.clone();
   }
 
   /**
@@ -1261,9 +1362,6 @@ export function gridToIndex(dims: number[], coords: number[]): number {
   }
   return index;
 }
-
-
-
 
 
 

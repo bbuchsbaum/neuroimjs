@@ -15,17 +15,20 @@ describe('DenseNeuroVol.getSliceAt() produces valid 2D slice spaces', () => {
     coronal: new AxisSet3D(NamedAxis.LEFT_RIGHT, NamedAxis.INF_SUP, NamedAxis.POST_ANT),
   };
 
-  function randomWorld(space: any): number[] {
+  function sampledWorld(space: any, sample: number): number[] {
     const [min, max] = space.bounds();
-    return [0, 1, 2].map(i => min[i] + Math.random() * (max[i] - min[i]));
+    const fractions = [0.137, 0.419, 0.733];
+    return [0, 1, 2].map(i =>
+      min[i] + ((fractions[i] * (sample + 1)) % 1) * (max[i] - min[i])
+    );
   }
 
   for (const [name, axes] of Object.entries(VIEWS)) {
     it(`never constructs a singular 2D transform for ${name}`, () => {
       const space = vol.space;
-      // test a handful of random world positions
+      // Test a deterministic spread of world positions.
       for (let n = 0; n < 8; n++) {
-        const world = randomWorld(space);
+        const world = sampledWorld(space, n);
         const re = space.reorient(axes);
         const g = re.coordToGrid(world);
         const sliceIndex = Math.round(g[2]);
@@ -45,4 +48,3 @@ describe('DenseNeuroVol.getSliceAt() produces valid 2D slice spaces', () => {
     });
   }
 });
-

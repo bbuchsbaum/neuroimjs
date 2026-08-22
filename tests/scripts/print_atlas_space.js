@@ -10,7 +10,6 @@ import { fileURLToPath } from 'url';
 import * as fs from 'fs/promises';
 import * as nifti from 'nifti-reader-js';
 import { Matrix, determinant } from 'ml-matrix';
-import fetch from 'node-fetch';
 
 // Try to import NeuroSpace directly from the source file
 try {
@@ -355,4 +354,4 @@ async function main() {
 }
 
 // Run the main function
-main(); 
+main();

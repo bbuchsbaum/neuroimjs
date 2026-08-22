@@ -4,7 +4,6 @@ import { NeuroSlice } from '../volume/NeuroSlice';
 import { AxisSet2D, AxisSet3D, NamedAxis } from '../geometry/Axis';
 import { NeuroSpace } from '../geometry/NeuroSpace';
 import { ImageSlice } from './ImageSlice';
-import { createImageData } from 'canvas';
 import { makeAutoObservable, observable, action } from 'mobx';
 import { Range, Threshold } from '../types';
 import { Matrix } from 'ml-matrix';
@@ -17,9 +16,6 @@ import { LRUCache } from '../utils/LRUCache';
 interface CustomImageData extends ImageData {
   colorSpace: PredefinedColorSpace;
 }
-
-// In environments without `window` (e.g., Node), fallback to `createImageData`.
-const ImageDataCtor = typeof window !== 'undefined' ? window.ImageData : createImageData;
 
 /**
  * VolLayer is a wrapper around a NeuroVol (3D neuroimaging volume) that
@@ -267,21 +263,15 @@ export class VolLayer {
     const data = slice.getData();
     const [width, height] = slice.dim;
 
-    // Use the available ImageData constructor (browser or node/canvas).
-    let imageData: CustomImageData;
-    if (typeof window !== 'undefined' && window.ImageData) {
-      imageData = new window.ImageData(
-        new Uint8ClampedArray(width * height * 4),
-        width,
-        height
-      ) as CustomImageData;
-    } else {
-      imageData = createImageData(
-        new Uint8ClampedArray(width * height * 4),
-        width,
-        height
-      ) as CustomImageData;
-    }
+    const rgba = new Uint8ClampedArray(width * height * 4);
+    const imageData = typeof globalThis.ImageData === 'function'
+      ? new globalThis.ImageData(rgba, width, height) as CustomImageData
+      : {
+          data: rgba,
+          width,
+          height,
+          colorSpace: 'srgb' as PredefinedColorSpace,
+        } as CustomImageData;
 
     // Fill the imageData based on intensity values using the color map.
     this.colorMap.fillImageData(imageData, data);

@@ -12,7 +12,7 @@ import { deepEqual } from '../utils/deepEqual';
 /**
  * Interface for Atlas Metadata
  */
-interface AtlasMetadata {
+export interface AtlasMetadata {
   name: string;
   labels: string[];
   ids: number[];
@@ -25,7 +25,7 @@ interface AtlasMetadata {
 }
 
  // Define an interface for the options
- interface SchaeferAtlasOptions {
+export interface SchaeferAtlasOptions {
   parcels?: 100 | 200 | 300 | 400 | 500 | 600 | 800 | 1000;
   networks?: 7 | 17;
   resolution?: 1 | 2;

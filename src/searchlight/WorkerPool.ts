@@ -1,224 +1,334 @@
 /**
- * Worker pool for managing parallel searchlight computations.
- * 
- * This class manages a pool of Web Workers for efficient parallel
- * processing of searchlight analyses.
+ * Browser Web Worker pool for spherical searchlight geometry.
+ *
+ * Workers receive linear center indices and return flat coordinate buffers. The
+ * parent thread owns the NeuroSpace and reconstructs ROIVolWindow instances so
+ * custom affines and axis metadata never need to be serialized.
  */
 
 import { LogicalNeuroVol } from '../volume/LogicalNeuroVol';
-import { ROIVolWindow } from '../roi/ROI_improved';
-import { NeuroSpace } from '../geometry/NeuroSpace';
 
 export interface WorkerPoolOptions {
   numWorkers?: number;
   onProgress?: (progress: number) => void;
 }
 
-interface WorkerTask {
-  indices: number[];
-  startIdx: number;
-  resolve: (results: any[]) => void;
-  reject: (error: Error) => void;
+export interface SearchlightWorkerResult {
+  /** Flat [i, j, k, ...] grid coordinates. */
+  coords: Int32Array;
+  data: Float32Array;
+  centerIdx: number;
 }
 
+interface WorkerHandle {
+  worker: Worker;
+  url: string;
+}
+
+interface InitializeRequest {
+  type: 'initialize';
+  data: {
+    dimensions: [number, number, number];
+    spacing: [number, number, number];
+    radius: number;
+  };
+}
+
+interface ComputeRequest {
+  type: 'compute';
+  data: {
+    centerIndices: number[];
+  };
+}
+
+type SearchlightWorkerRequest = InitializeRequest | ComputeRequest;
+
+type SearchlightWorkerResponse =
+  | { type: 'initialized' }
+  | { type: 'result'; results: SearchlightWorkerResult[] }
+  | { type: 'error'; error: string };
+
+const DEFAULT_WORKERS = 4;
+const MAX_WORKERS = 32;
+
 export class SearchlightWorkerPool {
-  private workers: Worker[] = [];
-  private taskQueue: WorkerTask[] = [];
-  private busyWorkers = new Set<Worker>();
-  private completedTasks = 0;
-  private totalTasks = 0;
-  private results: Map<number, any[]> = new Map();
-  private onProgress?: (progress: number) => void;
+  private handles: WorkerHandle[] = [];
+  private readonly onProgress?: (progress: number) => void;
+  private initialized = false;
+  private terminated = false;
 
   constructor(options: WorkerPoolOptions = {}) {
-    const numWorkers = options.numWorkers || navigator.hardwareConcurrency || 4;
+    if (typeof Worker === 'undefined' || typeof Blob === 'undefined' ||
+        typeof URL?.createObjectURL !== 'function') {
+      throw new Error('Web Workers are not available in this environment');
+    }
+
+    const hardwareConcurrency =
+      typeof navigator !== 'undefined' ? navigator.hardwareConcurrency : undefined;
+    const requested = options.numWorkers ?? hardwareConcurrency ?? DEFAULT_WORKERS;
+    if (!Number.isSafeInteger(requested) || requested < 1) {
+      throw new RangeError('numWorkers must be a positive integer');
+    }
+
     this.onProgress = options.onProgress;
+    const workerCount = Math.min(requested, MAX_WORKERS);
 
-    // Create workers
-    for (let i = 0; i < numWorkers; i++) {
-      const worker = this.createWorker();
-      this.workers.push(worker);
+    try {
+      for (let i = 0; i < workerCount; i++) {
+        this.handles.push(this.createWorker());
+      }
+    } catch (error) {
+      this.terminate();
+      throw error;
     }
   }
 
-  private createWorker(): Worker {
-    // In a real browser environment, this would create a Web Worker
-    // For Node.js compatibility, we'll use a different approach
-    if (typeof Worker !== 'undefined') {
-      // Browser environment
-      const blob = new Blob([
-        `(${workerFunction.toString()})()`
-      ], { type: 'application/javascript' });
-      const workerUrl = URL.createObjectURL(blob);
-      return new Worker(workerUrl);
-    } else {
-      // Node.js environment - return a mock worker
-      return createMockWorker();
+  private createWorker(): WorkerHandle {
+    const blob = new Blob([`(${searchlightWorkerMain.toString()})()`], {
+      type: 'application/javascript',
+    });
+    const url = URL.createObjectURL(blob);
+
+    try {
+      return { worker: new Worker(url), url };
+    } catch (error) {
+      URL.revokeObjectURL(url);
+      throw error;
     }
   }
 
-  async initialize(mask: LogicalNeuroVol, radius: number, nonzero: boolean): Promise<void> {
-    const initData = {
+  async initialize(mask: LogicalNeuroVol, radius: number): Promise<void> {
+    this.assertActive();
+    if (!Number.isFinite(radius) || radius < 0) {
+      throw new RangeError('radius must be a finite, non-negative number');
+    }
+    if (mask.space.ndim() !== 3) {
+      throw new Error('Searchlight computation requires a 3D mask');
+    }
+
+    const dimensions = mask.space.dim as [number, number, number];
+    const spacing = mask.space.spacing as [number, number, number];
+    const request: InitializeRequest = {
       type: 'initialize',
       data: {
-        maskData: mask.getData(),
-        spaceDim: mask.space.dim,
-        spacing: mask.space.spacing,
-        origin: mask.space.origin,
+        dimensions: [...dimensions],
+        spacing: [...spacing],
         radius,
-        nonzero
-      }
+      },
     };
 
-    // Initialize all workers
-    const initPromises = this.workers.map(worker => {
-      return new Promise<void>((resolve, reject) => {
-        const handler = (event: MessageEvent) => {
-          if (event.data.type === 'initialized') {
-            worker.removeEventListener('message', handler);
-            resolve();
-          } else if (event.data.type === 'error') {
-            worker.removeEventListener('message', handler);
-            reject(new Error(event.data.error));
-          }
-        };
-        worker.addEventListener('message', handler);
-        worker.postMessage(initData);
-      });
-    });
-
-    await Promise.all(initPromises);
+    await Promise.all(
+      this.handles.map(({ worker }) =>
+        this.request(worker, request, response => response.type === 'initialized')
+      )
+    );
+    this.initialized = true;
   }
 
   async computeSearchlights(
-    indices: number[],
-    batchSize: number = 100
-  ): Promise<any[]> {
-    this.results.clear();
-    this.completedTasks = 0;
-    this.totalTasks = Math.ceil(indices.length / batchSize);
-
-    // Create tasks
-    const tasks: WorkerTask[] = [];
-    for (let i = 0; i < indices.length; i += batchSize) {
-      const batch = indices.slice(i, i + batchSize);
-      tasks.push({
-        indices: batch,
-        startIdx: i,
-        resolve: () => {},
-        reject: () => {}
-      });
+    centerIndices: number[],
+    batchSize = 100
+  ): Promise<SearchlightWorkerResult[]> {
+    this.assertActive();
+    if (!this.initialized) {
+      throw new Error('SearchlightWorkerPool must be initialized before use');
+    }
+    if (!Number.isSafeInteger(batchSize) || batchSize < 1) {
+      throw new RangeError('batchSize must be a positive integer');
+    }
+    if (centerIndices.length === 0) {
+      this.onProgress?.(1);
+      return [];
     }
 
-    // Process all tasks
-    return new Promise((resolve, reject) => {
-      let resolved = false;
+    const batches: number[][] = [];
+    for (let i = 0; i < centerIndices.length; i += batchSize) {
+      batches.push(centerIndices.slice(i, i + batchSize));
+    }
 
-      const processNextTask = (worker: Worker) => {
-        if (tasks.length === 0) {
-          this.busyWorkers.delete(worker);
-          
-          // Check if all tasks are complete
-          if (this.busyWorkers.size === 0 && !resolved) {
-            resolved = true;
-            // Combine results in order
-            const allResults: any[] = [];
-            for (let i = 0; i < this.totalTasks; i++) {
-              const taskResults = this.results.get(i * batchSize);
-              if (taskResults) {
-                allResults.push(...taskResults);
-              }
-            }
-            resolve(allResults);
-          }
-          return;
-        }
+    const orderedResults = new Array<SearchlightWorkerResult[]>(batches.length);
+    let nextBatch = 0;
+    let completedBatches = 0;
 
-        const task = tasks.shift()!;
-        this.busyWorkers.add(worker);
+    const runWorker = async (worker: Worker): Promise<void> => {
+      while (true) {
+        const batchIndex = nextBatch++;
+        if (batchIndex >= batches.length) return;
 
-        const handler = (event: MessageEvent) => {
-          if (event.data.type === 'result') {
-            worker.removeEventListener('message', handler);
-            this.results.set(task.startIdx, event.data.results);
-            this.completedTasks++;
-            
-            if (this.onProgress) {
-              this.onProgress(event.data.progress);
-            }
-
-            processNextTask(worker);
-          } else if (event.data.type === 'error') {
-            worker.removeEventListener('message', handler);
-            this.busyWorkers.delete(worker);
-            if (!resolved) {
-              resolved = true;
-              reject(new Error(event.data.error));
-            }
-          }
-        };
-
-        worker.addEventListener('message', handler);
-        worker.postMessage({
+        const request: ComputeRequest = {
           type: 'compute',
-          data: {
-            indices: task.indices,
-            startIdx: task.startIdx
-          }
-        });
-      };
+          data: { centerIndices: batches[batchIndex] },
+        };
+        const response = await this.request(
+          worker,
+          request,
+          candidate => candidate.type === 'result'
+        );
+        if (response.type !== 'result') {
+          throw new Error('Worker returned an unexpected response');
+        }
+        orderedResults[batchIndex] = response.results;
+        completedBatches++;
+        this.onProgress?.(completedBatches / batches.length);
+      }
+    };
 
-      // Start processing with all workers
-      this.workers.forEach(worker => processNextTask(worker));
-    });
+    await Promise.all(this.handles.map(({ worker }) => runWorker(worker)));
+    return orderedResults.flat();
   }
 
   terminate(): void {
-    this.workers.forEach(worker => worker.terminate());
-    this.workers = [];
+    if (this.terminated) return;
+    this.terminated = true;
+    this.initialized = false;
+
+    for (const { worker, url } of this.handles) {
+      worker.terminate();
+      URL.revokeObjectURL(url);
+    }
+    this.handles = [];
+  }
+
+  private assertActive(): void {
+    if (this.terminated) {
+      throw new Error('SearchlightWorkerPool has been terminated');
+    }
+  }
+
+  private request<TRequest extends SearchlightWorkerRequest>(
+    worker: Worker,
+    request: TRequest,
+    accepts: (response: SearchlightWorkerResponse) => boolean
+  ): Promise<SearchlightWorkerResponse> {
+    return new Promise((resolve, reject) => {
+      const cleanup = (): void => {
+        worker.removeEventListener('message', handleMessage);
+        worker.removeEventListener('error', handleError);
+        worker.removeEventListener('messageerror', handleMessageError);
+      };
+      const handleMessage = (event: MessageEvent<SearchlightWorkerResponse>): void => {
+        const response = event.data;
+        if (response.type === 'error') {
+          cleanup();
+          reject(new Error(response.error));
+        } else if (accepts(response)) {
+          cleanup();
+          resolve(response);
+        }
+      };
+      const handleError = (event: ErrorEvent): void => {
+        cleanup();
+        reject(new Error(`Searchlight worker failed: ${event.message || 'unknown error'}`));
+      };
+      const handleMessageError = (): void => {
+        cleanup();
+        reject(new Error('Searchlight worker returned an unreadable message'));
+      };
+
+      worker.addEventListener('message', handleMessage);
+      worker.addEventListener('error', handleError);
+      worker.addEventListener('messageerror', handleMessageError);
+      try {
+        worker.postMessage(request);
+      } catch (error) {
+        cleanup();
+        reject(error instanceof Error ? error : new Error(String(error)));
+      }
+    });
   }
 }
 
-// Worker function to be injected
-function workerFunction() {
-  // The browser Web Worker searchlight path is not implemented. Previously this
-  // was an empty placeholder, which caused the worker to silently produce no
-  // results. Throw a clear error instead so callers are not misled by empty output.
-  throw new Error('worker searchlight not implemented');
-}
-
-// Mock worker for Node.js environment
-function createMockWorker(): Worker {
-  // Create a mock worker that processes synchronously
-  const listeners = new Map<string, Function[]>();
-  
-  const mockWorker = {
-    postMessage: (data: any) => {
-      // Simulate async processing
-      setTimeout(() => {
-        const handlers = listeners.get('message') || [];
-        handlers.forEach(handler => {
-          handler({ data: { type: 'initialized' } });
-        });
-      }, 0);
-    },
-    addEventListener: (event: string, handler: Function) => {
-      if (!listeners.has(event)) {
-        listeners.set(event, []);
-      }
-      listeners.get(event)!.push(handler);
-    },
-    removeEventListener: (event: string, handler: Function) => {
-      const handlers = listeners.get(event);
-      if (handlers) {
-        const index = handlers.indexOf(handler);
-        if (index >= 0) {
-          handlers.splice(index, 1);
-        }
-      }
-    },
-    terminate: () => {}
+/** Standalone entry point stringified into a Blob-backed Web Worker. */
+function searchlightWorkerMain(): void {
+  type State = {
+    dimensions: [number, number, number];
+    spacing: [number, number, number];
+    radius: number;
+  };
+  type Request =
+    | { type: 'initialize'; data: State }
+    | { type: 'compute'; data: { centerIndices: number[] } };
+  type Result = {
+    coords: Int32Array;
+    data: Float32Array;
+    centerIdx: number;
+  };
+  type Response =
+    | { type: 'initialized' }
+    | { type: 'result'; results: Result[] }
+    | { type: 'error'; error: string };
+  type WorkerScope = {
+    onmessage: ((event: MessageEvent<Request>) => void) | null;
+    postMessage(message: Response, transfer?: Transferable[]): void;
   };
 
-  return mockWorker as any;
+  const scope = self as unknown as WorkerScope;
+  let state: State | undefined;
+
+  const compute = (centerIndex: number): Result => {
+    if (!state) throw new Error('Worker has not been initialized');
+    const [nx, ny, nz] = state.dimensions;
+    const volumeSize = nx * ny * nz;
+    if (!Number.isSafeInteger(centerIndex) || centerIndex < 0 || centerIndex >= volumeSize) {
+      throw new RangeError(`Center index ${centerIndex} is out of bounds`);
+    }
+
+    const cx = centerIndex % nx;
+    const cy = Math.floor(centerIndex / nx) % ny;
+    const cz = Math.floor(centerIndex / (nx * ny));
+    const [sx, sy, sz] = state.spacing;
+    const radiusSquared = state.radius * state.radius;
+    const xRadius = state.radius / sx;
+    const yRadius = state.radius / sy;
+    const zRadius = state.radius / sz;
+    const xMin = Math.max(0, Math.floor(cx - xRadius));
+    const xMax = Math.min(nx - 1, Math.ceil(cx + xRadius));
+    const yMin = Math.max(0, Math.floor(cy - yRadius));
+    const yMax = Math.min(ny - 1, Math.ceil(cy + yRadius));
+    const zMin = Math.max(0, Math.floor(cz - zRadius));
+    const zMax = Math.min(nz - 1, Math.ceil(cz + zRadius));
+
+    const coordinates: number[] = [];
+    let centerIdx = -1;
+    for (let i = xMin; i <= xMax; i++) {
+      for (let j = yMin; j <= yMax; j++) {
+        for (let k = zMin; k <= zMax; k++) {
+          const distanceSquared =
+            ((i - cx) * sx) ** 2 +
+            ((j - cy) * sy) ** 2 +
+            ((k - cz) * sz) ** 2;
+          if (distanceSquared <= radiusSquared) {
+            if (i === cx && j === cy && k === cz) {
+              centerIdx = coordinates.length / 3;
+            }
+            coordinates.push(i, j, k);
+          }
+        }
+      }
+    }
+
+    if (centerIdx < 0) throw new Error('Searchlight geometry omitted its center voxel');
+    const coords = Int32Array.from(coordinates);
+    const data = new Float32Array(coords.length / 3);
+    data.fill(1);
+    return { coords, data, centerIdx };
+  };
+
+  scope.onmessage = (event): void => {
+    try {
+      if (event.data.type === 'initialize') {
+        state = event.data.data;
+        scope.postMessage({ type: 'initialized' });
+        return;
+      }
+      const results = event.data.data.centerIndices.map(compute);
+      const transfer = results.flatMap(result => [result.coords.buffer, result.data.buffer]);
+      scope.postMessage({ type: 'result', results }, transfer);
+    } catch (error) {
+      scope.postMessage({
+        type: 'error',
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
 }

@@ -113,7 +113,7 @@ npm test -- MultiLayerAlignment.test.ts
 
 ### Visual Debugging
 ```bash
-npx ts-node runAlignmentTest.ts --visual --output ./alignment-output
+npx tsx runAlignmentTest.ts --visual --output ./alignment-output
 ```
 
 This generates:

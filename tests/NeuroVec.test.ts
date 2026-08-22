@@ -67,11 +67,9 @@ describe('NeuroVec Classes', () => {
     });
 
     it('should throw error when getting range of empty data', () => {
-      // Create a valid space but with empty data array
       const validSpace = new NeuroSpace([1, 1, 1, 1]);
       const emptyData = new Float32Array(0);
-      const emptyVec = new Float32NeuroVec(validSpace, emptyData);
-      expect(() => emptyVec.getRange()).toThrow('Volume data is empty');
+      expect(() => new Float32NeuroVec(validSpace, emptyData)).toThrow(/Data length mismatch/);
     });
 
     it('should have correct dimension, spacing, and origin', () => {
@@ -136,6 +134,34 @@ describe('NeuroVec Classes', () => {
       const volume = vec.getVolume(1);
       expect(volume).toBeInstanceOf(Float64NeuroVol);
       expect(volume.getData()).toBeInstanceOf(Float64Array);
+    });
+  });
+
+  describe('geometry and storage contracts', () => {
+    it('preserves a complete oblique affine when extracting a volume', () => {
+      const affine = [
+        [1, 0.2, 0, 10],
+        [0, 2, 0.1, 20],
+        [0, 0, 3, 30],
+        [0, 0, 0, 1],
+      ];
+      const obliqueSpace = new NeuroSpace(
+        [2, 2, 2, 2],
+        undefined,
+        undefined,
+        AxisSet3D.AXIAL_LPI,
+        affine
+      );
+      const vec = new Float64NeuroVec(obliqueSpace, new Float64Array(16));
+
+      expect(vec.getVolume(1).space.trans.to2DArray()).toEqual(affine);
+    });
+
+    it('rejects backing arrays whose length does not match the 4D shape', () => {
+      const vectorSpace = new NeuroSpace([2, 2, 2, 2]);
+      expect(() => new Float32NeuroVec(vectorSpace, new Float32Array(1))).toThrow(
+        /Data length mismatch/
+      );
     });
   });
 

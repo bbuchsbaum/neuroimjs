@@ -12,7 +12,7 @@ import { arraysNearlyEqual, COORDINATE_EPSILON } from './NumericalUtils';
  *   - Coronal
  *   - Sagittal
  */
-enum ViewName {
+export enum ViewName {
   Axial = 'axial',
   Coronal = 'coronal',
   Sagittal = 'sagittal',
@@ -21,7 +21,7 @@ enum ViewName {
 /**
  * Optional configuration for how each orthogonal viewer is displayed and operated.
  */
-interface OrthogonalImageViewerOptions {
+export interface OrthogonalImageViewerOptions {
   /**
    * Width in pixels for each of the sub-viewers (optional if auto-resizing).
    */
@@ -70,7 +70,7 @@ interface OrthogonalImageViewerOptions {
 /**
  * Parameters required to instantiate the OrthogonalImageViewer.
  */
-interface OrthogonalImageViewerParams {
+export interface OrthogonalImageViewerParams {
   /**
    * The DOM container in which this orthogonal viewer's layout will be placed.
    */

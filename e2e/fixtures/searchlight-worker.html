@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Searchlight worker parity</title>
+  </head>
+  <body>
+    <div id="status">running</div>
+    <script type="module">
+      import {
+        FloatNeuroVol,
+        NeuroSpace,
+        searchlightCoords,
+        searchlightIterator,
+      } from '../../src/browser';
+
+      const status = document.querySelector('#status');
+      const transform = [
+        [1, 0.25, 0, 11],
+        [0, 2, 0.1, -7],
+        [0, 0, 3, 4],
+        [0, 0, 0, 1],
+      ];
+      const space = new NeuroSpace(
+        [5, 4, 3],
+        [1, 2, 3],
+        [11, -7, 4],
+        undefined,
+        transform,
+      );
+      const data = new Float32Array(space.size);
+      for (let index = 0; index < data.length; index++) {
+        data[index] = index % 3 === 0 ? 1 : 0;
+      }
+      const mask = new FloatNeuroVol(space, data);
+      const progress = [];
+
+      try {
+        if (typeof Worker === 'undefined') throw new Error('Worker is unavailable');
+        const sequential = searchlightIterator(mask, 2.25, {
+          eager: true,
+          nonzero: true,
+          cores: 1,
+        });
+        const parallel = await searchlightIterator(mask, 2.25, {
+          eager: true,
+          nonzero: true,
+          cores: 2,
+          onProgress: value => progress.push(value),
+        });
+        const sequentialCoords = await searchlightCoords(mask, 2.25, {
+          nonzero: true,
+          cores: 1,
+        });
+        const parallelCoords = await searchlightCoords(mask, 2.25, {
+          nonzero: true,
+          cores: 2,
+        });
+
+        const same = parallel.length === sequential.length && parallel.every((roi, index) => {
+          const expected = sequential[index];
+          return roi.parentIndex === expected.parentIndex &&
+            roi.centerIndex === expected.centerIndex &&
+            JSON.stringify(roi.coords) === JSON.stringify(expected.coords) &&
+            JSON.stringify(Array.from(roi.data)) === JSON.stringify(Array.from(expected.data)) &&
+            JSON.stringify(roi.space.getTrans().to2DArray()) === JSON.stringify(transform) &&
+            JSON.stringify(Array.from(parallelCoords.get(index))) ===
+              JSON.stringify(Array.from(sequentialCoords.get(index)));
+        });
+        if (!same) throw new Error('Parallel results differ from the sequential oracle');
+        if (progress.at(-1) !== 1) throw new Error('Progress did not finish at 1');
+
+        window.searchlightWorkerResult = {
+          count: parallel.length,
+          progress,
+          workerSupported: true,
+        };
+        status.textContent = 'passed';
+      } catch (error) {
+        window.searchlightWorkerResult = { error: String(error) };
+        status.textContent = 'failed';
+      }
+    </script>
+  </body>
+</html>

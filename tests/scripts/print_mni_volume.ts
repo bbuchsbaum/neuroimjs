@@ -1,14 +1,18 @@
-#!/usr/bin/env ts-node
+#!/usr/bin/env tsx
 
 /**
  * This script loads the MNI template NIfTI file and pretty prints its NeuroSpace information.
- * Run with: npx ts-node tests/scripts/print_mni_volume.ts
+ * Run with: npx tsx tests/scripts/print_mni_volume.ts
  */
 
 import * as path from 'path';
+import { fileURLToPath } from 'url';
 import { read_vol } from '../../src/io/nifti';
 import { NeuroVol } from '../../src/volume/NeuroVol';
 import { NeuroSpace } from '../../src/geometry/NeuroSpace';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Path to the MNI template file
 const mniFilePath = path.join(__dirname, '../data/volumes/tpl-MNI152NLin2009aAsym_res-1_T1w.nii.gz');
@@ -91,4 +95,4 @@ async function main(): Promise<void> {
 }
 
 // Run the main function
-main(); 
+main();

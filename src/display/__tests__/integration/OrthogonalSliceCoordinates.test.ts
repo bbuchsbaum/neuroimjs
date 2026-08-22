@@ -195,22 +195,23 @@ describe('OrthogonalSliceRenderer Coordinate Pipeline Integration', () => {
     });
   });
 
-  describe('Property-Based Testing with Random Coordinates', () => {
-    function randomWorldCoord(): number[] {
+  describe('Property-style testing with sampled coordinates', () => {
+    function sampledWorldCoord(sample: number): number[] {
       const bounds = volume.space.bounds();
+      const fractions = [0.137, 0.419, 0.733];
       return [
-        bounds[0][0] + Math.random() * (bounds[1][0] - bounds[0][0]),
-        bounds[0][1] + Math.random() * (bounds[1][1] - bounds[0][1]),
-        bounds[0][2] + Math.random() * (bounds[1][2] - bounds[0][2])
+        bounds[0][0] + ((fractions[0] * (sample + 1)) % 1) * (bounds[1][0] - bounds[0][0]),
+        bounds[0][1] + ((fractions[1] * (sample + 1)) % 1) * (bounds[1][1] - bounds[0][1]),
+        bounds[0][2] + ((fractions[2] * (sample + 1)) % 1) * (bounds[1][2] - bounds[0][2])
       ];
     }
 
-    it('should produce consistent results for 50 random coordinates in all views', () => {
+    it('should produce consistent results for 50 sampled coordinates in all views', () => {
       const numTests = 50;
       const tolerance = 0.5; // pixels
 
       for (let i = 0; i < numTests; i++) {
-        const worldCoord = randomWorldCoord();
+        const worldCoord = sampledWorldCoord(i);
 
         for (const viewType of ['axial', 'sagittal', 'coronal']) {
           const config = (renderer as any).getViewConfiguration(worldCoord, viewType);
@@ -226,12 +227,12 @@ describe('OrthogonalSliceRenderer Coordinate Pipeline Integration', () => {
       }
     });
 
-    it('should maintain round-trip consistency for random coordinates', () => {
+    it('should maintain round-trip consistency for sampled coordinates', () => {
       const numTests = 50;
       const tolerance = 1.0; // mm
 
       for (let i = 0; i < numTests; i++) {
-        const worldCoord = randomWorldCoord();
+        const worldCoord = sampledWorldCoord(i);
 
         for (const viewType of ['axial', 'sagittal', 'coronal']) {
           const config = (renderer as any).getViewConfiguration(worldCoord, viewType);

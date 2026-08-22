@@ -5,7 +5,7 @@ import { AxisSet3D } from '../geometry/Axis';
 import { NeuroSpace } from '../geometry/NeuroSpace';
 import { IReactionDisposer, reaction, action, makeObservable, observable, computed } from 'mobx';
 import { ViewerStateInfo } from './ViewerStateInfo';
-import { ISliceModel, ISliceView, ISliceController } from './interfaces';
+import { ISliceModel, ISliceView, ISliceController } from './interfaces/index';
 import { ViewerFactory } from './ViewerFactory';
 import { CrossHair } from './CrossHair';
 import { OrientationLabelLayer, OrientationLabelOptions } from './OrientationLabelLayer';

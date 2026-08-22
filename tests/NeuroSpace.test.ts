@@ -37,6 +37,18 @@ describe('NeuroSpace', () => {
       expect(ns.origin).toEqual(origin);
     });
 
+    it('preserves non-spatial metadata for higher-dimensional spaces', () => {
+      const ns = new NeuroSpace(
+        [5, 6, 7, 8],
+        [1, 2, 3, 0.8],
+        [10, 20, 30, 0]
+      );
+
+      expect(ns.spacing).toEqual([1, 2, 3, 0.8]);
+      expect(ns.origin).toEqual([10, 20, 30, 0]);
+      expect(ns.withDimensions([5, 6, 7]).spacing).toEqual([1, 2, 3]);
+    });
+
     it('should throw an error if origin and spacing lengths do not match', () => {
       const dim = [10, 20];
       const spacing = [1, 1, 1];
@@ -59,6 +71,28 @@ describe('NeuroSpace', () => {
       const origin = [0, 0, 0];
 
       expect(() => new NeuroSpace(dim, spacing, origin)).toThrow();
+    });
+
+    it('rejects non-integer, non-finite, and empty dimensions', () => {
+      expect(() => new NeuroSpace([])).toThrow(/at least one dimension/);
+      expect(() => new NeuroSpace([2, 2.5, 3])).toThrow(/safe integers/);
+      expect(() => new NeuroSpace([2, Number.NaN, 3])).toThrow(/safe integers/);
+      expect(() => new NeuroSpace([2, Number.POSITIVE_INFINITY, 3])).toThrow(/safe integers/);
+    });
+
+    it('rejects malformed or non-finite affine transforms', () => {
+      expect(() => new NeuroSpace([2, 2, 2], undefined, undefined, undefined, [
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, 0, 1],
+      ])).toThrow(/4x4/);
+
+      expect(() => new NeuroSpace([2, 2, 2], undefined, undefined, undefined, [
+        [1, 0, 0, 0],
+        [0, Number.NaN, 0, 0],
+        [0, 0, 1, 0],
+        [0, 0, 0, 1],
+      ])).toThrow(/finite 4x4/);
     });
   });
 
@@ -258,6 +292,60 @@ describe('NeuroSpace', () => {
   });
 
   describe('Encapsulation & affine-derived spacing', () => {
+    it('copies dimension inputs and does not expose mutable affine state', () => {
+      const dims = [4, 5, 6];
+      const affine = [
+        [1, 0.2, 0, 10],
+        [0, 2, 0, 20],
+        [0, 0, 3, 30],
+        [0, 0, 0, 1],
+      ];
+      const ns = new NeuroSpace(dims, undefined, undefined, undefined, affine);
+
+      dims[0] = 99;
+      affine[0][0] = 99;
+      const leakedForward = ns.trans;
+      const leakedInverse = ns.inverseTrans;
+      leakedForward.set(0, 0, 77);
+      leakedInverse.set(0, 0, 77);
+
+      expect(ns.dim).toEqual([4, 5, 6]);
+      expect(ns.gridToCoord([1, 0, 0])).toEqual([11, 20, 30]);
+      expect(ns.coordToGrid([11, 20, 30])).toEqual([1, 0, 0]);
+    });
+
+    it('preserves the complete affine when changing 3D/4D logical dimensions', () => {
+      const affine = [
+        [1, 0.2, 0, 10],
+        [0, 2, 0.1, 20],
+        [0, 0, 3, 30],
+        [0, 0, 0, 1],
+      ];
+      const volumeSpace = new NeuroSpace([4, 5, 6], undefined, undefined, undefined, affine);
+      const vectorSpace = volumeSpace.withDimensions([4, 5, 6, 8]);
+      const recovered = vectorSpace.withDimensions([4, 5, 6]);
+
+      expect(vectorSpace.trans.to2DArray()).toEqual(affine);
+      expect(recovered.trans.to2DArray()).toEqual(affine);
+      expect(recovered.isSpatiallyCompatibleWith(volumeSpace)).toBe(true);
+    });
+
+    it('distinguishes spaces with different origins, scales, or obliquity', () => {
+      const reference = new NeuroSpace([4, 5, 6], [1, 1, 1], [0, 0, 0]);
+      const shifted = new NeuroSpace([4, 5, 6], [1, 1, 1], [10, 0, 0]);
+      const scaled = new NeuroSpace([4, 5, 6], [2, 1, 1], [0, 0, 0]);
+      const oblique = new NeuroSpace([4, 5, 6], undefined, undefined, undefined, [
+        [1, 0.2, 0, 0],
+        [0, 1, 0, 0],
+        [0, 0, 1, 0],
+        [0, 0, 0, 1],
+      ]);
+
+      expect(reference.isSpatiallyCompatibleWith(shifted)).toBe(false);
+      expect(reference.isSpatiallyCompatibleWith(scaled)).toBe(false);
+      expect(reference.isSpatiallyCompatibleWith(oblique)).toBe(false);
+    });
+
     it('does not let callers mutate the space via origin/spacing getters', () => {
       const ns = new NeuroSpace([4, 5, 6], [2, 2.5, 3], [10, 20, 30]);
       // Mutating the returned arrays must not affect the space.

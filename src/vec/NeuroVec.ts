@@ -7,7 +7,7 @@ import { FloatNeuroVol, Int16NeuroVol, UInt8NeuroVol, Float64NeuroVol } from '..
 /**
  * Interface for 4D neuroimaging data (NeuroVec).
  */
-export interface NeuroVec {
+export interface NeuroVec<TData = TypedArray> {
   readonly space: NeuroSpace;
   readonly length: number;
   readonly dim: number[];    // Should have 4 dimensions
@@ -18,7 +18,7 @@ export interface NeuroVec {
   setAt(i: number, j: number, k: number, t: number, value: number): void;
   getVolume(t: number): NeuroVol;
   getSeries(i: number, j: number, k: number): number[];
-  getData(): any; // Can be TypedArray for dense data or custom data structures for sparse data
+  getData(): TData;
   getRange(): [number, number];
 }
 
@@ -26,7 +26,8 @@ export interface NeuroVec {
  * Abstract class for dense 4D neuroimaging data.
  * Implements the NeuroVec interface.
  */
-export abstract class DenseNeuroVec<TArray extends TypedArray, TVol extends NeuroVol> implements NeuroVec {
+export abstract class DenseNeuroVec<TArray extends TypedArray, TVol extends NeuroVol>
+  implements NeuroVec<TArray> {
   readonly space: NeuroSpace;
   protected data: TArray;
 
@@ -38,7 +39,10 @@ export abstract class DenseNeuroVec<TArray extends TypedArray, TVol extends Neur
       throw new Error('NeuroVec requires a 4D NeuroSpace.');
     }
     this.space = space;
-    this.data = data || this.createDataArray();
+    if (data && data.length !== this.length) {
+      throw new Error(`Data length mismatch: expected ${this.length}, got ${data.length}`);
+    }
+    this.data = data ?? this.createDataArray();
   }
 
   get length(): number {
@@ -102,12 +106,7 @@ export abstract class DenseNeuroVec<TArray extends TypedArray, TVol extends Neur
     const offset = t * volumeLength;
     const volumeData = this.data.subarray(offset, offset + volumeLength);
 
-    const volumeSpace = new NeuroSpace(
-      [dimX, dimY, dimZ],
-      this.spacing.slice(0, 3),
-      this.origin.slice(0, 3),
-      this.space.axes // Assuming axes are the same
-    );
+    const volumeSpace = this.space.withDimensions([dimX, dimY, dimZ]);
 
     return new (this.getVolumeConstructor())(volumeSpace, volumeData as TArray);
   }
@@ -126,8 +125,13 @@ export abstract class DenseNeuroVec<TArray extends TypedArray, TVol extends Neur
 
     for (let i = 0, len = data.length; i < len; i++) {
       const value = data[i];
+      if (!Number.isFinite(value)) continue;
       if (value < min) min = value;
       if (value > max) max = value;
+    }
+
+    if (!Number.isFinite(min) || !Number.isFinite(max)) {
+      throw new Error('No valid numeric data found in volume');
     }
 
     return [min, max];

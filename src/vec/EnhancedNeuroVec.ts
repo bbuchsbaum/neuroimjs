@@ -114,12 +114,7 @@ export abstract class EnhancedDenseNeuroVec<TArray extends TypedArray, TVol exte
    */
   temporalMean(): NeuroVol {
     const [dimX, dimY, dimZ, dimT] = this.space.dim;
-    const volumeSpace = new NeuroSpace(
-      [dimX, dimY, dimZ],
-      this.spacing.slice(0, 3),
-      this.origin.slice(0, 3),
-      this.space.axes
-    );
+    const volumeSpace = this.space.withDimensions([dimX, dimY, dimZ]);
 
     const meanData = new Float32Array(dimX * dimY * dimZ);
     let idx = 0;
@@ -141,12 +136,7 @@ export abstract class EnhancedDenseNeuroVec<TArray extends TypedArray, TVol exte
    */
   temporalStd(): NeuroVol {
     const [dimX, dimY, dimZ, dimT] = this.space.dim;
-    const volumeSpace = new NeuroSpace(
-      [dimX, dimY, dimZ],
-      this.spacing.slice(0, 3),
-      this.origin.slice(0, 3),
-      this.space.axes
-    );
+    const volumeSpace = this.space.withDimensions([dimX, dimY, dimZ]);
 
     const stdData = new Float32Array(dimX * dimY * dimZ);
     let idx = 0;
@@ -194,12 +184,7 @@ export abstract class EnhancedDenseNeuroVec<TArray extends TypedArray, TVol exte
     const seedStd = this.std(seedSeries);
 
     const [dimX, dimY, dimZ] = this.space.dim;
-    const volumeSpace = new NeuroSpace(
-      [dimX, dimY, dimZ],
-      this.spacing.slice(0, 3),
-      this.origin.slice(0, 3),
-      this.space.axes
-    );
+    const volumeSpace = this.space.withDimensions([dimX, dimY, dimZ]);
 
     const corrData = new Float32Array(dimX * dimY * dimZ);
     let idx = 0;
@@ -294,12 +279,7 @@ export abstract class EnhancedDenseNeuroVec<TArray extends TypedArray, TVol exte
     }
 
     const newDimT = endTime - startTime;
-    const newSpace = new NeuroSpace(
-      [dimX, dimY, dimZ, newDimT],
-      this.spacing,
-      this.origin,
-      this.space.axes
-    );
+    const newSpace = this.space.withDimensions([dimX, dimY, dimZ, newDimT]);
 
     const SlicedClass = this.constructor as any;
     const sliced = new SlicedClass(newSpace);
@@ -328,12 +308,7 @@ export abstract class EnhancedDenseNeuroVec<TArray extends TypedArray, TVol exte
       throw new Error('Spatial dimensions must match for concatenation');
     }
 
-    const newSpace = new NeuroSpace(
-      [dimX, dimY, dimZ, dimT1 + dimT2],
-      this.spacing,
-      this.origin,
-      this.space.axes
-    );
+    const newSpace = this.space.withDimensions([dimX, dimY, dimZ, dimT1 + dimT2]);
 
     const ConcatClass = this.constructor as any;
     const concatenated = new ConcatClass(newSpace);
@@ -369,12 +344,7 @@ export abstract class EnhancedDenseNeuroVec<TArray extends TypedArray, TVol exte
 
   private temporalReduce(reducer: (series: Float32Array) => number): NeuroVol {
     const [dimX, dimY, dimZ] = this.space.dim;
-    const volumeSpace = new NeuroSpace(
-      [dimX, dimY, dimZ],
-      this.spacing.slice(0, 3),
-      this.origin.slice(0, 3),
-      this.space.axes
-    );
+    const volumeSpace = this.space.withDimensions([dimX, dimY, dimZ]);
 
     const data = new Float32Array(dimX * dimY * dimZ);
     let idx = 0;

@@ -30,9 +30,18 @@ export function sphericalROI(
   if (centroid.length !== 3) {
     throw new ValueError('Centroid must have length 3');
   }
+  if (centroid.some(value => !Number.isFinite(value))) {
+    throw new ValueError('Centroid coordinates must be finite');
+  }
+  if (!Number.isFinite(radius) || radius < 0) {
+    throw new ValueError('Radius must be a finite, non-negative number');
+  }
 
   const space = vol.space;
   const dims = space.dim;
+  if (centroid.some((value, axis) => value < 0 || value > dims[axis] - 1)) {
+    throw new ValueError('Centroid must lie within the volume bounds');
+  }
   // Per-axis voxel spacing in mm (do NOT average — keep anisotropy).
   const spacing = space.spacing;
   const sx = spacing[0] || 1;

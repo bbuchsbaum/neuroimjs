@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Overlay Review Demo - neuroimjs</title>
+  <link rel="icon" href="data:,">
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+    }
+
+    body {
+      overflow: hidden;
+      color: #192026;
+      background: #edf0f3;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+
+    .app-shell {
+      display: grid;
+      grid-template-columns: minmax(520px, 1fr) 340px;
+      width: 100vw;
+      height: 100vh;
+      min-height: 620px;
+    }
+
+    .viewer-region {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      min-height: 0;
+      background: #121417;
+      border-right: 1px solid #c9d1d9;
+    }
+
+    .viewer-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      min-height: 48px;
+      padding: 10px 16px;
+      color: #dce4ec;
+      background: #1d242a;
+      border-bottom: 1px solid #313a43;
+      font-size: 13px;
+    }
+
+    .viewer-title {
+      min-width: 0;
+      overflow: hidden;
+      font-weight: 650;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+
+    .status-strip {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      flex-wrap: wrap;
+      color: #a9b6c1;
+      font-size: 12px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 3px 8px;
+      color: #dce4ec;
+      background: #2a333b;
+      border: 1px solid #44505b;
+      border-radius: 4px;
+      white-space: nowrap;
+    }
+
+    #viewer {
+      flex: 1;
+      min-width: 0;
+      min-height: 0;
+    }
+
+    .side-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      min-width: 0;
+      min-height: 0;
+      padding: 14px;
+      overflow-y: auto;
+      background: #f7f9fb;
+    }
+
+    .panel-heading {
+      display: flex;
+      flex-direction: column;
+      padding: 2px 2px 0;
+    }
+
+    .panel-heading h1 {
+      margin: 0;
+      color: #18212a;
+      font-size: 18px;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+
+    overlay-review-panel {
+      max-width: none;
+    }
+
+    .demo-error {
+      padding: 18px;
+      color: #651f1d;
+      background: #fff1f0;
+      border: 1px solid #f1b7b4;
+      font: 13px ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+      white-space: pre-wrap;
+    }
+
+    @media (max-width: 900px) {
+      body {
+        overflow: auto;
+      }
+
+      .app-shell {
+        grid-template-columns: 1fr;
+        grid-template-rows: minmax(520px, 68vh) auto;
+        min-height: 0;
+      }
+
+      .viewer-region {
+        border-right: none;
+        border-bottom: 1px solid #c9d1d9;
+      }
+
+      .side-panel {
+        overflow: visible;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <main class="viewer-region">
+      <div class="viewer-toolbar">
+        <div class="viewer-title">Synthetic Subject Overlay Review</div>
+        <div class="status-strip" aria-label="demo status">
+          <span class="pill">12 subjects</span>
+          <span class="pill">2 contrasts</span>
+          <span class="pill">fixed z range [-6, 6]</span>
+        </div>
+      </div>
+      <div id="viewer"></div>
+    </main>
+
+    <aside class="side-panel">
+      <div class="panel-heading">
+        <h1>Overlay Review</h1>
+      </div>
+      <overlay-review-panel id="review-panel"></overlay-review-panel>
+    </aside>
+  </div>
+
+  <script type="module">
+    import {
+      AxisSet3D,
+      FloatNeuroVol,
+      NeuroSpace,
+      OverlayReviewPanel,
+      SubjectOverlayViewer,
+      createReviewVecFromVolumes,
+    } from '../src/browser';
+
+    void OverlayReviewPanel;
+
+    const dim = [56, 56, 40];
+    const spacing = [2, 2, 2];
+    const origin = [-56, -56, -40];
+    const subjectCount = 12;
+    const displayRange = [-6, 6];
+    const space = new NeuroSpace(dim, spacing, origin, AxisSet3D.AXIAL_LPI);
+
+    function indexOf(x, y, z) {
+      return x + y * dim[0] + z * dim[0] * dim[1];
+    }
+
+    function seededRandom(seed) {
+      let state = seed >>> 0;
+      return () => {
+        state = (1664525 * state + 1013904223) >>> 0;
+        return state / 4294967296;
+      };
+    }
+
+    function gaussian3d(x, y, z, center, scale) {
+      const dx = (x - center[0]) / scale[0];
+      const dy = (y - center[1]) / scale[1];
+      const dz = (z - center[2]) / scale[2];
+      return Math.exp(-0.5 * (dx * dx + dy * dy + dz * dz));
+    }
+
+    function anatomicalMask(xn, yn, zn) {
+      const base = (xn * xn) / 0.92 + (yn * yn) / 0.72 + (zn * zn) / 0.86;
+      const notch = 0.08 * Math.exp(-((yn + 0.72) ** 2) / 0.05) * (1 + Math.abs(xn));
+      return base + notch < 1;
+    }
+
+    function createTemplateVolume() {
+      const data = new Float32Array(dim[0] * dim[1] * dim[2]);
+
+      for (let z = 0; z < dim[2]; z++) {
+        const zn = (z - (dim[2] - 1) / 2) / (dim[2] / 2);
+        for (let y = 0; y < dim[1]; y++) {
+          const yn = (y - (dim[1] - 1) / 2) / (dim[1] / 2);
+          for (let x = 0; x < dim[0]; x++) {
+            const xn = (x - (dim[0] - 1) / 2) / (dim[0] / 2);
+            const idx = indexOf(x, y, z);
+
+            if (!anatomicalMask(xn, yn, zn)) {
+              data[idx] = 0;
+              continue;
+            }
+
+            const radial = Math.sqrt(xn * xn + 0.9 * yn * yn + 0.75 * zn * zn);
+            const cortex = Math.max(0, 1 - Math.abs(radial - 0.68) / 0.22);
+            const whiteMatter = Math.max(0, 1 - radial / 0.74);
+            const ventricles =
+              gaussian3d(xn, yn, zn, [-0.18, -0.06, 0.02], [0.08, 0.16, 0.16]) +
+              gaussian3d(xn, yn, zn, [0.18, -0.06, 0.02], [0.08, 0.16, 0.16]);
+            const sulci = 0.08 * Math.sin((x + 2 * y) * 0.42) * Math.cos(z * 0.34);
+            data[idx] = Math.max(0, 34 + 58 * whiteMatter + 22 * cortex - 35 * ventricles + 8 * sulci);
+          }
+        }
+      }
+
+      return new FloatNeuroVol(space, data);
+    }
+
+    function createOverlayVolume(subjectIndex, contrastIndex) {
+      const rand = seededRandom(9157 + subjectIndex * 7919 + contrastIndex * 104729);
+      const data = new Float32Array(dim[0] * dim[1] * dim[2]);
+
+      const col = subjectIndex % 4;
+      const row = Math.floor(subjectIndex / 4);
+      const subjectOffset = [
+        (col - 1.5) * 0.075,
+        (row - 1) * 0.09,
+        ((subjectIndex % 3) - 1) * 0.045,
+      ];
+      const jitter = [
+        (rand() - 0.5) * 0.08,
+        (rand() - 0.5) * 0.08,
+        (rand() - 0.5) * 0.06,
+      ];
+      const amplitude = 1.05 + subjectIndex * 0.06 + rand() * 0.24;
+      const signFlip = contrastIndex === 0 && subjectIndex === 7 ? -1.05 : 1;
+      const shifted = contrastIndex === 1 && subjectIndex === 10 ? 0.32 : 0;
+      const contrastDirection = contrastIndex === 0 ? 1 : -1;
+
+      const positiveCenter = contrastIndex === 0
+        ? [
+            0.24 + contrastDirection * subjectOffset[0] + jitter[0] + shifted,
+            -0.18 + subjectOffset[1] + jitter[1],
+            0.08 + subjectOffset[2] + jitter[2],
+          ]
+        : [
+            -0.22 + contrastDirection * subjectOffset[0] + jitter[0],
+            0.24 - subjectOffset[1] + jitter[1] - shifted,
+            0.02 + subjectOffset[2] + jitter[2],
+          ];
+      const negativeCenter = contrastIndex === 0
+        ? [
+            -0.28 - contrastDirection * subjectOffset[0] + jitter[0],
+            0.20 - subjectOffset[1] + jitter[1],
+            -0.06 - subjectOffset[2] + jitter[2],
+          ]
+        : [
+            0.30 - contrastDirection * subjectOffset[0] + jitter[0],
+            -0.18 + subjectOffset[1] + jitter[1],
+            0.12 - subjectOffset[2] + jitter[2],
+          ];
+
+      for (let z = 0; z < dim[2]; z++) {
+        const zn = (z - (dim[2] - 1) / 2) / (dim[2] / 2);
+        for (let y = 0; y < dim[1]; y++) {
+          const yn = (y - (dim[1] - 1) / 2) / (dim[1] / 2);
+          for (let x = 0; x < dim[0]; x++) {
+            const xn = (x - (dim[0] - 1) / 2) / (dim[0] / 2);
+            const idx = indexOf(x, y, z);
+
+            if (!anatomicalMask(xn, yn, zn)) {
+              data[idx] = Number.NaN;
+              continue;
+            }
+
+            const positive = gaussian3d(xn, yn, zn, positiveCenter, [0.19, 0.18, 0.20]);
+            const negative = gaussian3d(xn, yn, zn, negativeCenter, [0.18, 0.21, 0.19]);
+            const background = 0.36 * Math.sin(5.6 * xn + subjectIndex * 0.39) *
+              Math.cos(4.8 * yn - contrastIndex * 0.36) *
+              Math.exp(-0.7 * (xn * xn + yn * yn + zn * zn));
+            const noise = (rand() - 0.5) * 0.36;
+
+            data[idx] = signFlip * amplitude * (6.2 * positive - 5.4 * negative) + background + noise;
+          }
+        }
+      }
+
+      return new FloatNeuroVol(space, data);
+    }
+
+    function createDataset(template) {
+      const memoryVolumes = [];
+      const faceVolumes = [];
+
+      for (let i = 0; i < subjectCount; i++) {
+        memoryVolumes.push(createOverlayVolume(i, 0));
+        faceVolumes.push(createOverlayVolume(i, 1));
+      }
+
+      return {
+        template,
+        subjects: Array.from({ length: subjectCount }, (_, i) => ({
+          id: `sub-${String(i + 1).padStart(2, '0')}`,
+          label: `Subject ${String(i + 1).padStart(2, '0')}`,
+          group: i < subjectCount / 2 ? 'A' : 'B',
+          metadata: {
+            note: i === 7 ? 'sign-flipped memory response' : i === 10 ? 'shifted face response' : 'typical',
+          },
+        })),
+        contrasts: [
+          {
+            id: 'memory',
+            label: 'Memory > Baseline',
+            vec: createReviewVecFromVolumes(memoryVolumes),
+            displayRange,
+          },
+          {
+            id: 'faces',
+            label: 'Faces > Shapes',
+            vec: createReviewVecFromVolumes(faceVolumes),
+            displayRange,
+          },
+        ],
+      };
+    }
+
+    async function init() {
+      const viewerElement = document.getElementById('viewer');
+      const panel = document.getElementById('review-panel');
+      const template = createTemplateVolume();
+      const dataset = createDataset(template);
+
+      const reviewViewer = await SubjectOverlayViewer.create(viewerElement, dataset, {
+        initialContrastId: 'memory',
+        initialSubjectIndex: 0,
+        layout: 'left-tall',
+        showCrosshair: true,
+        showSlider: true,
+        showOrientationLabels: true,
+        subjectThreshold: [-3, 3],
+        subjectAlpha: 0.72,
+        templateRange: [0, 115],
+      });
+
+      reviewViewer.getViewer().setLPICoord([0, 0, 0]);
+      panel.summaryDebounceMs = 80;
+      panel.cineFps = 3;
+      panel.setReviewViewer(reviewViewer);
+      panel.setContrastId('memory');
+      panel.setSubjectIndex(0);
+      panel.setReducer('mean');
+      panel.setCutoff(3);
+      panel.setView('subject');
+    }
+
+    init().catch((error) => {
+      const viewerElement = document.getElementById('viewer');
+      viewerElement.className = 'demo-error';
+      viewerElement.textContent = error && error.stack ? error.stack : String(error);
+      console.error(error);
+    });
+  </script>
+</body>
+</html>

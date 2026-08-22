@@ -9,13 +9,13 @@ import { CoordinateTransformer } from './CoordinateTransformer';
 import { NeuroSpace } from '../geometry/NeuroSpace';
 import { SliceModel } from './SliceModel';
 import { reaction, IReactionDisposer, autorun } from 'mobx';
-import { ISliceView, ICoordinateTransformer } from './interfaces';
+import { ISliceView, ICoordinateTransformer } from './interfaces/index';
 import { PointerEventHandler, SlicePointerEvent } from './types/display';
 
 /**
  * Options for configuring a SliceView instance.
  */
-interface SliceViewOptions {
+export interface SliceViewOptions {
   width?: number;
   height?: number;
   showCrosshair?: boolean;
@@ -110,7 +110,7 @@ export class SliceView implements ISliceView {
     const width = this.options.width ?? (containerWidth || 800);
     const height = this.options.height ?? (containerHeight || 600);
 
-    const baseOptions: PIXI.ApplicationOptions = {
+    const baseOptions: Partial<PIXI.ApplicationOptions> = {
       width,
       height,
       antialias: true,

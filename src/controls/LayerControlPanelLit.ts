@@ -356,6 +356,11 @@ export class LayerControlPanel extends LitElement {
     this.defaultColormap = this.selectedColormap;
   }
 
+  private colormapNamesIncluding(name: string): string[] {
+    const presets = ColorMap.getAvailableMaps();
+    return presets.includes(name) ? presets : [name, ...presets];
+  }
+
   updated(changedProperties: Map<string, any>) {
     if (changedProperties.has('imageLayer') && this.imageLayer) {
       this.initializeFromImageLayer();
@@ -372,9 +377,9 @@ export class LayerControlPanel extends LitElement {
     this.volLayer = this.imageLayer.getLayer(0);
     this.availableLayers = this.imageLayer.getLayerIds();
     this.selectedLayerId = this.availableLayers[0];
-    this.colormaps = ColorMap.getAvailableMaps();
     this.range = this.volLayer.getRange();
     this.selectedColormap = this.volLayer.colorMap.name;
+    this.colormaps = this.colormapNamesIncluding(this.selectedColormap);
     this.alpha = this.volLayer.opacity;
     this.threshold = this.volLayer.getThreshold();
     this.visible = this.volLayer.visible;
@@ -392,9 +397,9 @@ export class LayerControlPanel extends LitElement {
     this.volLayer = this._volStack.getLayer(0);
     this.availableLayers = this._volStack.getLayerIds();
     this.selectedLayerId = this.availableLayers[0];
-    this.colormaps = ColorMap.getAvailableMaps();
     this.range = this.volLayer.getRange();
     this.selectedColormap = this.volLayer.colorMap.name;
+    this.colormaps = this.colormapNamesIncluding(this.selectedColormap);
     this.alpha = this.volLayer.opacity;
     this.threshold = this.volLayer.getThreshold();
     this.visible = this.volLayer.visible;
@@ -493,6 +498,7 @@ export class LayerControlPanel extends LitElement {
         this.volLayer = selectedLayer;
         this.range = selectedLayer.getRange();
         this.selectedColormap = selectedLayer.colorMap.name;
+        this.colormaps = this.colormapNamesIncluding(this.selectedColormap);
         this.alpha = selectedLayer.opacity;
         this.threshold = selectedLayer.getThreshold();
         this.volumeRange = selectedLayer.getVolumeRange();
@@ -652,7 +658,9 @@ export class LayerControlPanel extends LitElement {
   }
 
   private getColormapGradient(colormapName: string): string {
-    const colormap = ColorMap.fromPreset(colormapName);
+    const colormap = this.volLayer?.colorMap.name === colormapName
+      ? this.volLayer.colorMap
+      : ColorMap.fromPreset(colormapName);
     const colors = colormap.getColorMap();
     const numStops = 10;
 
