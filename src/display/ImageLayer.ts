@@ -250,7 +250,9 @@ export class ImageLayer implements SliceLayer {
       // 'smooth' layers are already resampled and hard-thresholded on the CPU;
       // magnifying them linearly would blend colour into transparent pixels
       // and feather a halo across the threshold, so they sample nearest too.
-      const scaleMode = layer.interpolation === 'linear' ? 'linear' : 'nearest';
+      // 'cubic' (anatomy) keeps linear magnification of its resampled texture.
+      const scaleMode = layer.interpolation === 'linear' || layer.interpolation === 'cubic'
+        ? 'linear' : 'nearest';
       const cacheKey = `${layer.id}_${validatedSliceIndex}_${viewAxes.id}_v${layer.textureVersion ?? layer.version}_${scaleMode}`;
       const sprite = this.createSprite(imageSlice.data, cacheKey, scaleMode);
       sprite.alpha = layer.opacity;
@@ -273,25 +275,34 @@ export class ImageLayer implements SliceLayer {
         spriteScaleY: sprite.scale.y
       });
 
-      // A layer resampled on the reference grid ('smooth' mode) overlays the
-      // reference exactly: copy its transform, shrunk by the upsampling factor.
-      const factor = imageSlice.width / refWidth;
-      const refDim = referenceLayer.volume.space.dim;
-      const layerDim = layer.volume.space.dim;
-      const sameGrid = layerDim.length === refDim.length &&
-        layerDim.every((d: number, idx: number) => d === refDim[idx]) &&
-        layer.volume.space.origin.every((o: number, idx: number) =>
-          Math.abs(o - referenceLayer.volume.space.origin[idx]) < 1e-6);
-      const sameGridUpsampled = i !== 0 && referenceSprite !== null &&
-        layer.interpolation === 'smooth' && sameGrid &&
-        factor > 1 && Number.isInteger(factor) && imageSlice.height === refHeight * factor;
-      if (sameGridUpsampled) {
-        sprite.anchor.copyFrom(referenceSprite!.anchor);
-        sprite.position.copyFrom(referenceSprite!.position);
-        sprite.pivot.set(referenceSprite!.pivot.x * factor, referenceSprite!.pivot.y * factor);
-        sprite.scale.set(referenceSprite!.scale.x / factor, referenceSprite!.scale.y / factor);
-        sprite.rotation = referenceSprite!.rotation;
-      } else if (i !== 0) { // Don't align reference to itself
+      // Resampled slices carry `upsample` pixels per voxel. The reference sprite
+      // is shrunk by that factor so image-content space stays in voxel units
+      // (crosshair, labels and fit regions rely on it). A layer on the same
+      // grid as the reference copies its transform, rescaled by the ratio of
+      // the two factors; anything else goes through the alignment strategies.
+      const k = imageSlice.upsample ?? 1;
+      const refK = referenceSlice.upsample ?? 1;
+      const refSpace = referenceLayer.volume.space;
+      const space = layer.volume.space;
+      const close = (a: number[], b: number[]) =>
+        a.length === b.length && a.every((v, idx) => Math.abs(v - b[idx]) < 1e-6);
+      const sameGrid = close(space.dim, refSpace.dim) && close(space.origin, refSpace.origin) &&
+        close(space.spacing, refSpace.spacing);
+      if (i === 0) {
+        if (k !== 1) sprite.scale.set(sprite.scale.x / k, sprite.scale.y / k);
+      } else if (referenceSprite !== null && sameGrid &&
+        imageSlice.width / k === refWidth / refK && imageSlice.height / k === refHeight / refK) {
+        const ratio = k / refK;
+        const ref = referenceSprite;
+        if (sprite.anchor && ref.anchor) sprite.anchor.set(ref.anchor.x, ref.anchor.y);
+        sprite.position.set(ref.position.x, ref.position.y);
+        sprite.pivot?.set((ref.pivot?.x ?? 0) * ratio, (ref.pivot?.y ?? 0) * ratio);
+        sprite.scale.set(ref.scale.x / ratio, ref.scale.y / ratio);
+        sprite.rotation = ref.rotation ?? 0;
+      } else {
+        if (k !== 1 || refK !== 1) {
+          this.logger.warn('Resampled layer is not on the reference grid; alignment ignores upsampling', { layerId: layer.id });
+        }
         this.alignmentManager.alignSprite(sprite, imageSlice, referenceSlice, this.alignmentOptions);
       }
       if (i === 0) referenceSprite = sprite;

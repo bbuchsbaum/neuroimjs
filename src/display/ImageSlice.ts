@@ -34,6 +34,12 @@ export class ImageSlice {
   private boundingBox: BoundingBox;      // The real-world bounding box for this slice.
   private spacing: number[];             // The pixel spacing (size) along the X and Y axes.
   private axes: AxisSet2D;               // A 2D axis set describing orientation (e.g. L-R, A-P).
+  /**
+   * Pixels per source voxel along each in-plane axis. Greater than 1 when the
+   * slice was resampled for display ('smooth'/'cubic'); renderers divide the
+   * sprite scale by it so content space stays in voxel units.
+   */
+  public readonly upsample: number;
 
   /**
    * Constructs an ImageSlice instance.
@@ -46,8 +52,10 @@ export class ImageSlice {
     imageData: ImageData,
     boundingBox: BoundingBox,
     spacing: number[],
-    axes: AxisSet2D
+    axes: AxisSet2D,
+    upsample: number = 1
   ) {
+    this.upsample = upsample;
     this.imageData = imageData;
     this.boundingBox = boundingBox;
     this.spacing = spacing;
