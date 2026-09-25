@@ -99,6 +99,8 @@ export type { SliceLayer, ScreenLayoutContext } from './display/SliceLayer';
 // Orientation labels (L/R/A/P/S/I) overlay
 export { OrientationLabelLayer } from './display/OrientationLabelLayer';
 export type { OrientationLabelOptions } from './display/OrientationLabelLayer';
+export type { CrossHairOptions } from './display/CrossHair';
+export type { SliceInterpolation } from './display/VolLayer';
 
 // Export concrete classes for backward compatibility
 export { SliceModel } from './display/SliceModel';
