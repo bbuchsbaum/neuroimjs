@@ -23,6 +23,7 @@ export type { DepthEnhancedOptions } from './display/DepthEnhancedLayer';
 
 export { OrientationLabelLayer } from './display/OrientationLabelLayer';
 export type { OrientationLabelOptions } from './display/OrientationLabelLayer';
+export type { CrossHairOptions } from './display/CrossHair';
 
 export { ColorMap } from './display/ColorMap';
 export type {

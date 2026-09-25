@@ -28,6 +28,19 @@ interface CustomImageData extends ImageData {
  * - LogicalNeuroVol: Boolean mask volumes
  * - ClusteredNeuroVol: Labeled/parcellated volumes
  */
+/**
+ * How a slice is resampled for display:
+ * - 'linear': colours are blended by the GPU when magnified (smooth anatomy).
+ * - 'nearest': voxel-exact blocks; colour never bleeds past a voxel edge.
+ * - 'smooth': the *values* are bilinearly interpolated to a finer grid before
+ *   colour mapping and thresholding, so thresholded contours follow the
+ *   interpolated statistic (as in MRIcroGL / niivue) instead of voxel steps.
+ */
+export type SliceInterpolation = 'linear' | 'nearest' | 'smooth';
+
+/** Upsampling factor used by the 'smooth' interpolation mode. */
+export const SMOOTH_UPSAMPLE = 4;
+
 export class VolLayer {
   /**
    * A unique identifier for the layer.
@@ -76,6 +89,35 @@ export class VolLayer {
   @observable public version: number = 0;
 
   /**
+   * Bumped only when the colour-mapped pixels change (not for opacity), so
+   * renderers can reuse uploaded textures across opacity changes.
+   */
+  public textureVersion: number = 0;
+
+  /**
+   * Texture sampling used when the slice is magnified on screen.
+   */
+  /**
+   * Sampling for display. Note: 'smooth' is meant for overlays resampled on the
+   * reference (layer 0) grid; the reference layer itself should not use it.
+   */
+  @observable public interpolation: SliceInterpolation = 'linear';
+
+  /**
+   * Strength in [0, 1] of a dark outline drawn on the visible side of every
+   * edge between drawn and transparent pixels (i.e. at the threshold contour).
+   * 0 disables it.
+   */
+  @observable public outline: number = 0;
+
+  /**
+   * Width, in voxels, of an alpha ramp at the slice's outer edges, so a field
+   * of view that ends inside tissue fades out instead of stopping at a hard
+   * line. 0 disables it.
+   */
+  @observable public edgeFade: number = 0;
+
+  /**
    * A cache of generated slices to avoid recomputation.
    * Keys are constructed from slice index or coordinates, orientation (outAxes),
    * and interpolation mode when relevant.
@@ -122,7 +164,6 @@ export class VolLayer {
     // Sync the color map with the current settings.
     this.colorMap.setRange(this.range);
     this.colorMap.setThreshold(this.threshold);
-    this.colorMap.setAlpha(this.opacity);
   }
 
   /**
@@ -249,7 +290,6 @@ export class VolLayer {
     // Sync colormap to new settings
     this.colorMap.setRange(this.range);
     this.colorMap.setThreshold(this.threshold);
-    this.colorMap.setAlpha(this.opacity);
 
     // Invalidate cached slices
     this.sliceCache.clear();
@@ -262,8 +302,13 @@ export class VolLayer {
    * @returns A `CustomImageData` object containing RGBA pixel data.
    */
   private processSliceData(slice: NeuroSlice): CustomImageData {
-    const data = slice.getData();
-    const [width, height] = slice.dim;
+    let data: ArrayLike<number> = slice.getData();
+    let [width, height] = slice.dim;
+    if (this.interpolation === 'smooth') {
+      data = upsampleBilinear(data, width, height, SMOOTH_UPSAMPLE);
+      width *= SMOOTH_UPSAMPLE;
+      height *= SMOOTH_UPSAMPLE;
+    }
 
     const rgba = new Uint8ClampedArray(width * height * 4);
     const imageData = typeof globalThis.ImageData === 'function'
@@ -276,7 +321,12 @@ export class VolLayer {
         } as CustomImageData;
 
     // Fill the imageData based on intensity values using the color map.
-    this.colorMap.fillImageData(imageData, data);
+    this.colorMap.fillImageData(imageData, data as any);
+    if (this.outline > 0) darkenAlphaEdges(imageData.data, width, height, this.outline);
+    if (this.edgeFade > 0) {
+      const scale = this.interpolation === 'smooth' ? SMOOTH_UPSAMPLE : 1;
+      fadeImageEdges(imageData.data, width, height, this.edgeFade * scale);
+    }
     return imageData;
   }
 
@@ -375,7 +425,6 @@ export class VolLayer {
     this.colorMap = colormap;
     this.colorMap.setRange(this.range);
     this.colorMap.setThreshold(this.threshold);
-    this.colorMap.setAlpha(this.opacity);
     this.invalidateCache();
   }
 
@@ -386,6 +435,7 @@ export class VolLayer {
   @action
   private invalidateCache(): void {
     this.sliceCache.clear();
+    this.textureVersion++;
     this.version++;
   }
 
@@ -445,8 +495,43 @@ export class VolLayer {
    */
   @action
   public setOpacity(opacity: number): void {
+    // Opacity is applied once, at composite time (ImageLayer sets sprite.alpha).
+    // It is deliberately NOT baked into the colormap: doing both squared the
+    // effective opacity (0.7 rendered as 0.49) and overwrote any per-entry LUT alpha.
     this.opacity = opacity;
-    this.colorMap.setAlpha(this.opacity);
+    this.version++;
+  }
+
+  /**
+   * Sets the edge fade width in voxels (0 disables).
+   */
+  @action
+  public setEdgeFade(voxels: number): void {
+    const next = Math.max(0, voxels);
+    if (next === this.edgeFade) return;
+    this.edgeFade = next;
+    this.invalidateCache();
+  }
+
+  /**
+   * Sets the threshold-contour outline strength (0 disables).
+   */
+  @action
+  public setOutline(strength: number): void {
+    const next = Math.max(0, Math.min(1, strength));
+    if (next === this.outline) return;
+    this.outline = next;
+    this.invalidateCache();
+  }
+
+  /**
+   * Sets how the slice is resampled for display; see {@link SliceInterpolation}.
+   */
+  @action
+  public setInterpolation(interpolation: SliceInterpolation): void {
+    if (interpolation === this.interpolation) return;
+    this.interpolation = interpolation;
+    // Cached slices were colour-mapped at the previous sampling.
     this.invalidateCache();
   }
 
@@ -470,5 +555,97 @@ export class VolLayer {
   @action
   public setVisible(visible: boolean): void {
     this.visible = visible;
+  }
+}
+
+/**
+ * Bilinearly resamples a row-major (x fastest) 2D grid by an integer factor,
+ * sampling at output pixel centres. Where any contributing voxel is not finite
+ * the nearest voxel is used, so "no data" never smears into its neighbours.
+ */
+export function upsampleBilinear(
+  src: ArrayLike<number>,
+  width: number,
+  height: number,
+  factor: number
+): Float32Array {
+  const ow = width * factor;
+  const oh = height * factor;
+  const out = new Float32Array(ow * oh);
+  for (let oy = 0; oy < oh; oy++) {
+    const fy = Math.min(Math.max((oy + 0.5) / factor - 0.5, 0), height - 1);
+    const y0 = Math.floor(fy);
+    const y1 = Math.min(y0 + 1, height - 1);
+    const ty = fy - y0;
+    for (let ox = 0; ox < ow; ox++) {
+      const fx = Math.min(Math.max((ox + 0.5) / factor - 0.5, 0), width - 1);
+      const x0 = Math.floor(fx);
+      const x1 = Math.min(x0 + 1, width - 1);
+      const tx = fx - x0;
+      const a = src[y0 * width + x0];
+      const b = src[y0 * width + x1];
+      const c = src[y1 * width + x0];
+      const d = src[y1 * width + x1];
+      let v: number;
+      if (Number.isFinite(a) && Number.isFinite(b) && Number.isFinite(c) && Number.isFinite(d)) {
+        v = (a * (1 - tx) + b * tx) * (1 - ty) + (c * (1 - tx) + d * tx) * ty;
+      } else {
+        v = src[(ty < 0.5 ? y0 : y1) * width + (tx < 0.5 ? x0 : x1)];
+      }
+      out[oy * ow + ox] = v;
+    }
+  }
+  return out;
+}
+
+/**
+ * Darkens drawn pixels (alpha > 0) that touch a transparent 4-neighbour, which
+ * traces the threshold contour one pixel wide on its visible side.
+ */
+export function darkenAlphaEdges(
+  rgba: Uint8ClampedArray,
+  width: number,
+  height: number,
+  strength: number
+): void {
+  const k = 1 - strength;
+  // Outside the slice counts as drawn, so clusters cut by the field of view
+  // are not outlined along the image border.
+  const alpha = (x: number, y: number) =>
+    x < 0 || y < 0 || x >= width || y >= height ? 255 : rgba[(y * width + x) * 4 + 3];
+  const edges: number[] = [];
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (alpha(x, y) === 0) continue;
+      if (alpha(x - 1, y) === 0 || alpha(x + 1, y) === 0 || alpha(x, y - 1) === 0 || alpha(x, y + 1) === 0) {
+        edges.push((y * width + x) * 4);
+      }
+    }
+  }
+  for (const o of edges) {
+    rgba[o] = rgba[o] * k;
+    rgba[o + 1] = rgba[o + 1] * k;
+    rgba[o + 2] = rgba[o + 2] * k;
+  }
+}
+
+/**
+ * Multiplies alpha by a linear ramp over the outermost `widthPx` pixels.
+ */
+export function fadeImageEdges(
+  rgba: Uint8ClampedArray,
+  width: number,
+  height: number,
+  widthPx: number
+): void {
+  if (widthPx <= 0) return;
+  for (let y = 0; y < height; y++) {
+    const dy = Math.min(y, height - 1 - y);
+    for (let x = 0; x < width; x++) {
+      const d = Math.min(dy, x, width - 1 - x);
+      if (d >= widthPx) continue;
+      const o = (y * width + x) * 4 + 3;
+      rgba[o] = rgba[o] * ((d + 0.5) / widthPx);
+    }
   }
 }

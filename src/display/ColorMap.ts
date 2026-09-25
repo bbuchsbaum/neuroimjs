@@ -654,10 +654,11 @@ export class ColorMap {
 
     // Convert the array of hex strings to [r,g,b,(a)] in [0..1]
     const colorTuples: Color[] = presetColors.map(color => {
-      const rgba = chroma(color).rgba().map(v => v / 255);
-      return rgba.length === 4
-        ? [rgba[0], rgba[1], rgba[2], rgba[3]]
-        : [rgba[0], rgba[1], rgba[2]];
+      // chroma's rgba() gives RGB in [0..255] but alpha already in [0..1].
+      const [r, g, b, a] = chroma(color).rgba();
+      return a === undefined || a === 1
+        ? [r / 255, g / 255, b / 255]
+        : [r / 255, g / 255, b / 255, a];
     });
 
     if (options.existingColorMap instanceof ColorMap) {

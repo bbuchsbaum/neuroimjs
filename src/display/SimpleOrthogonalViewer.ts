@@ -11,8 +11,9 @@ import { resolveColorMap } from './ColorMapResolver';
 import { EventEmitter } from './EventEmitter';
 import type { SlicePointerEvent } from './types/display';
 import type { OrientationLabelOptions } from './OrientationLabelLayer';
+import type { CrossHairOptions } from './CrossHair';
 
-export type LayoutMode = 'left-tall' | 'top-bottom';
+export type LayoutMode = 'left-tall' | 'top-bottom' | 'ortho';
 
 export interface SimpleOrthogonalViewerOptions {
   layout?: LayoutMode;
@@ -24,6 +25,20 @@ export interface SimpleOrthogonalViewerOptions {
   showOrientationLabels?: boolean;
   /** Styling for the orientation labels. Only used when showOrientationLabels is true. */
   orientationLabelOptions?: OrientationLabelOptions;
+  /** Crosshair styling (colour, alpha, width and gap in screen px). */
+  crosshairOptions?: CrossHairOptions;
+  /** Canvas clear colour for every view (PIXI numeric colour). Default 0x000000. */
+  backgroundColor?: number;
+  /** CSS outline on the hovered view, or null for none. */
+  focusOutline?: string | null;
+  /** Space kept clear around each slice inside its cell, in screen px. */
+  cellPaddingPx?: number;
+  /** 'ortho' layout: stack the views in one column below this width (px). */
+  stackBelowPx?: number;
+  /** 'ortho' layout: legend row height when stacked (px). */
+  stackedLegendHeightPx?: number;
+  /** 'ortho' layout: stacked views as a column or one at a time. */
+  stackMode?: 'column' | 'single';
 }
 
 /**
@@ -55,6 +70,32 @@ export class SimpleOrthogonalViewer {
     this.imageLayer = imageLayer;
   }
 
+  /**
+   * The empty fourth cell of the 'ortho' layout, for a host-supplied legend or
+   * readout. Null for other layouts.
+   */
+  getLegendElement(): HTMLElement | null {
+    return this.viewer?.getLegendElement() ?? null;
+  }
+
+  /**
+   * Fits all views to a box of reference-grid voxel indices (inclusive), e.g.
+   * the head's bounding box; null restores the full field of view.
+   */
+  setFitBounds(bounds: { min: number[]; max: number[] } | null): void {
+    this.viewer?.setFitBounds(bounds);
+  }
+
+  /** Chooses the view shown when a stacked 'ortho' layout is in 'single' mode. */
+  setStackedView(view: 'axial' | 'coronal' | 'sagittal'): void {
+    this.viewer?.setStackedView(view);
+  }
+
+  /** Whether the 'ortho' layout is currently stacked. */
+  isStacked(): boolean {
+    return this.viewer?.isStacked() ?? false;
+  }
+
   static async create(
     container: HTMLElement,
     volStack: VolStack,
@@ -74,6 +115,13 @@ export class SimpleOrthogonalViewer {
         gapPx: options?.gapPx ?? 12,
         showOrientationLabels: options?.showOrientationLabels ?? false,
         orientationLabelOptions: options?.orientationLabelOptions,
+        crosshairOptions: options?.crosshairOptions,
+        backgroundColor: options?.backgroundColor,
+        focusOutline: options?.focusOutline,
+        cellPaddingPx: options?.cellPaddingPx,
+        stackBelowPx: options?.stackBelowPx,
+        stackedLegendHeightPx: options?.stackedLegendHeightPx,
+        stackMode: options?.stackMode,
       },
     });
     // Wire events for external integrations

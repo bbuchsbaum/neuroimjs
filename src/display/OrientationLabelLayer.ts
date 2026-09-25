@@ -23,6 +23,22 @@ export interface OrientationLabelOptions {
   strokeColor?: number;
   /** Outline width in pixels. Set to 0 to disable. */
   strokeWidth?: number;
+  /** CSS font weight. Default 'bold'. */
+  fontWeight?: 'normal' | 'bold' | '100' | '200' | '300' | '400' | '500' | '600' | '700' | '800' | '900';
+  /** Letter spacing in pixels. Default 0. */
+  letterSpacing?: number;
+  /** Fill opacity in [0, 1]. Default 1. */
+  alpha?: number;
+  /** Soft shadow for legibility over bright anatomy; alpha 0 disables. Default 0. */
+  shadowAlpha?: number;
+  /** Shadow blur radius in pixels. Default 2. */
+  shadowBlur?: number;
+  /**
+   * What the labels are pinned to: the viewport edges ('viewport', default) or
+   * just outside the rendered image's edges ('image', clamped to the viewport),
+   * which keeps labels of neighbouring views apart.
+   */
+  anchor?: 'viewport' | 'image';
 }
 
 /**
@@ -88,6 +104,12 @@ export class OrientationLabelLayer implements SliceLayer {
       margin: options?.margin ?? 6,
       strokeColor: options?.strokeColor ?? 0x000000,
       strokeWidth: options?.strokeWidth ?? 3,
+      fontWeight: options?.fontWeight ?? 'bold',
+      letterSpacing: options?.letterSpacing ?? 0,
+      alpha: options?.alpha ?? 1,
+      shadowAlpha: options?.shadowAlpha ?? 0,
+      shadowBlur: options?.shadowBlur ?? 2,
+      anchor: options?.anchor ?? 'viewport',
     };
     this.container = new PIXI.Container();
   }
@@ -147,6 +169,10 @@ export class OrientationLabelLayer implements SliceLayer {
     const margin = this.options.margin;
 
     // Safe-area edges: keep labels clear of reserved UI (e.g. the slice slider).
+    if (this.options.anchor === 'image') {
+      this.layoutAroundImage(ctx);
+      return;
+    }
     const left = insets.left + margin;
     const right = width - insets.right - margin;
     const top = insets.top + margin;
@@ -178,6 +204,50 @@ export class OrientationLabelLayer implements SliceLayer {
     }
   }
 
+  /**
+   * Places each label just outside the matching edge of the rendered image,
+   * clamped so the whole label stays inside the viewport's safe area.
+   */
+  private layoutAroundImage(ctx: ScreenLayoutContext): void {
+    const { width, height, project } = ctx;
+    const insets = ctx.insets ?? { top: 0, right: 0, bottom: 0, left: 0 };
+    const m = this.options.margin;
+    const r = ctx.contentRect ?? { x0: 0, y0: 0, x1: this.contentW, y1: this.contentH };
+    const a = project(r.x0, r.y0);
+    const b = project(r.x1, r.y1);
+    const imgL = Math.min(a.x, b.x), imgR = Math.max(a.x, b.x);
+    const imgT = Math.min(a.y, b.y), imgB = Math.max(a.y, b.y);
+    const midX = (imgL + imgR) / 2, midY = (imgT + imgB) / 2;
+    const safeL = insets.left, safeR = width - insets.right;
+    const safeT = insets.top, safeB = height - insets.bottom;
+
+    const atLeft = (t: PIXI.Text) => {
+      t.anchor.set(1, 0.5);
+      t.position.set(Math.max(safeL + t.width, imgL - m), midY);
+    };
+    const atRight = (t: PIXI.Text) => {
+      t.anchor.set(0, 0.5);
+      t.position.set(Math.min(safeR - t.width, imgR + m), midY);
+    };
+    const atTop = (t: PIXI.Text) => {
+      t.anchor.set(0.5, 1);
+      t.position.set(midX, Math.max(safeT + t.height, imgT - m));
+    };
+    const atBottom = (t: PIXI.Text) => {
+      t.anchor.set(0.5, 0);
+      t.position.set(midX, Math.min(safeB - t.height, imgB + m));
+    };
+
+    const negI = project(0, this.contentH / 2);
+    const posI = project(this.contentW, this.contentH / 2);
+    if (negI.x <= posI.x) { atLeft(this.textNegI!); atRight(this.textPosI!); }
+    else { atRight(this.textNegI!); atLeft(this.textPosI!); }
+    const negJ = project(this.contentW / 2, 0);
+    const posJ = project(this.contentW / 2, this.contentH);
+    if (negJ.y <= posJ.y) { atTop(this.textNegJ!); atBottom(this.textPosJ!); }
+    else { atBottom(this.textNegJ!); atTop(this.textPosJ!); }
+  }
+
   private placeLeft(t: PIXI.Text, x: number, y: number) {
     t.anchor.set(0, 0.5);
     t.position.set(x, y);
@@ -200,12 +270,23 @@ export class OrientationLabelLayer implements SliceLayer {
       fontSize: this.options.fontSize,
       fill: this.options.color,
       fontFamily: this.options.fontFamily,
-      fontWeight: 'bold',
+      fontWeight: this.options.fontWeight,
+      letterSpacing: this.options.letterSpacing,
     };
     if (this.options.strokeWidth > 0) {
       style.stroke = { color: this.options.strokeColor, width: this.options.strokeWidth };
     }
+    if (this.options.shadowAlpha > 0) {
+      style.dropShadow = {
+        color: 0x000000,
+        alpha: this.options.shadowAlpha,
+        blur: this.options.shadowBlur,
+        distance: 0,
+        angle: 0,
+      };
+    }
     const label = new PIXI.Text(text, style);
+    label.alpha = this.options.alpha;
     label.anchor.set(0.5, 0.5);
     return label;
   }

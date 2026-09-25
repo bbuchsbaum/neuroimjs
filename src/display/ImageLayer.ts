@@ -122,7 +122,7 @@ export class ImageLayer implements SliceLayer {
    * Uses TextureMemoryConsumer for intelligent caching and memory management.
    * Uses sprite pool to reduce garbage collection pressure.
    */
-  createSprite(imageData: ImageData, cacheKey: string): PIXI.Sprite {
+  createSprite(imageData: ImageData, cacheKey: string, scaleMode: 'linear' | 'nearest' = 'linear'): PIXI.Sprite {
     // Check if we already have a texture for this key
     let texture = this.textureMemory.getTexture(cacheKey);
     
@@ -154,6 +154,9 @@ export class ImageLayer implements SliceLayer {
       // This ensures the texture data is available for rendering
       // Note: We access texture.source via 'any' cast to avoid TypeScript errors with old @types/pixi.js
       const textureSource = (texture as any).source;
+      if (textureSource && 'scaleMode' in textureSource) {
+        textureSource.scaleMode = scaleMode;
+      }
       if (textureSource && typeof textureSource.update === 'function') {
         textureSource.update();
       }
@@ -227,6 +230,7 @@ export class ImageLayer implements SliceLayer {
     const refHeight = referenceSlice.height;
 
     // For each layer, get the slice, build a sprite, align, add
+    let referenceSprite: PIXI.Sprite | null = null;
     for (let i = 0; i < this.volumeStack.length; i++) {
       const layer = this.volumeStack.getLayer(i);
       const validatedSliceIndex = sliceValidation.sliceIndices[i];
@@ -243,8 +247,12 @@ export class ImageLayer implements SliceLayer {
 
       // Create cache key based on layer ID, slice index, axes, and version
       // Version changes when opacity/threshold/range/colormap are modified
-      const cacheKey = `${layer.id}_${validatedSliceIndex}_${viewAxes.id}_v${layer.version}`;
-      const sprite = this.createSprite(imageSlice.data, cacheKey);
+      // 'smooth' layers are already resampled and hard-thresholded on the CPU;
+      // magnifying them linearly would blend colour into transparent pixels
+      // and feather a halo across the threshold, so they sample nearest too.
+      const scaleMode = layer.interpolation === 'linear' ? 'linear' : 'nearest';
+      const cacheKey = `${layer.id}_${validatedSliceIndex}_${viewAxes.id}_v${layer.textureVersion ?? layer.version}_${scaleMode}`;
+      const sprite = this.createSprite(imageSlice.data, cacheKey, scaleMode);
       sprite.alpha = layer.opacity;
       sprite.visible = layer.visible;
 
@@ -265,10 +273,28 @@ export class ImageLayer implements SliceLayer {
         spriteScaleY: sprite.scale.y
       });
 
-      // Use AlignmentManager for sophisticated alignment
-      if (i !== 0) { // Don't align reference to itself
+      // A layer resampled on the reference grid ('smooth' mode) overlays the
+      // reference exactly: copy its transform, shrunk by the upsampling factor.
+      const factor = imageSlice.width / refWidth;
+      const refDim = referenceLayer.volume.space.dim;
+      const layerDim = layer.volume.space.dim;
+      const sameGrid = layerDim.length === refDim.length &&
+        layerDim.every((d: number, idx: number) => d === refDim[idx]) &&
+        layer.volume.space.origin.every((o: number, idx: number) =>
+          Math.abs(o - referenceLayer.volume.space.origin[idx]) < 1e-6);
+      const sameGridUpsampled = i !== 0 && referenceSprite !== null &&
+        layer.interpolation === 'smooth' && sameGrid &&
+        factor > 1 && Number.isInteger(factor) && imageSlice.height === refHeight * factor;
+      if (sameGridUpsampled) {
+        sprite.anchor.copyFrom(referenceSprite!.anchor);
+        sprite.position.copyFrom(referenceSprite!.position);
+        sprite.pivot.set(referenceSprite!.pivot.x * factor, referenceSprite!.pivot.y * factor);
+        sprite.scale.set(referenceSprite!.scale.x / factor, referenceSprite!.scale.y / factor);
+        sprite.rotation = referenceSprite!.rotation;
+      } else if (i !== 0) { // Don't align reference to itself
         this.alignmentManager.alignSprite(sprite, imageSlice, referenceSlice, this.alignmentOptions);
       }
+      if (i === 0) referenceSprite = sprite;
 
       // Add sprite to container FIRST
       mainContainer.addChild(sprite);

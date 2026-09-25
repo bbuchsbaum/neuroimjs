@@ -233,7 +233,26 @@ describe('VolLayer LRU Cache', () => {
       expect(volLayer.getCacheStats().size).toBe(0);
     });
 
-    it('should clear cache when opacity changes', () => {
+    it('should keep colour-mapped slices but re-render when opacity changes', () => {
+      // Opacity is applied at composite time (sprite alpha), not baked into the
+      // colour-mapped slice, so the cached slice stays valid; the version bump
+      // is what triggers the re-render.
+      const axialAxes = new AxisSet3D(
+        NamedAxis.LEFT_RIGHT,
+        NamedAxis.POST_ANT,
+        NamedAxis.INF_SUP
+      );
+
+      const before = volLayer.getSlice(5, axialAxes);
+      expect(volLayer.getCacheStats().size).toBe(1);
+      const version = volLayer.version;
+
+      volLayer.setOpacity(0.5);
+      expect(volLayer.version).toBe(version + 1);
+      expect(volLayer.getSlice(5, axialAxes)).toBe(before);
+    });
+
+    it('should clear cache when the sampling mode changes', () => {
       const axialAxes = new AxisSet3D(
         NamedAxis.LEFT_RIGHT,
         NamedAxis.POST_ANT,
@@ -241,10 +260,10 @@ describe('VolLayer LRU Cache', () => {
       );
 
       volLayer.getSlice(5, axialAxes);
-      expect(volLayer.getCacheStats().size).toBe(1);
-
-      volLayer.setOpacity(0.5);
+      volLayer.setInterpolation('smooth');
       expect(volLayer.getCacheStats().size).toBe(0);
+      const smooth = volLayer.getSlice(5, axialAxes);
+      expect(smooth.width).toBe(volLayer.volume.space.dim[0] * 4);
     });
 
     it('should maintain high hit ratio in typical usage', () => {
