@@ -9,6 +9,8 @@ export { AxisSet } from './geometry/Axis';
 
 // Standard orientation constants for composable views
 export { AXIAL_LPI, CORONAL_LIP, SAGITTAL_AIL } from './geometry/Axis';
+export { getVolumeGeometry, assertSameVolumeGeometry } from './geometry/VolumeGeometry';
+export type { VolumeGeometry } from './geometry/VolumeGeometry';
 export type { NeuroVol } from './volume/NeuroVol';
 export {
   DenseNeuroVol,
@@ -97,6 +99,8 @@ export type { SliceLayer, ScreenLayoutContext } from './display/SliceLayer';
 // Orientation labels (L/R/A/P/S/I) overlay
 export { OrientationLabelLayer } from './display/OrientationLabelLayer';
 export type { OrientationLabelOptions } from './display/OrientationLabelLayer';
+export type { CrossHairOptions } from './display/CrossHair';
+export type { SliceInterpolation } from './display/VolLayer';
 
 // Export concrete classes for backward compatibility
 export { SliceModel } from './display/SliceModel';

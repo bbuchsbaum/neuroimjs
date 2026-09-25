@@ -122,7 +122,7 @@ export class ImageLayer implements SliceLayer {
    * Uses TextureMemoryConsumer for intelligent caching and memory management.
    * Uses sprite pool to reduce garbage collection pressure.
    */
-  createSprite(imageData: ImageData, cacheKey: string): PIXI.Sprite {
+  createSprite(imageData: ImageData, cacheKey: string, scaleMode: 'linear' | 'nearest' = 'linear'): PIXI.Sprite {
     // Check if we already have a texture for this key
     let texture = this.textureMemory.getTexture(cacheKey);
     
@@ -154,6 +154,9 @@ export class ImageLayer implements SliceLayer {
       // This ensures the texture data is available for rendering
       // Note: We access texture.source via 'any' cast to avoid TypeScript errors with old @types/pixi.js
       const textureSource = (texture as any).source;
+      if (textureSource && 'scaleMode' in textureSource) {
+        textureSource.scaleMode = scaleMode;
+      }
       if (textureSource && typeof textureSource.update === 'function') {
         textureSource.update();
       }
@@ -227,6 +230,7 @@ export class ImageLayer implements SliceLayer {
     const refHeight = referenceSlice.height;
 
     // For each layer, get the slice, build a sprite, align, add
+    let referenceSprite: PIXI.Sprite | null = null;
     for (let i = 0; i < this.volumeStack.length; i++) {
       const layer = this.volumeStack.getLayer(i);
       const validatedSliceIndex = sliceValidation.sliceIndices[i];
@@ -243,8 +247,14 @@ export class ImageLayer implements SliceLayer {
 
       // Create cache key based on layer ID, slice index, axes, and version
       // Version changes when opacity/threshold/range/colormap are modified
-      const cacheKey = `${layer.id}_${validatedSliceIndex}_${viewAxes.id}_v${layer.version}`;
-      const sprite = this.createSprite(imageSlice.data, cacheKey);
+      // 'smooth' layers are already resampled and hard-thresholded on the CPU;
+      // magnifying them linearly would blend colour into transparent pixels
+      // and feather a halo across the threshold, so they sample nearest too.
+      // 'cubic' (anatomy) keeps linear magnification of its resampled texture.
+      const scaleMode = layer.interpolation === 'linear' || layer.interpolation === 'cubic'
+        ? 'linear' : 'nearest';
+      const cacheKey = `${layer.id}_${validatedSliceIndex}_${viewAxes.id}_v${layer.textureVersion ?? layer.version}_${scaleMode}`;
+      const sprite = this.createSprite(imageSlice.data, cacheKey, scaleMode);
       sprite.alpha = layer.opacity;
       sprite.visible = layer.visible;
 
@@ -265,10 +275,37 @@ export class ImageLayer implements SliceLayer {
         spriteScaleY: sprite.scale.y
       });
 
-      // Use AlignmentManager for sophisticated alignment
-      if (i !== 0) { // Don't align reference to itself
+      // Resampled slices carry `upsample` pixels per voxel. The reference sprite
+      // is shrunk by that factor so image-content space stays in voxel units
+      // (crosshair, labels and fit regions rely on it). A layer on the same
+      // grid as the reference copies its transform, rescaled by the ratio of
+      // the two factors; anything else goes through the alignment strategies.
+      const k = imageSlice.upsample ?? 1;
+      const refK = referenceSlice.upsample ?? 1;
+      const refSpace = referenceLayer.volume.space;
+      const space = layer.volume.space;
+      const close = (a: number[], b: number[]) =>
+        a.length === b.length && a.every((v, idx) => Math.abs(v - b[idx]) < 1e-6);
+      const sameGrid = close(space.dim, refSpace.dim) && close(space.origin, refSpace.origin) &&
+        close(space.spacing, refSpace.spacing);
+      if (i === 0) {
+        if (k !== 1) sprite.scale.set(sprite.scale.x / k, sprite.scale.y / k);
+      } else if (referenceSprite !== null && sameGrid &&
+        imageSlice.width / k === refWidth / refK && imageSlice.height / k === refHeight / refK) {
+        const ratio = k / refK;
+        const ref = referenceSprite;
+        if (sprite.anchor && ref.anchor) sprite.anchor.set(ref.anchor.x, ref.anchor.y);
+        sprite.position.set(ref.position.x, ref.position.y);
+        sprite.pivot?.set((ref.pivot?.x ?? 0) * ratio, (ref.pivot?.y ?? 0) * ratio);
+        sprite.scale.set(ref.scale.x / ratio, ref.scale.y / ratio);
+        sprite.rotation = ref.rotation ?? 0;
+      } else {
+        if (k !== 1 || refK !== 1) {
+          this.logger.warn('Resampled layer is not on the reference grid; alignment ignores upsampling', { layerId: layer.id });
+        }
         this.alignmentManager.alignSprite(sprite, imageSlice, referenceSlice, this.alignmentOptions);
       }
+      if (i === 0) referenceSprite = sprite;
 
       // Add sprite to container FIRST
       mainContainer.addChild(sprite);

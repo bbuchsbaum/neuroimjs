@@ -4,7 +4,7 @@ import * as PIXI from 'pixi.js';
 import { SliceLayer, ScreenLayoutContext } from './SliceLayer';
 import { AxisSet3D } from '../geometry/Axis';
 import { ImageLayer } from './ImageLayer';
-import { CrossHair } from './CrossHair';  // note: updated CrossHair that requires a transformer
+import { CrossHair, CrossHairOptions } from './CrossHair';  // note: updated CrossHair that requires a transformer
 import { CoordinateTransformer } from './CoordinateTransformer';
 import { NeuroSpace } from '../geometry/NeuroSpace';
 import { SliceModel } from './SliceModel';
@@ -20,6 +20,14 @@ export interface SliceViewOptions {
   height?: number;
   showCrosshair?: boolean;
   showSlider?: boolean;
+  /** Styling for the crosshair (colour, alpha, width and gap in screen px). */
+  crosshairOptions?: CrossHairOptions;
+  /** Canvas clear colour (PIXI numeric colour). Default 0x000000. */
+  backgroundColor?: number;
+  /** Canvas clear alpha in [0, 1]. Default 1. */
+  backgroundAlpha?: number;
+  /** Space kept clear around the fitted slice on every side, in screen px. Default 0. */
+  fitPadding?: number;
 }
 
 /**
@@ -36,6 +44,7 @@ export class SliceView implements ISliceView {
   // labels). It sits on top of mainContainer and is never scaled or Y-flipped,
   // so its children are positioned directly in viewport pixel coordinates.
   public overlayContainer!: PIXI.Container;
+  private fitRegion: { x0: number; y0: number; x1: number; y1: number } | null = null;
   private canvas: HTMLCanvasElement | null = null;
   public slider: HTMLInputElement | null = null;
   public coordinateTransformer!: CoordinateTransformer;
@@ -52,6 +61,7 @@ export class SliceView implements ISliceView {
   private disposers: IReactionDisposer[] = [];
   private boundOnResize: () => void = () => {};
   private resizeObserver: ResizeObserver | null = null;
+  private disposed = false;
 
   // Zoom & Pan state
   private zoomLevel: number = 1.0;
@@ -116,7 +126,8 @@ export class SliceView implements ISliceView {
       antialias: true,
       resolution: window.devicePixelRatio || 1,
       autoDensity: true,
-      backgroundColor: 0x000000,
+      backgroundColor: this.options.backgroundColor ?? 0x000000,
+      backgroundAlpha: this.options.backgroundAlpha ?? 1,
     };
 
     const PixiAppClass: any = PIXI.Application as any;
@@ -172,7 +183,8 @@ export class SliceView implements ISliceView {
       const crossHairLayer = new CrossHair(
         this.neuroSpace,
         this.viewAxes,
-        this.coordinateTransformer  // <=== share the transform
+        this.coordinateTransformer,  // <=== share the transform
+        this.options.crosshairOptions
       );
       this.addLayer('crosshair', crossHairLayer);
     }
@@ -352,6 +364,19 @@ export class SliceView implements ISliceView {
   /**
    * Fit content to screen + flip Y scale
    */
+  /**
+   * Fits the view to a sub-rectangle of image-content space (x along the
+   * i-axis, y along the j-axis, in slice pixels) instead of the whole slice.
+   * Pass null to fit the whole slice again.
+   */
+  public setFitRegion(region: { x0: number; y0: number; x1: number; y1: number } | null): void {
+    this.fitRegion = region && region.x1 > region.x0 && region.y1 > region.y0 ? { ...region } : null;
+    if (this.mainContainer?.children.length) {
+      this.fitContainerToScreen();
+      this.app?.renderer?.render?.(this.app.stage);
+    }
+  }
+
   private fitContainerToScreen(): void {
     if (!this.mainContainer.children.length) {
       console.warn('No content to fit');
@@ -390,11 +415,22 @@ export class SliceView implements ISliceView {
       availableHeight = rect.height || contentH;
     }
 
-    const scale = Math.min(availableWidth / contentW, availableHeight / contentH, 4);
+    let pivotX = bounds.x + contentW / 2;
+    let pivotY = bounds.y + contentH / 2;
+    if (this.fitRegion) {
+      // The region sets both the zoom and the centre.
+      contentW = this.fitRegion.x1 - this.fitRegion.x0;
+      contentH = this.fitRegion.y1 - this.fitRegion.y0;
+      pivotX = this.fitRegion.x0 + contentW / 2;
+      pivotY = this.fitRegion.y0 + contentH / 2;
+    }
+
+    const pad = Math.max(0, this.options.fitPadding ?? 0);
+    const fitW = Math.max(1, availableWidth - 2 * pad);
+    const fitH = Math.max(1, availableHeight - 2 * pad);
+    const scale = Math.min(fitW / contentW, fitH / contentH, 16);
     const safeScale = !Number.isFinite(scale) || scale <= 0 ? 1 : scale;
 
-    const pivotX = bounds.x + contentW / 2;
-    const pivotY = bounds.y + contentH / 2;
     this.mainContainer.pivot.set(pivotX, pivotY);
     const effectiveScale = safeScale * this.zoomLevel;
     this.mainContainer.scale.set(effectiveScale, -effectiveScale);
@@ -440,6 +476,7 @@ export class SliceView implements ISliceView {
       height,
       insets: { top: 0, right: 0, bottom: this.slider ? SLIDER_RESERVED_PX : 0, left: 0 },
       project: (cx: number, cy: number) => this.projectContentToScreen(cx, cy),
+      contentRect: this.fitRegion ?? undefined,
     };
     this.layers.forEach(layer => {
       if (layer.screenSpace && typeof layer.layoutScreen === 'function') {
@@ -653,9 +690,24 @@ export class SliceView implements ISliceView {
   }
 
   /**
+   * Dispose overlay layers without destroying the PIXI application.
+   * Orthogonal viewers use this as the first phase of teardown so Text
+   * resources from all renderers return to PIXI's shared pool before any one
+   * renderer clears that pool.
+   */
+  public disposeLayers(): void {
+    this.layers.forEach(layer => layer.dispose());
+    this.layers = [];
+    this.layersMap.clear();
+  }
+
+  /**
    * Cleanup
    */
   public dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+
     // Clean up ResizeObserver
     if (this.resizeObserver) {
       this.resizeObserver.disconnect();
@@ -666,10 +718,11 @@ export class SliceView implements ISliceView {
     this.disposers.forEach(disposer => disposer());
 
     // Dispose layers
-    this.layers.forEach(layer => layer.dispose());
-    this.layers = [];
+    this.disposeLayers();
 
-    this.mainContainer.destroy({ children: true });
+    // The PIXI Application owns mainContainer and overlayContainer through its
+    // stage. Destroying mainContainer here and then asking Application.destroy
+    // to destroy stage children releases text textures twice in PIXI 8.
     this.app.destroy(true, { children: true });
 
     if (this.canvas && this.domElement.contains(this.canvas)) {

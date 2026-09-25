@@ -204,4 +204,10 @@ export interface ScreenLayoutContext {
    * screen pixels, accounting for the current scale, Y-flip, zoom, and pan.
    */
   project(contentX: number, contentY: number): { x: number; y: number };
+  /**
+   * The part of image-content space the view is fitted to, when the host has
+   * set a fit region (see SliceView.setFitRegion). Layers that clip or anchor
+   * to "the image" should use this rectangle when present.
+   */
+  contentRect?: { x0: number; y0: number; x1: number; y1: number };
 }

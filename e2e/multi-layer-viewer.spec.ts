@@ -55,13 +55,13 @@ test.describe('Multi-layer viewer demo', () => {
     const layerSelect = panel.getByLabel('Select layer');
 
     // Read the initial alpha value (T1-background should be opacity=1)
-    const alphaSlider = panel.getByLabel('Alpha', { exact: true });
+    const alphaSlider = panel.getByLabel('Opacity', { exact: true });
     await expect(alphaSlider).toHaveValue('1');
 
     // Select the activation layer
     await layerSelect.selectOption('activation');
 
-    // Alpha should now be 0.7 for the activation layer
+    // Opacity should now be 0.7 for the activation layer
     await expect(alphaSlider).toHaveValue('0.7');
     await expect(panel.getByLabel('Colormap')).toHaveValue('Hot');
   });

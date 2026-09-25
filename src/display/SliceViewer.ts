@@ -8,6 +8,7 @@ import { ViewerStateInfo } from './ViewerStateInfo';
 import { ISliceModel, ISliceView, ISliceController } from './interfaces/index';
 import { ViewerFactory } from './ViewerFactory';
 import { CrossHair } from './CrossHair';
+import type { SliceViewOptions } from './SliceView';
 import { OrientationLabelLayer, OrientationLabelOptions } from './OrientationLabelLayer';
 import { arraysNearlyEqual, COORDINATE_EPSILON } from './NumericalUtils';
 
@@ -60,6 +61,7 @@ export class SliceViewer implements ViewerStateInfo {
    * Stores the ImageLayer instance for reference
    */
   private readonly imageLayer: ImageLayer;
+  private viewOptions: SliceViewOptions = {};
 
   /**
    * Stores the view axes for reference
@@ -78,12 +80,7 @@ export class SliceViewer implements ViewerStateInfo {
     domElement: HTMLElement,
     imageLayer: ImageLayer,
     viewAxes: AxisSet3D,
-    options?: {
-      width?: number;
-      height?: number;
-      showCrosshair?: boolean;
-      showSlider?: boolean;
-    }
+    options?: SliceViewOptions
   ) {
     // Enable MobX-based reactivity for any properties we mark with @observable, @computed, etc.
     makeObservable(this);
@@ -105,6 +102,7 @@ export class SliceViewer implements ViewerStateInfo {
     // Store the imageLayer and viewAxes for reference
     this.imageLayer = imageLayer;
     this.viewAxes = viewAxes;
+    this.viewOptions = options ?? {};
   }
 
   /**
@@ -121,12 +119,7 @@ export class SliceViewer implements ViewerStateInfo {
     domElement: HTMLElement,
     imageLayer: ImageLayer,
     viewAxes: AxisSet3D,
-    options?: {
-      width?: number;
-      height?: number;
-      showCrosshair?: boolean;
-      showSlider?: boolean;
-    }
+    options?: SliceViewOptions
   ): Promise<SliceViewer> {
     const viewer = new SliceViewer(domElement, imageLayer, viewAxes, options);
     await viewer.initialize(domElement, imageLayer, viewAxes, options);
@@ -148,12 +141,7 @@ export class SliceViewer implements ViewerStateInfo {
     domElement: HTMLElement,
     imageLayer: ImageLayer,
     viewAxes: AxisSet3D,
-    options?: {
-      width?: number;
-      height?: number;
-      showCrosshair?: boolean;
-      showSlider?: boolean;
-    }
+    options?: SliceViewOptions
   ) {
     // 1) Create the SliceView (Async) using factory
     const neuroSpace = imageLayer.neuroSpace;
@@ -192,7 +180,8 @@ export class SliceViewer implements ViewerStateInfo {
         v.addLayer('crosshair', new CrossHair(
           this.imageLayer.neuroSpace,
           this.viewAxes,
-          v.getCoordinateTransformer() as any
+          v.getCoordinateTransformer() as any,
+          this.viewOptions.crosshairOptions
         ));
       }
     } else {

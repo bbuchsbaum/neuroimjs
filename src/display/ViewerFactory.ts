@@ -3,7 +3,7 @@
  */
 
 import { SliceModel } from './SliceModel';
-import { SliceView } from './SliceView';
+import { SliceView, SliceViewOptions } from './SliceView';
 import { SliceController } from './SliceController';
 import { SliceViewer } from './SliceViewer';
 import { ImageLayer } from './ImageLayer';
@@ -12,12 +12,7 @@ import { AxisSet3D } from '../geometry/Axis';
 import { NeuroSpace } from '../geometry/NeuroSpace';
 import { ISliceModel, ISliceView, ISliceController } from './interfaces/index';
 
-export interface ViewerOptions {
-  width?: number;
-  height?: number;
-  showCrosshair?: boolean;
-  showSlider?: boolean;
-}
+export type ViewerOptions = SliceViewOptions;
 
 /**
  * Factory class for creating viewer components
