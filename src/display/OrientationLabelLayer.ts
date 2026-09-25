@@ -106,23 +106,29 @@ export class OrientationLabelLayer implements SliceLayer {
     this.contentW = this.neuroSpace.dim[this.neuroSpace.whichDim(viewAxes.i)];
     this.contentH = this.neuroSpace.dim[this.neuroSpace.whichDim(viewAxes.j)];
 
-    // Rebuild the label texts from the current orientation. The four texts hold
-    // fixed letters; positioning happens in layoutScreen() once the viewport
-    // geometry is known.
-    this.container.removeChildren();
-
     const iLabels = this.getLabelsForAxis(viewAxes.i); // [positive, negative]
     const jLabels = this.getLabelsForAxis(viewAxes.j);
 
-    this.textNegI = this.makeLabel(iLabels[1]);
-    this.textPosI = this.makeLabel(iLabels[0]);
-    this.textNegJ = this.makeLabel(jLabels[1]);
-    this.textPosJ = this.makeLabel(jLabels[0]);
-
-    this.container.addChild(this.textNegI);
-    this.container.addChild(this.textPosI);
-    this.container.addChild(this.textNegJ);
-    this.container.addChild(this.textPosJ);
+    // Reuse the same Text objects across renders; positioning happens in
+    // layoutScreen(). Rebuilding them after removeChildren() leaves detached
+    // Text instances registered with PIXI's CanvasTextPipe; renderer disposal
+    // then attempts to return their pooled textures after the pool has already
+    // been cleared.
+    if (!this.textNegI || !this.textPosI || !this.textNegJ || !this.textPosJ) {
+      this.textNegI = this.makeLabel(iLabels[1]);
+      this.textPosI = this.makeLabel(iLabels[0]);
+      this.textNegJ = this.makeLabel(jLabels[1]);
+      this.textPosJ = this.makeLabel(jLabels[0]);
+      this.container.addChild(this.textNegI);
+      this.container.addChild(this.textPosI);
+      this.container.addChild(this.textNegJ);
+      this.container.addChild(this.textPosJ);
+    } else {
+      this.textNegI.text = iLabels[1];
+      this.textPosI.text = iLabels[0];
+      this.textNegJ.text = jLabels[1];
+      this.textPosJ.text = jLabels[0];
+    }
 
     return this.container;
   }

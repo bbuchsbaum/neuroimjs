@@ -9,6 +9,8 @@ export { AxisSet } from './geometry/Axis';
 
 // Standard orientation constants for composable views
 export { AXIAL_LPI, CORONAL_LIP, SAGITTAL_AIL } from './geometry/Axis';
+export { getVolumeGeometry, assertSameVolumeGeometry } from './geometry/VolumeGeometry';
+export type { VolumeGeometry } from './geometry/VolumeGeometry';
 export type { NeuroVol } from './volume/NeuroVol';
 export {
   DenseNeuroVol,

@@ -52,6 +52,7 @@ export class SliceView implements ISliceView {
   private disposers: IReactionDisposer[] = [];
   private boundOnResize: () => void = () => {};
   private resizeObserver: ResizeObserver | null = null;
+  private disposed = false;
 
   // Zoom & Pan state
   private zoomLevel: number = 1.0;
@@ -653,9 +654,24 @@ export class SliceView implements ISliceView {
   }
 
   /**
+   * Dispose overlay layers without destroying the PIXI application.
+   * Orthogonal viewers use this as the first phase of teardown so Text
+   * resources from all renderers return to PIXI's shared pool before any one
+   * renderer clears that pool.
+   */
+  public disposeLayers(): void {
+    this.layers.forEach(layer => layer.dispose());
+    this.layers = [];
+    this.layersMap.clear();
+  }
+
+  /**
    * Cleanup
    */
   public dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+
     // Clean up ResizeObserver
     if (this.resizeObserver) {
       this.resizeObserver.disconnect();
@@ -666,10 +682,11 @@ export class SliceView implements ISliceView {
     this.disposers.forEach(disposer => disposer());
 
     // Dispose layers
-    this.layers.forEach(layer => layer.dispose());
-    this.layers = [];
+    this.disposeLayers();
 
-    this.mainContainer.destroy({ children: true });
+    // The PIXI Application owns mainContainer and overlayContainer through its
+    // stage. Destroying mainContainer here and then asking Application.destroy
+    // to destroy stage children releases text textures twice in PIXI 8.
     this.app.destroy(true, { children: true });
 
     if (this.canvas && this.domElement.contains(this.canvas)) {

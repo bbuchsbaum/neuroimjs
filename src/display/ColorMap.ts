@@ -592,6 +592,14 @@ export class ColorMap {
         }
       }
 
+      // Report-facing scientific defaults that are not native ColorBrewer
+      // names. BlueRed is deliberately blue for negative values and red for
+      // positive values; Inferno uses stable matplotlib-inspired anchors.
+      ColorMap._presetMaps['BlueRed'] = [...ColorMap.generatePreset('RdBu')].reverse();
+      ColorMap._presetMaps['Inferno'] = chroma.scale([
+        '#000004', '#420a68', '#932667', '#dd513a', '#fca50a', '#fcffa4'
+      ]).mode('lch').colors(256);
+
       // Add an explicit "Grayscale" from our GRAY_SCALE constant
       ColorMap._presetMaps['Grayscale'] = ColorMap.GRAY_SCALE.colors.map(color => 
         chroma(color[0], color[1], color[2]).hex()

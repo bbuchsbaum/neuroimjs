@@ -48,6 +48,11 @@ export class ColorMapFactory {
       }
     }
 
+    this._presetMaps.set('BlueRed', [...this.generatePresetColors('RdBu')].reverse());
+    this._presetMaps.set('Inferno', chroma.scale([
+      '#000004', '#420a68', '#932667', '#dd513a', '#fca50a', '#fcffa4'
+    ]).mode('lch').colors(256));
+
     // Add grayscale preset
     const grayscaleColors = Array.from({ length: 256 }, (_, i) => {
       const v = i / 255;

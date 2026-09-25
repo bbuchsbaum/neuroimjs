@@ -71,6 +71,9 @@ export interface ISliceView {
    */
   dispose(): void;
 
+  /** Release render layers before renderer teardown in multi-view owners. */
+  disposeLayers?(): void;
+
   /**
    * Add a render layer (e.g., crosshair or custom annotation)
    */

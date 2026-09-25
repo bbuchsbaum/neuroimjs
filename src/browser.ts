@@ -36,6 +36,11 @@ export type { PresetConfig } from './display/ColorMapFactory';
 
 export { AxisSet1D, AxisSet2D, AxisSet3D, NamedAxis } from './geometry/Axis';
 export { NeuroSpace } from './geometry/NeuroSpace';
+export { getVolumeGeometry, assertSameVolumeGeometry } from './geometry/VolumeGeometry';
+export type { VolumeGeometry } from './geometry/VolumeGeometry';
+// Browser-only NIfTI loading (ArrayBuffer input; no Node fs/path dependencies)
+export { readNiftiArrayBuffer } from './io/browserNifti';
+export type { BrowserNiftiOptions } from './io/browserNifti';
 export type { ViewerStateInfo } from './display/ViewerStateInfo';
 export type { ValidationOptions, ValidationResult } from './display/CoordinateValidation';
 export type {
@@ -157,3 +162,4 @@ export type {
 
 // Control panel components (Web Components for browser)
 export { LayerControlPanel } from './controls/LayerControlPanelLit';
+export type { LayerControlName, LayerControlState } from './controls/LayerControlPanelLit';

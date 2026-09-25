@@ -207,6 +207,8 @@ export class SimpleOrthogonalViewer {
       ? resolveColorMap(opts.colormap as any)
       : opts?.colormap;
 
+    // Each orthogonal view owns a render cache. Replace the volume and
+    // invalidate textures in the main and all three per-view ImageLayers.
     this.viewer.applyToImageLayers(layer => layer.replaceVolume(layerId, volume, {
       range: opts?.range ?? null,
       threshold: opts?.threshold,
@@ -215,6 +217,23 @@ export class SimpleOrthogonalViewer {
     }));
     this.redraw();
     this.emitter.emit('layerUpdated', { id: layerId });
+  }
+
+  /**
+   * Read the nearest raw voxel value for a layer at a world coordinate.
+   * Returns null when the coordinate is outside the volume or the voxel is not finite.
+   */
+  getValue(layerId: string, worldCoord: number[] = this.getWorldCoord()): number | null {
+    const layer = this.imageLayer.getVolStack().getLayerById(layerId);
+    if (!layer) throw new Error(`Unknown layer id: ${layerId}`);
+    if (worldCoord.length !== 3 || worldCoord.some(value => !Number.isFinite(value))) {
+      throw new Error('worldCoord must contain three finite numbers.');
+    }
+    const grid = layer.volume.space.coordToGrid(worldCoord).map(value => Math.round(value));
+    const dimensions = layer.volume.space.dim;
+    if (grid.some((value, axis) => value < 0 || value >= dimensions[axis])) return null;
+    const value = layer.volume.getAt(grid[0], grid[1], grid[2]);
+    return Number.isFinite(value) ? value : null;
   }
 
   // Canvas access per view

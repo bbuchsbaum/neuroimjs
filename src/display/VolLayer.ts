@@ -8,6 +8,7 @@ import { makeAutoObservable, observable, action } from 'mobx';
 import { Range, Threshold } from '../types';
 import { Matrix } from 'ml-matrix';
 import { LRUCache } from '../utils/LRUCache';
+import { assertSameVolumeGeometry } from '../geometry/VolumeGeometry';
 
 /**
  * A custom ImageData interface that ensures `colorSpace` is not optional.
@@ -223,12 +224,13 @@ export class VolLayer {
     newVolume: NeuroVol,
     opts?: { range?: Range | null; threshold?: Threshold; opacity?: number; colormap?: ColorMap }
   ): void {
-    const sameDim =
-      newVolume.space.dim[0] === this.volume.space.dim[0] &&
-      newVolume.space.dim[1] === this.volume.space.dim[1] &&
-      newVolume.space.dim[2] === this.volume.space.dim[2];
-    if (!sameDim || !newVolume.space.axes.equals(this.volume.space.axes)) {
-      throw new Error('replaceVolume: geometry mismatch (dim or axes differ).');
+    // Compare the complete voxel grid (dims, axes, spacing, origin, affine),
+    // not just dims/axes: an overlay on a shifted grid must not be displayed.
+    try {
+      assertSameVolumeGeometry(this.volume, newVolume);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new Error(`replaceVolume: ${detail}`);
     }
 
     this.volume = newVolume;

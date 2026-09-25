@@ -674,6 +674,13 @@ export class OrthogonalImageViewer implements ViewerStateInfo {
    * and unsubscribes from MobX reactions.
    */
   public dispose(): void {
+    // PIXI's text TexturePool is shared across renderers. Release every
+    // sub-view's overlay Text resources before destroying the first renderer,
+    // which clears that shared pool.
+    Object.values(this.sliceViewers).forEach((viewer) => {
+      viewer.view.disposeLayers?.();
+    });
+
     // Dispose each sub-viewer
     Object.values(this.sliceViewers).forEach((viewer) => {
       viewer.dispose();

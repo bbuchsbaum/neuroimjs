@@ -6,9 +6,26 @@ import { VolLayer } from '../display/VolLayer';
 import { VolStack } from '../display/VolStack';
 import { Range, Threshold } from '../types';  // Import the types
 
-import 'nouislider/dist/nouislider.css';
-// Import our custom RangeSlider
+// Import our custom RangeSlider (native inputs; no noUiSlider CSS required)
 import './RangeSlider2';
+
+/** Serializable display state for one controlled volume layer. */
+export interface LayerControlState {
+  layerId: string;
+  range: Range;
+  threshold: Threshold;
+  colormap: string;
+  opacity: number;
+  visible: boolean;
+}
+
+export type LayerControlName =
+  | 'layer'
+  | 'visibility'
+  | 'colormap'
+  | 'range'
+  | 'threshold'
+  | 'opacity';
 
 @customElement('layer-control-panel')
 export class LayerControlPanel extends LitElement {
@@ -321,6 +338,18 @@ export class LayerControlPanel extends LitElement {
   }
 
   /**
+   * Optional visible-control subset for embedded report UIs. `null` preserves
+   * the full standalone panel. Programmatic get/apply/reset state always
+   * remains complete regardless of which controls are visible.
+   */
+  @property({ attribute: false })
+  visibleControls: LayerControlName[] | null = null;
+
+  private shows(control: LayerControlName): boolean {
+    return this.visibleControls === null || this.visibleControls.includes(control);
+  }
+
+  /**
    * Optional viewer reference for triggering re-renders across all per-view ImageLayers.
    * When set, layer updates will use viewer.applyToImageLayers() to update all views.
    */
@@ -348,12 +377,44 @@ export class LayerControlPanel extends LitElement {
   private defaultThreshold: Threshold = [0, 0];
   private defaultAlpha: number = 1;
   private defaultColormap: string = 'Viridis';
+  private defaultVisible: boolean = true;
+  private defaultsByLayer = new Map<string, LayerControlState>();
 
-  private captureDefaults() {
+  private resolveStack(): VolStack | undefined {
+    return this._volStack ?? this.imageLayer?.getVolStack();
+  }
+
+  private captureDefaults(overwrite = false) {
+    if (!this.selectedLayerId || (!overwrite && this.defaultsByLayer.has(this.selectedLayerId))) return;
     this.defaultRange = [this.range[0], this.range[1]];
     this.defaultThreshold = [this.threshold[0], this.threshold[1]];
     this.defaultAlpha = this.alpha;
     this.defaultColormap = this.selectedColormap;
+    this.defaultVisible = this.visible;
+    this.defaultsByLayer.set(this.selectedLayerId, {
+      layerId: this.selectedLayerId,
+      range: [...this.defaultRange] as Range,
+      threshold: [...this.defaultThreshold] as Threshold,
+      colormap: this.defaultColormap,
+      opacity: this.defaultAlpha,
+      visible: this.defaultVisible,
+    });
+  }
+
+  private captureAllDefaults(stack: VolStack) {
+    stack.getLayerIds().forEach(layerId => {
+      if (this.defaultsByLayer.has(layerId)) return;
+      const layer = stack.getLayerById(layerId);
+      if (!layer) return;
+      this.defaultsByLayer.set(layerId, {
+        layerId,
+        range: [...layer.getRange()] as Range,
+        threshold: [...layer.getThreshold()] as Threshold,
+        colormap: layer.colorMap.name,
+        opacity: layer.opacity,
+        visible: layer.visible,
+      });
+    });
   }
 
   private colormapNamesIncluding(name: string): string[] {
@@ -387,6 +448,7 @@ export class LayerControlPanel extends LitElement {
     // Get the volume's actual data range for display
     this.volumeRange = this.volLayer.getVolumeRange();
 
+    this.captureAllDefaults(this.imageLayer.getVolStack());
     this.captureDefaults();
     this.requestUpdate();
   }
@@ -405,108 +467,224 @@ export class LayerControlPanel extends LitElement {
     this.visible = this.volLayer.visible;
     this.volumeRange = this.volLayer.getVolumeRange();
 
+    this.captureAllDefaults(this._volStack);
     this.captureDefaults();
     this.requestUpdate();
   }
 
+  /** Return a detached snapshot of one layer's current display controls. */
+  getState(layerId: string = this.selectedLayerId): LayerControlState {
+    const layer = this.resolveStack()?.getLayerById(layerId);
+    if (!layer) throw new Error(`Unknown layer id: ${layerId || '(none)'}`);
+    return {
+      layerId,
+      range: [...layer.getRange()] as Range,
+      threshold: [...layer.getThreshold()] as Threshold,
+      colormap: layer.colorMap.name,
+      opacity: layer.opacity,
+      visible: layer.visible,
+    };
+  }
+
+  /** Select a layer for both visible controls and subsequent programmatic updates. */
+  selectLayer(layerId: string): void {
+    const selectedLayer = this.resolveStack()?.getLayerById(layerId);
+    if (!selectedLayer) throw new Error(`Unknown layer id: ${layerId}`);
+    this.selectedLayerId = layerId;
+    this.volLayer = selectedLayer;
+    this.range = [...selectedLayer.getRange()] as Range;
+    this.threshold = [...selectedLayer.getThreshold()] as Threshold;
+    this.selectedColormap = selectedLayer.colorMap.name;
+    this.colormaps = this.colormapNamesIncluding(this.selectedColormap);
+    this.alpha = selectedLayer.opacity;
+    this.visible = selectedLayer.visible;
+    this.volumeRange = selectedLayer.getVolumeRange();
+    this.captureDefaults();
+    const defaults = this.defaultsByLayer.get(layerId);
+    if (defaults) {
+      this.defaultRange = [...defaults.range] as Range;
+      this.defaultThreshold = [...defaults.threshold] as Threshold;
+      this.defaultColormap = defaults.colormap;
+      this.defaultAlpha = defaults.opacity;
+      this.defaultVisible = defaults.visible;
+    }
+    this.requestUpdate();
+  }
+
+  /** Apply display controls through the same update path used by the widgets. */
+  applyState(state: Partial<LayerControlState> & { layerId?: string }): LayerControlState {
+    const layerId = state.layerId ?? this.selectedLayerId;
+    this.selectLayer(layerId);
+    const current = this.getState(layerId);
+    const range = (state.range ? [...state.range] : current.range) as Range;
+    const threshold = (state.threshold ? [...state.threshold] : current.threshold) as Threshold;
+    const opacity = state.opacity ?? current.opacity;
+    const colormap = state.colormap ?? current.colormap;
+    const visible = state.visible ?? current.visible;
+
+    if (range.length !== 2 || range.some(value => !Number.isFinite(value)) || range[0] >= range[1]) {
+      throw new Error('range must contain two finite, increasing numbers.');
+    }
+    if (threshold.length !== 2 || threshold.some(value => !Number.isFinite(value))) {
+      throw new Error('threshold must contain two finite numbers.');
+    }
+    if (!Number.isFinite(opacity) || opacity < 0 || opacity > 1) {
+      throw new Error('opacity must be between 0 and 1.');
+    }
+    if (typeof visible !== 'boolean') throw new Error('visible must be boolean.');
+
+    // Keep a non-preset (custom) colormap when the requested name is unchanged.
+    const colorMap = colormap === this.volLayer.colorMap.name && !ColorMap.presetMaps.hasOwnProperty(colormap)
+      ? this.volLayer.colorMap
+      : ColorMap.fromPreset(colormap, { existingColorMap: this.volLayer.colorMap });
+
+    this.range = range;
+    this.threshold = threshold;
+    this.alpha = opacity;
+    this.selectedColormap = colormap;
+    this.colormaps = this.colormapNamesIncluding(colormap);
+    this.visible = visible;
+    this.volLayer.setRange(range);
+    this.volLayer.setThreshold(threshold);
+    this.volLayer.setOpacity(opacity);
+    this.volLayer.setColormap(colorMap);
+    this.volLayer.setVisible(visible);
+    this.updateAllImageLayers({ range, threshold, alpha: opacity, colormap: colorMap, visible });
+    this.requestUpdate();
+    const next = this.getState(layerId);
+    this.emitControlChange(next);
+    return next;
+  }
+
+  private emitControlChange(state: LayerControlState = this.getState()): void {
+    this.dispatchEvent(new CustomEvent<LayerControlState>('layer-control-change', {
+      detail: state,
+      bubbles: true,
+      composed: true,
+    }));
+  }
+
+  /** Restore the layer state captured when the panel was attached. */
+  resetToDefaults(layerId: string = this.selectedLayerId): LayerControlState {
+    const defaults = this.defaultsByLayer.get(layerId);
+    if (!defaults) throw new Error(`No defaults recorded for layer id: ${layerId}`);
+    return this.applyState({
+      ...defaults,
+      range: [...defaults.range] as Range,
+      threshold: [...defaults.threshold] as Threshold,
+    });
+  }
+
+  /**
+   * Replace one layer's reset baseline with its current state. This is useful
+   * when an embedding reuses a stable layer id while swapping among report
+   * maps whose authored display defaults differ.
+   */
+  setDefaultsFromCurrent(layerId: string = this.selectedLayerId): LayerControlState {
+    this.selectLayer(layerId);
+    const current = this.getState(layerId);
+    this.defaultsByLayer.set(layerId, {
+      ...current,
+      range: [...current.range] as Range,
+      threshold: [...current.threshold] as Threshold,
+    });
+    this.defaultRange = [...current.range] as Range;
+    this.defaultThreshold = [...current.threshold] as Threshold;
+    this.defaultColormap = current.colormap;
+    this.defaultAlpha = current.opacity;
+    this.defaultVisible = current.visible;
+    return current;
+  }
+
   render() {
     return html`
-      <div class="label">Select layer</div>
-      <select class="native-select" aria-label="Select layer" @change=${this.onLayerChange}>
-        ${this.availableLayers.map(layer => html`
-          <option value=${layer} ?selected=${layer === this.selectedLayerId}>${layer}</option>
-        `)}
-      </select>
+      ${this.shows('layer') ? html`
+        <div class="label">Select layer</div>
+        <select class="native-select" aria-label="Select layer" @change=${this.onLayerChange}>
+          ${this.availableLayers.map(layer => html`
+            <option value=${layer} ?selected=${layer === this.selectedLayerId}>${layer}</option>
+          `)}
+        </select>
+      ` : null}
 
-      <div class="visibility-toggle">
-        <input type="checkbox" id="visibility-check" ?checked=${this.visible} @change=${this.onVisibilityChange} />
-        <label for="visibility-check">Visible</label>
-      </div>
+      ${this.shows('visibility') ? html`
+        <div class="visibility-toggle">
+          <input type="checkbox" id="visibility-check" ?checked=${this.visible} @change=${this.onVisibilityChange} />
+          <label for="visibility-check">Visible</label>
+        </div>
+      ` : null}
 
-      <div class="label">Colormap</div>
-      <select class="native-select" aria-label="Colormap" @change=${this.onColormapChange}>
-        ${this.colormaps.map(colormap => html`
-          <option value=${colormap} ?selected=${colormap === this.selectedColormap}>${colormap}</option>
-        `)}
-      </select>
+      ${this.shows('colormap') ? html`
+        <div class="label">Colormap</div>
+        <select class="native-select" aria-label="Colormap" @change=${this.onColormapChange}>
+          ${this.colormaps.map(colormap => html`
+            <option value=${colormap} ?selected=${colormap === this.selectedColormap}>${colormap}</option>
+          `)}
+        </select>
+        <div class="colorbar" style=${`background: linear-gradient(to right, ${this.getColormapGradient(this.selectedColormap)})`}></div>
+      ` : null}
 
-      <div class="colorbar" style=${`background: linear-gradient(to right, ${this.getColormapGradient(this.selectedColormap)})`}></div>
+      ${this.shows('range') ? html`
+        <div class="label">Range</div>
+        <div class="range-slider-container">
+          ${this.volumeRange ? html`
+            <range-slider
+              .min=${this.volumeRange[0]}
+              .max=${this.volumeRange[1]}
+              .start=${[this.range[0], this.range[1]]}
+              @range-update=${this.onRangeUpdate}
+            ></range-slider>
+          ` : html`<div>Loading range data...</div>`}
+        </div>
+        <div class="value-inputs">
+          <input type="number" class="native-number" aria-label="Range low"
+                 .value=${this.fmt(this.range[0])} @change=${this.onRangeLowInput} />
+          <input type="number" class="native-number" aria-label="Range high"
+                 .value=${this.fmt(this.range[1])} @change=${this.onRangeHighInput} />
+        </div>
+      ` : null}
 
-      <div class="label">Range</div>
-      <div class="range-slider-container">
-        ${this.volumeRange ? html`
-          <range-slider
-            .min=${this.volumeRange[0]}
-            .max=${this.volumeRange[1]}
-            .start=${[this.range[0], this.range[1]]}
-            @range-update=${this.onRangeUpdate}
-          ></range-slider>
-        ` : html`
-          <div>Loading range data...</div>
-        `}
-      </div>
-      <div class="value-inputs">
-        <input type="number" class="native-number" aria-label="Range low"
-               .value=${this.fmt(this.range[0])} @change=${this.onRangeLowInput} />
-        <input type="number" class="native-number" aria-label="Range high"
-               .value=${this.fmt(this.range[1])} @change=${this.onRangeHighInput} />
-      </div>
+      ${this.shows('threshold') ? html`
+        <div class="label">Threshold</div>
+        <div class="range-slider-container">
+          ${this.volumeRange ? html`
+            <range-slider
+              .min=${this.volumeRange[0]}
+              .max=${this.volumeRange[1]}
+              .start=${[this.threshold[0], this.threshold[1]]}
+              @range-update=${this.onThresholdUpdate}
+            ></range-slider>
+          ` : html`<div>Loading threshold data...</div>`}
+        </div>
+        <div class="value-inputs">
+          <input type="number" class="native-number" aria-label="Threshold low"
+                 .value=${this.fmt(this.threshold[0])} @change=${this.onThresholdLowInput} />
+          <input type="number" class="native-number" aria-label="Threshold high"
+                 .value=${this.fmt(this.threshold[1])} @change=${this.onThresholdHighInput} />
+        </div>
+        <div class="threshold-caption">Values outside [low, high] are visible; values between are transparent.</div>
+      ` : null}
 
-      <div class="label">Threshold</div>
-      <div class="range-slider-container">
-        ${this.volumeRange ? html`
-          <range-slider
-            .min=${this.volumeRange[0]}
-            .max=${this.volumeRange[1]}
-            .start=${[this.threshold[0], this.threshold[1]]}
-            @range-update=${this.onThresholdUpdate}
-          ></range-slider>
-        ` : html`
-          <div>Loading threshold data...</div>
-        `}
-      </div>
-      <div class="value-inputs">
-        <input type="number" class="native-number" aria-label="Threshold low"
-               .value=${this.fmt(this.threshold[0])} @change=${this.onThresholdLowInput} />
-        <input type="number" class="native-number" aria-label="Threshold high"
-               .value=${this.fmt(this.threshold[1])} @change=${this.onThresholdHighInput} />
-      </div>
-      <div class="threshold-caption">Values outside [low, high] are visible; values between are transparent.</div>
+      ${this.shows('opacity') ? html`
+        <div class="label">Opacity</div>
+        <div class="alpha-row">
+          <input class="native-range" type="range" min="0" max="1" step="0.01"
+                 aria-label="Opacity" .value=${String(this.alpha)} @input=${this.onAlphaChange} />
+          <input type="number" class="native-number" min="0" max="1" step="0.01"
+                 aria-label="Opacity value" .value=${this.alpha.toFixed(2)} @change=${this.onAlphaInput} />
+        </div>
+      ` : null}
 
-      <div class="label">Alpha</div>
-      <div class="alpha-row">
-        <input class="native-range" type="range" min="0" max="1" step="0.01"
-               aria-label="Alpha" .value=${String(this.alpha)} @input=${this.onAlphaChange} />
-        <input type="number" class="native-number" min="0" max="1" step="0.01"
-               aria-label="Alpha value" .value=${this.alpha.toFixed(2)} @change=${this.onAlphaInput} />
-      </div>
-
-      <button class="reset-btn" type="button" @click=${this.onReset}>
-        <span aria-hidden="true">↺</span> Reset to defaults
-      </button>
+      ${this.visibleControls === null || this.visibleControls.length > 0 ? html`
+        <button class="reset-btn" type="button" @click=${this.onReset}>
+          <span aria-hidden="true">↺</span> Reset to defaults
+        </button>
+      ` : null}
     `;
   }
 
- 
   private onLayerChange(e: Event) {
-    this.selectedLayerId = (e.target as any).value;
-    // Resolve the VolStack from either the direct volStack property or the imageLayer
-    const stack = this._volStack ?? this.imageLayer?.getVolStack();
-    if (stack) {
-      const selectedLayer = stack.getLayerById(this.selectedLayerId);
-      if (selectedLayer) {
-        this.volLayer = selectedLayer;
-        this.range = selectedLayer.getRange();
-        this.selectedColormap = selectedLayer.colorMap.name;
-        this.colormaps = this.colormapNamesIncluding(this.selectedColormap);
-        this.alpha = selectedLayer.opacity;
-        this.threshold = selectedLayer.getThreshold();
-        this.volumeRange = selectedLayer.getVolumeRange();
-        this.visible = selectedLayer.visible;
-        this.captureDefaults();
-        this.requestUpdate();
-      }
-    }
+    this.selectLayer((e.target as HTMLSelectElement).value);
   }
 
   private onColormapChange(e: Event) {
@@ -532,6 +710,7 @@ export class LayerControlPanel extends LitElement {
       this.volLayer.setRange(this.range);
       // Update all ImageLayers and force re-render
       this.updateAllImageLayers({ range: this.range });
+      this.emitControlChange();
     }
     this.requestUpdate();
   }
@@ -553,6 +732,7 @@ export class LayerControlPanel extends LitElement {
       this.volLayer.setThreshold(this.threshold);
       // Update all ImageLayers and force re-render
       this.updateAllImageLayers({ threshold: this.threshold });
+      this.emitControlChange();
     }
     this.requestUpdate();
   }
@@ -563,6 +743,7 @@ export class LayerControlPanel extends LitElement {
       this.volLayer.setOpacity(this.alpha);
       // Update all ImageLayers and force re-render
       this.updateAllImageLayers({ alpha: this.alpha });
+      this.emitControlChange();
     }
   }
 
@@ -575,6 +756,7 @@ export class LayerControlPanel extends LitElement {
     if (this.volLayer) {
       this.volLayer.setRange(this.range);
       this.updateAllImageLayers({ range: this.range });
+      this.emitControlChange();
     }
     this.requestUpdate();
   }
@@ -583,6 +765,7 @@ export class LayerControlPanel extends LitElement {
     if (this.volLayer) {
       this.volLayer.setThreshold(this.threshold);
       this.updateAllImageLayers({ threshold: this.threshold });
+      this.emitControlChange();
     }
     this.requestUpdate();
   }
@@ -623,29 +806,13 @@ export class LayerControlPanel extends LitElement {
     if (this.volLayer) {
       this.volLayer.setOpacity(this.alpha);
       this.updateAllImageLayers({ alpha: this.alpha });
+      this.emitControlChange();
     }
     this.requestUpdate();
   }
 
   private onReset() {
-    this.range = [this.defaultRange[0], this.defaultRange[1]];
-    this.threshold = [this.defaultThreshold[0], this.defaultThreshold[1]];
-    this.alpha = this.defaultAlpha;
-    this.selectedColormap = this.defaultColormap;
-    if (this.volLayer) {
-      const cmap = ColorMap.fromPreset(this.selectedColormap);
-      this.volLayer.setRange(this.range);
-      this.volLayer.setThreshold(this.threshold);
-      this.volLayer.setOpacity(this.alpha);
-      this.volLayer.setColormap(cmap);
-      this.updateAllImageLayers({
-        range: this.range,
-        threshold: this.threshold,
-        alpha: this.alpha,
-        colormap: cmap,
-      });
-    }
-    this.requestUpdate();
+    this.resetToDefaults();
   }
 
   private onVisibilityChange(e: Event) {
@@ -654,6 +821,7 @@ export class LayerControlPanel extends LitElement {
       this.volLayer.setVisible(this.visible);
       // Update all ImageLayers and force re-render
       this.updateAllImageLayers({ visible: this.visible });
+      this.emitControlChange();
     }
   }
 
@@ -679,6 +847,7 @@ export class LayerControlPanel extends LitElement {
     this.volLayer.setColormap(cmap);
     // Update all ImageLayers and force re-render
     this.updateAllImageLayers({ colormap: cmap });
+    this.emitControlChange();
   }
 
   /**
@@ -689,7 +858,10 @@ export class LayerControlPanel extends LitElement {
   private updateAllImageLayers(params: { range?: Range; threshold?: Threshold; alpha?: number; colormap?: ColorMap; visible?: boolean }) {
     const layerId = this.selectedLayerId;
 
-    if (this._viewer && typeof this._viewer.applyToImageLayers === 'function') {
+    if (this._viewer && typeof this._viewer.updateLayer === 'function') {
+      // SimpleOrthogonalViewer owns the public redraw/cache-invalidation path.
+      this._viewer.updateLayer(layerId, params);
+    } else if (this._viewer && typeof this._viewer.applyToImageLayers === 'function') {
       // Update all ImageLayers via the viewer
       this._viewer.applyToImageLayers((imgLayer: ImageLayer) => {
         imgLayer.updateLayer(layerId, params);
