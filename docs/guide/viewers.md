@@ -72,6 +72,22 @@ See **[Colormaps & Layers](/guide/colormaps)** for thresholding and opacity.
 
 Viewers read their container's dimensions on creation, so give the container an explicit size (CSS or the `width`/`height` options on single views). Recreate the viewer if the container resizes substantially.
 
+## Logging
+
+The viewers log only warnings and errors by default. To see their diagnostic
+output (layer setup, sprite creation, render timings), opt in:
+
+```ts
+import { enableDebugLogging, setLogLevel } from 'neuroimjs';
+
+enableDebugLogging();      // DEBUG; enableDebugLogging(false) restores the default
+setLogLevel('info');       // or 'warn' | 'error' | 'none'
+```
+
+Without code changes, set `globalThis.NEUROIMJS_DEBUG = true` (or
+`globalThis.NEUROIMJS_LOG_LEVEL = 'debug'`) before neuroimjs loads; in Node,
+use the `NEUROIMJS_DEBUG` / `NEUROIMJS_LOG_LEVEL` environment variables.
+
 ::: tip Live, not static
 The brains on this page are these exact components running against a real MNI152 volume. The same code in your app produces the same result — see the runnable **[Examples](/examples/)**.
 :::

@@ -16,6 +16,9 @@ describe('Logger', () => {
   beforeEach(() => {
     // Destroy any existing instance
     Logger.destroy();
+    // The library default is WARN; these tests exercise filtering, storage and
+    // formatting of every level, so opt in to DEBUG the way a host page would.
+    (globalThis as Record<string, unknown>).NEUROIMJS_LOG_LEVEL = 'debug';
 
     // Spy on console methods
     consoleSpy = {
@@ -32,6 +35,17 @@ describe('Logger', () => {
     
     // Clean up logger
     Logger.destroy();
+    delete (globalThis as Record<string, unknown>).NEUROIMJS_LOG_LEVEL;
+  });
+
+  it('defaults to WARN when the host has not opted in', () => {
+    delete (globalThis as Record<string, unknown>).NEUROIMJS_LOG_LEVEL;
+    const logger = Logger.getInstance();
+    expect(logger.getLevel()).toBe(LogLevel.WARN);
+    logger.log(LogLevel.INFO, 'test', 'routine');
+    logger.log(LogLevel.WARN, 'test', 'odd');
+    expect(consoleSpy.info).not.toHaveBeenCalled();
+    expect(consoleSpy.warn).toHaveBeenCalledTimes(1);
   });
 
   describe('Singleton Pattern', () => {

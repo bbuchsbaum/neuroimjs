@@ -20,6 +20,13 @@ import { ColorMap } from './ColorMap';
 import { resolveColorMap } from './ColorMapResolver';
 import { SliceCoordinator } from '../core/SliceCoordinator';
 import { SliceAccessStrategy, SliceAccessConfig, SliceAccessResult } from '../types/SliceAccess';
+import { GridRegistration, registerGrid, layerSliceForReference, placeLayerSlice } from './GridRegistration';
+
+function sameGrid(a: NeuroSpace, b: NeuroSpace): boolean {
+  const close = (x: number[], y: number[]) =>
+    x.length === y.length && x.every((v, idx) => Math.abs(v - y[idx]) < 1e-6);
+  return close(a.dim, b.dim) && close(a.origin, b.origin) && close(a.spacing, b.spacing);
+}
 
 /**
  * ImageLayer handles retrieving 2D slices from a VolStack and drawing them in a single container,
@@ -45,6 +52,9 @@ export class ImageLayer implements SliceLayer {
   // Slice coordinator for multi-volume slice validation
   private sliceCoordinator: SliceCoordinator;
 
+  // Grid registrations per layer space, keyed by reference space and view
+  private registrationCache = new WeakMap<NeuroSpace, Map<string, { reference: NeuroSpace; registration: GridRegistration | null }>>();
+
   public opacity: number = 1;
 
   constructor(volStack: VolStack, alignmentOptions?: AlignmentManagerOptions) {
@@ -52,7 +62,7 @@ export class ImageLayer implements SliceLayer {
     this.neuroSpace = volStack.space;
     this.layerId = `image-layer-${Date.now()}`;
     
-    this.logger.info('Creating ImageLayer', {
+    this.logger.debug('Creating ImageLayer', {
       layerId: this.layerId,
       volumeCount: volStack.length,
       space: volStack.space.dim
@@ -73,13 +83,16 @@ export class ImageLayer implements SliceLayer {
     
     // Initialize alignment manager
     this.alignmentManager = new AlignmentManager();
-    this.alignmentOptions = alignmentOptions || {
-      strategy: 'auto',
-      enableCache: true,
-      maintainAspectRatio: false,
-      maxScale: 10,
-      minScale: 0.1
-    };
+    // 'world' is the default strategy, also when options omit it
+    this.alignmentOptions = alignmentOptions
+      ? { ...alignmentOptions, strategy: alignmentOptions.strategy ?? 'world' }
+      : {
+          strategy: 'world',
+          enableCache: true,
+          maintainAspectRatio: false,
+          maxScale: 10,
+          minScale: 0.1
+        };
     
     // Initialize slice coordinator with default configuration
     this.sliceCoordinator = new SliceCoordinator({
@@ -106,13 +119,13 @@ export class ImageLayer implements SliceLayer {
   }
 
   public addVolLayer(volLayer: VolLayer): void {
-    this.logger.info('Adding volume layer', { layerId: volLayer.id });
+    this.logger.debug('Adding volume layer', { layerId: volLayer.id });
     this.volumeStack.addLayer(volLayer);
     this.needsRefresh = true;
   }
 
   public removeVolLayer(volLayer: VolLayer): void {
-    this.logger.info('Removing volume layer', { layerId: volLayer.id });
+    this.logger.debug('Removing volume layer', { layerId: volLayer.id });
     this.volumeStack.removeLayer(volLayer);
     this.needsRefresh = true;
   }
@@ -167,7 +180,7 @@ export class ImageLayer implements SliceLayer {
     
     // Get sprite from pool
     const sprite = this.spritePool.acquire(texture);
-    this.logger.info('Sprite created', {
+    this.logger.debug('Sprite created', {
       layerId: cacheKey.split('_')[0],
       layerIndex: 0,
       spriteAlpha: sprite.alpha,
@@ -184,8 +197,17 @@ export class ImageLayer implements SliceLayer {
   }
 
   /**
-   * The crucial method: for each VolLayer, we get the slice, create a sprite, 
-   * then call `alignSpriteToReference(...)` to position/scale it.
+   * The crucial method: for each VolLayer, we get the slice, create a sprite,
+   * and position/scale it in image-content space (the reference slice's grid).
+   *
+   * Layer 0 is the reference: it fixes the slice index, image-content space,
+   * crosshair and navigation. A layer on the reference grid shares its
+   * transform. With the 'world' alignment strategy, a layer on any other grid
+   * whose axes are parallel to the reference's (e.g. a 2 mm statistical map
+   * over a 1 mm template) is sliced on its own grid at the plane nearest the
+   * reference plane and drawn at its true world position; it is omitted where
+   * the reference plane lies outside its slab. Other layers, and every layer
+   * under the remaining strategies, use the heuristic alignment strategies.
    */
   renderSlice(
     sliceIndex: number,
@@ -196,11 +218,28 @@ export class ImageLayer implements SliceLayer {
     const renderTimer = `renderSlice_${sliceIndex}_${viewAxes.id}`;
     PerformanceLogger.start(renderTimer);
     
-    // Validate slice access across all volumes
+    // Register layers on other grids to the reference grid, so that they can
+    // choose their own plane instead of reusing the reference slice index.
+    const referenceLayer = this.volumeStack.getLayer(0);
+    const refSpace = referenceLayer.volume.space;
+    const placeByWorld = this.alignmentOptions.strategy === 'world';
+    const registrations: Array<GridRegistration | null> = [];
+    for (let i = 0; i < this.volumeStack.length; i++) {
+      // Orientation facades slice through the reference index; leave them
+      // to the heuristics.
+      const layer = this.volumeStack.getLayer(i);
+      const space = layer.volume.space;
+      registrations.push(i > 0 && placeByWorld && layer.space === space && !sameGrid(space, refSpace)
+        ? this.registration(refSpace, space, viewAxes)
+        : null);
+    }
+
+    // Validate slice access across the volumes that share the reference index
     const sliceValidation = this.sliceCoordinator.validateSliceAccess(
       sliceIndex,
       viewAxes,
-      this.volumeStack
+      this.volumeStack,
+      i => registrations[i] === null
     );
     
     if (sliceValidation.warnings.length > 0) {
@@ -219,7 +258,6 @@ export class ImageLayer implements SliceLayer {
     this.activeContainers.add(mainContainer);
 
     // The "reference slice" is from layer 0 (the reference layer)
-    const referenceLayer = this.volumeStack.getLayer(0);
     const referenceSliceIndex = sliceValidation.sliceIndices[0];
     const referenceSlice = referenceLayer.getSlice(referenceSliceIndex, viewAxes);
 
@@ -233,14 +271,18 @@ export class ImageLayer implements SliceLayer {
     let referenceSprite: PIXI.Sprite | null = null;
     for (let i = 0; i < this.volumeStack.length; i++) {
       const layer = this.volumeStack.getLayer(i);
-      const validatedSliceIndex = sliceValidation.sliceIndices[i];
-      
-      // Skip if slice index is -1 (empty slice indicator)
+      const registration = registrations[i];
+      const validatedSliceIndex = registration
+        ? layerSliceForReference(registration, referenceSliceIndex) ?? -1
+        : sliceValidation.sliceIndices[i];
+
+      // Skip if slice index is -1 (empty slice indicator, or a registered
+      // layer whose slab does not reach the reference plane)
       if (validatedSliceIndex === -1) {
         this.logger.debug('Skipping empty slice for volume', { volumeIndex: i });
         continue;
       }
-      
+
       const imageSlice: ImageSlice = (i === 0)
         ? referenceSlice
         : layer.getSlice(validatedSliceIndex, viewAxes);
@@ -253,13 +295,15 @@ export class ImageLayer implements SliceLayer {
       // 'cubic' (anatomy) keeps linear magnification of its resampled texture.
       const scaleMode = layer.interpolation === 'linear' || layer.interpolation === 'cubic'
         ? 'linear' : 'nearest';
-      const cacheKey = `${layer.id}_${validatedSliceIndex}_${viewAxes.id}_v${layer.textureVersion ?? layer.version}_${scaleMode}`;
+      // Registered layers index their own grid; keep their textures apart.
+      const indexKey = registration ? `w${validatedSliceIndex}` : `${validatedSliceIndex}`;
+      const cacheKey = `${layer.id}_${indexKey}_${viewAxes.id}_v${layer.textureVersion ?? layer.version}_${scaleMode}`;
       const sprite = this.createSprite(imageSlice.data, cacheKey, scaleMode);
       sprite.alpha = layer.opacity;
       sprite.visible = layer.visible;
 
       // Debug logging
-      this.logger.info('Sprite created', {
+      this.logger.debug('Sprite created', {
         layerIndex: i,
         layerId: layer.id,
         spriteWidth: sprite.width,
@@ -282,15 +326,16 @@ export class ImageLayer implements SliceLayer {
       // the two factors; anything else goes through the alignment strategies.
       const k = imageSlice.upsample ?? 1;
       const refK = referenceSlice.upsample ?? 1;
-      const refSpace = referenceLayer.volume.space;
-      const space = layer.volume.space;
-      const close = (a: number[], b: number[]) =>
-        a.length === b.length && a.every((v, idx) => Math.abs(v - b[idx]) < 1e-6);
-      const sameGrid = close(space.dim, refSpace.dim) && close(space.origin, refSpace.origin) &&
-        close(space.spacing, refSpace.spacing);
       if (i === 0) {
         if (k !== 1) sprite.scale.set(sprite.scale.x / k, sprite.scale.y / k);
-      } else if (referenceSprite !== null && sameGrid &&
+      } else if (registration) {
+        const placement = placeLayerSlice(registration, k);
+        sprite.anchor?.set(0, 0);
+        sprite.pivot?.set(0, 0);
+        sprite.rotation = 0;
+        sprite.position.set(placement.position[0], placement.position[1]);
+        sprite.scale.set(placement.scale[0], placement.scale[1]);
+      } else if (referenceSprite !== null && sameGrid(layer.volume.space, refSpace) &&
         imageSlice.width / k === refWidth / refK && imageSlice.height / k === refHeight / refK) {
         const ratio = k / refK;
         const ref = referenceSprite;
@@ -328,6 +373,21 @@ export class ImageLayer implements SliceLayer {
     return mainContainer;
   }
   
+  /** Cached {@link registerGrid}: spaces are immutable, so this only grows with new volumes. */
+  private registration(reference: NeuroSpace, space: NeuroSpace, viewAxes: AxisSet3D): GridRegistration | null {
+    let byView = this.registrationCache.get(space);
+    if (!byView) {
+      byView = new Map();
+      this.registrationCache.set(space, byView);
+    }
+    const key = viewAxes.toString();
+    const cached = byView.get(key);
+    if (cached && cached.reference === reference) return cached.registration;
+    const registration = registerGrid(reference, space, viewAxes);
+    byView.set(key, { reference, registration });
+    return registration;
+  }
+
   /**
    * Releases all active containers and returns their sprites to the pool
    */
@@ -395,7 +455,7 @@ export class ImageLayer implements SliceLayer {
     return false;
   }
   dispose(): void {
-    this.logger.info('Disposing ImageLayer', { layerId: this.layerId });
+    this.logger.debug('Disposing ImageLayer', { layerId: this.layerId });
     
     // Release all active containers
     this.releaseActiveContainers();

@@ -26,15 +26,23 @@ export class SliceCoordinator {
   }
 
   /**
-   * Validates and normalizes slice access across all volumes in a stack
+   * Validates and normalizes slice access across all volumes in a stack.
+   *
+   * @param include - Optional filter. Volumes it rejects do not share the
+   *   reference slice index (they pick their own plane), so they are passed
+   *   through unchanged and never clamped, warned about or counted as adjusted.
    */
   validateSliceAccess(
     sliceIndex: number,
     axis: AxisSet3D,
-    volStack: VolStack
+    volStack: VolStack,
+    include?: (volumeIndex: number) => boolean
   ): SliceAccessResult {
-    const validRange = this.getValidSliceRange(axis, volStack);
     const volumeDimensions = this.getVolumeDimensions(volStack, axis);
+    const shared = include ? volumeDimensions.filter((_, i) => include(i)) : null;
+    const validRange: [number, number] = shared && shared.length > 0
+      ? [0, Math.max(0, Math.min(...shared.map(d => d.currentSliceCount)) - 1)]
+      : this.getValidSliceRange(axis, volStack);
     
     const result: SliceAccessResult = {
       isValid: sliceIndex >= validRange[0] && sliceIndex <= validRange[1],
@@ -46,6 +54,10 @@ export class SliceCoordinator {
 
     // Check each volume and determine appropriate slice index
     for (let i = 0; i < volStack.length; i++) {
+      if (include && !include(i)) {
+        result.sliceIndices.push(sliceIndex);
+        continue;
+      }
       const volDim = volumeDimensions[i];
       const maxIndex = volDim.currentSliceCount - 1;
       

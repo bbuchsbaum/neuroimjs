@@ -266,7 +266,14 @@ export class OrientationLabelLayer implements SliceLayer {
   }
 
   private makeLabel(text: string): PIXI.Text {
-    const style: any = {
+    const label = new PIXI.Text(text, this.labelStyle());
+    label.alpha = this.options.alpha;
+    label.anchor.set(0.5, 0.5);
+    return label;
+  }
+
+  private labelStyle(): Record<string, unknown> {
+    const style: Record<string, unknown> = {
       fontSize: this.options.fontSize,
       fill: this.options.color,
       fontFamily: this.options.fontFamily,
@@ -285,10 +292,33 @@ export class OrientationLabelLayer implements SliceLayer {
         angle: 0,
       };
     }
-    const label = new PIXI.Text(text, style);
-    label.alpha = this.options.alpha;
-    label.anchor.set(0.5, 0.5);
-    return label;
+    return style;
+  }
+
+  /**
+   * Updates any subset of the label styling in place (e.g. to follow a
+   * light/dark theme switch). Existing Text objects are restyled rather than
+   * rebuilt, so the shared PIXI text pool is not churned. Layout-affecting
+   * options (margin, anchor, font size) take effect on the next layout pass;
+   * {@link SliceViewer.setOrientationLabelStyle} triggers one.
+   */
+  public setStyle(options: OrientationLabelOptions): void {
+    const next = { ...this.options };
+    (Object.keys(options) as Array<keyof OrientationLabelOptions>).forEach(key => {
+      const value = options[key];
+      if (value !== undefined) (next as Record<string, unknown>)[key] = value;
+    });
+    this.options = next;
+    for (const label of [this.textNegI, this.textPosI, this.textNegJ, this.textPosJ]) {
+      if (!label) continue;
+      (label as unknown as { style: unknown }).style = this.labelStyle();
+      label.alpha = this.options.alpha;
+    }
+  }
+
+  /** The styling currently in effect. */
+  public getStyle(): Required<OrientationLabelOptions> {
+    return { ...this.options };
   }
 
   /**

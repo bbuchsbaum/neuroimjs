@@ -10,6 +10,8 @@ import { ICoordinateTransformer } from './interfaces/ICoordinateTransformer';
 import { PointerEventHandler } from './types/display';
 import { DepthEnhancedLayer, DepthEnhancedOptions } from './DepthEnhancedLayer';
 import { IntensityReadout } from './IntensityReadout';
+import type { CrossHairOptions } from './CrossHair';
+import type { ViewerTheme } from './ViewerTheme';
 import { OrientationLabelOptions } from './OrientationLabelLayer';
 
 /**
@@ -509,6 +511,26 @@ export class SingleSliceViewer {
    */
   public setOrientationLabelsVisible(visible: boolean, options?: OrientationLabelOptions): void {
     this.viewer.setOrientationLabelsVisible(visible, options);
+  }
+
+  /** Changes the canvas clear colour (and optionally alpha) in place. */
+  public setBackground(color: number, alpha?: number): void {
+    this.viewer.setBackground(color, alpha);
+  }
+
+  /** Restyles the crosshair in place; omitted fields keep their value. */
+  public setCrosshairStyle(options: CrossHairOptions): void {
+    this.viewer.setCrosshairStyle(options);
+  }
+
+  /** Restyles the orientation labels in place; omitted fields keep their value. */
+  public setOrientationLabelStyle(options: OrientationLabelOptions): void {
+    this.viewer.setOrientationLabelStyle(options);
+  }
+
+  /** Applies a (partial) theme — background, crosshair, labels — without a rebuild. */
+  public setTheme(theme: ViewerTheme): void {
+    this.viewer.setTheme(theme);
   }
 
   /**
