@@ -100,6 +100,7 @@ export type { SliceLayer, ScreenLayoutContext } from './display/SliceLayer';
 export { OrientationLabelLayer } from './display/OrientationLabelLayer';
 export type { OrientationLabelOptions } from './display/OrientationLabelLayer';
 export type { CrossHairOptions } from './display/CrossHair';
+export type { ViewerTheme } from './display/ViewerTheme';
 export type { SliceInterpolation } from './display/VolLayer';
 
 // Export concrete classes for backward compatibility

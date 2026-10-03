@@ -64,8 +64,13 @@ viewer.setCrosshairVisible(true);
 // 9) Access canvases (e.g., for thumbnails)
 const axialCanvas = viewer.getCanvas('axial');
 
-// 10) Set background color of canvases
+// 10) Change colours at runtime (no rebuild), e.g. a light/dark ground switch
 viewer.setBackground(0x222222);
+viewer.setTheme({
+  backgroundColor: 0xfafaf7,
+  crosshair: { crossColor: 0x1c2226, crossAlpha: 0.55, haloColor: 0xffffff, haloAlpha: 0.6 },
+  orientationLabels: { color: 0x3e4952, alpha: 0.9 },
+});
 
 // 11) Cleanup
 // viewer.dispose();
@@ -103,7 +108,10 @@ class SimpleOrthogonalViewer {
 
   // View utilities
   getCanvas(view: 'axial' | 'sagittal' | 'coronal'): HTMLCanvasElement;
-  setBackground(color: number): void;              // canvas CSS background per view
+  setBackground(color: number, alpha?: number): void;      // clear colour of every view
+  setCrosshairStyle(options: CrossHairOptions): void;      // colour, alpha, halo, width, gap
+  setOrientationLabelStyle(options: OrientationLabelOptions): void;
+  setTheme(theme: ViewerTheme): void;              // any subset of the above, in place
   setCrosshairVisible(visible: boolean): void;     // runtime toggle
 
   // Lifecycle
