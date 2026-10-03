@@ -24,6 +24,21 @@ export type { DepthEnhancedOptions } from './display/DepthEnhancedLayer';
 export { OrientationLabelLayer } from './display/OrientationLabelLayer';
 export type { OrientationLabelOptions } from './display/OrientationLabelLayer';
 export type { CrossHairOptions } from './display/CrossHair';
+
+// Logging: quiet (WARN) by default; opt in to diagnostics with
+// enableDebugLogging() / setLogLevel('debug') or globalThis.NEUROIMJS_DEBUG.
+export {
+  Logger,
+  LogLevel,
+  DEFAULT_LOG_LEVEL,
+  setLogLevel,
+  getLogLevel,
+  enableDebugLogging,
+  enableConsoleLogging,
+  parseLogLevel,
+} from './display/logging/Logger';
+export type { LogEntry, LoggerOptions, LogLevelName } from './display/logging/Logger';
+
 export type { SliceInterpolation } from './display/VolLayer';
 
 export { ColorMap } from './display/ColorMap';
