@@ -23,6 +23,9 @@ in the pull request that makes the change.
   frames, so a resize just before `dispose()` no longer runs against the
   destroyed PIXI application. `OrthogonalImageViewer.dispose()` is idempotent
   and `SliceView.isDisposed` is new. (#2)
+- `OrthogonalImageViewer` handles ArrowLeft/ArrowRight only when focus is on the
+  page itself or inside one of its slice panes, so sliders and text fields
+  elsewhere on the page keep their arrow keys. (#3)
 
 ### Security
 
