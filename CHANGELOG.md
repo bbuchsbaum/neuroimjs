@@ -53,6 +53,10 @@ in the pull request that makes the change.
 - A pooled sprite reused as a reference sprite no longer keeps the position and
   pivot of its previous use as an offset overlay (`SpritePool.acquire` resets
   them). (#6)
+- Volumes not stored LPI (e.g. RPI, LAI, RAI) are no longer mirrored in the
+  coronal and sagittal views: `DenseNeuroVol.getSlice` and
+  `SparseNeuroVol.getSlice` use their LPI-only fast paths only for LPI-stored
+  sources, and slice indices are taken in the volume's own voxel order. (#10)
 
 ### Security
 
