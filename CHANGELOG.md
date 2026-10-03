@@ -7,6 +7,13 @@ in the pull request that makes the change.
 
 ## Unreleased
 
+## 0.5.0 - 2026-10-03
+
+Upgrading from 0.4.0: Node.js 22 or later is required; `ImageLayer` defaults
+to `'world'` alignment; the image-pixel methods of `SliceTransform` and
+`CoordinateTransformer` use texel-centre coordinates (+0.5 px); and the display
+logger is quiet by default. Each is described below.
+
 ### Added
 
 - `setTheme()`, `setBackground()`, `setCrosshairStyle()` and
@@ -68,6 +75,8 @@ in the pull request that makes the change.
   `CoordinateTransformer` now use texel-centre coordinates (voxel `c` maps to
   pixel `c + 0.5`); the new `SliceTransform.sliceToImageCoord` /
   `imageToSliceCoord` implement the convention. (#9)
+- `CategoryLogger`, the type returned by `Logger.getCategory()`, is exported
+  from both entry points, so the API reference builds again.
 
 ### Security
 
