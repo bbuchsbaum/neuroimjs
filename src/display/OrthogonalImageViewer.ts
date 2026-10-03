@@ -200,6 +200,9 @@ export class OrthogonalImageViewer implements ViewerStateInfo {
   // A collection of MobX disposers for cleaning up reactive side effects.
   private disposers: IReactionDisposer[] = [];
 
+  // Set by dispose(); late resize callbacks check it before touching sub-views.
+  private disposed = false;
+
   /**
    * Private constructor to force usage of the async factory method `.create()`.
    * 
@@ -703,6 +706,7 @@ export class OrthogonalImageViewer implements ViewerStateInfo {
    * its internal PIXI canvas size and re-fit images.
    */
   private handleResize(): void {
+    if (this.disposed) return;
     this.applyResponsiveLayout();
 
     Object.values(this.sliceViewers).forEach((viewer) => {
@@ -902,6 +906,14 @@ export class OrthogonalImageViewer implements ViewerStateInfo {
    * and unsubscribes from MobX reactions.
    */
   public dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+
+    // Stop resize sources first so nothing schedules work on a dying view.
+    window.removeEventListener('resize', this.handleResizeBound);
+    document.removeEventListener('keydown', this.handleKeydownBound);
+    try { this.resizeObserver?.disconnect(); } catch {}
+
     // PIXI's text TexturePool is shared across renderers. Release every
     // sub-view's overlay Text resources before destroying the first renderer,
     // which clears that shared pool.
@@ -918,10 +930,6 @@ export class OrthogonalImageViewer implements ViewerStateInfo {
     while (this.container.firstChild) {
       this.container.removeChild(this.container.firstChild);
     }
-
-    window.removeEventListener('resize', this.handleResizeBound);
-    document.removeEventListener('keydown', this.handleKeydownBound);
-    try { this.resizeObserver?.disconnect(); } catch {}
 
     // Dispose all reactive watchers
     this.disposers.forEach((disposer) => disposer());
