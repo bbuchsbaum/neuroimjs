@@ -43,8 +43,9 @@ export interface SimpleOrthogonalViewerOptions {
   /**
    * How layers that are not on the first layer's voxel grid are placed.
    * 'world' slices each one on its own grid and draws it at its true world
-   * position (e.g. a 2 mm statistical map over a 1 mm template). Default
-   * 'auto' keeps the heuristic fit. Can be changed later with
+   * position (e.g. a 2 mm statistical map over a 1 mm template); this is the
+   * default. 'auto' restores the earlier heuristic fit, which fits slice
+   * bounds and reuses the first layer's slice index. Can be changed later with
    * {@link SimpleOrthogonalViewer.setAlignmentStrategy}.
    */
   alignmentStrategy?: AlignmentStrategyType;

@@ -83,13 +83,16 @@ export class ImageLayer implements SliceLayer {
     
     // Initialize alignment manager
     this.alignmentManager = new AlignmentManager();
-    this.alignmentOptions = alignmentOptions || {
-      strategy: 'auto',
-      enableCache: true,
-      maintainAspectRatio: false,
-      maxScale: 10,
-      minScale: 0.1
-    };
+    // 'world' is the default strategy, also when options omit it
+    this.alignmentOptions = alignmentOptions
+      ? { ...alignmentOptions, strategy: alignmentOptions.strategy ?? 'world' }
+      : {
+          strategy: 'world',
+          enableCache: true,
+          maintainAspectRatio: false,
+          maxScale: 10,
+          minScale: 0.1
+        };
     
     // Initialize slice coordinator with default configuration
     this.sliceCoordinator = new SliceCoordinator({

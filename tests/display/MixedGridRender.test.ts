@@ -233,12 +233,36 @@ describe('ImageLayer with layers on different grids', () => {
     imageLayer.dispose();
   });
 
-  it("the default 'auto' strategy keeps the heuristic alignment for other grids", () => {
+  it("'world' is the default strategy", () => {
     const { anatomy, stat } = layers();
     const imageLayer = new ImageLayer(new VolStack(anatomy, stat));
+    expect(imageLayer.getAlignmentOptions().strategy).toBe('world');
     const getSlice = vi.spyOn(stat, 'getSlice');
     imageLayer.renderSlice(10, [0, 0, 0], VIEWS.axial, new PIXI.Container());
-    // Unchanged: the reference index is reused and the heuristic runs.
+    // Reference plane 10 is z = -18 + 10 * 1 = -8 mm; the map plane there is
+    // (-8 - (-16)) / 2 = 4. No heuristic alignment is computed.
+    expect(getSlice).toHaveBeenCalledWith(4, VIEWS.axial);
+    expect(imageLayer.getAlignmentCacheStats().size).toBe(0);
+    imageLayer.dispose();
+  });
+
+  it("options without a strategy also default to 'world'", () => {
+    const { anatomy, stat } = layers();
+    const imageLayer = new ImageLayer(new VolStack(anatomy, stat), { enableCache: true });
+    expect(imageLayer.getAlignmentOptions().strategy).toBe('world');
+    const getSlice = vi.spyOn(stat, 'getSlice');
+    imageLayer.renderSlice(10, [0, 0, 0], VIEWS.axial, new PIXI.Container());
+    expect(getSlice).toHaveBeenCalledWith(4, VIEWS.axial);
+    imageLayer.dispose();
+  });
+
+  it("an explicit 'auto' strategy keeps the heuristic alignment for other grids", () => {
+    const { anatomy, stat } = layers();
+    const imageLayer = new ImageLayer(new VolStack(anatomy, stat));
+    imageLayer.setAlignmentStrategy('auto');
+    const getSlice = vi.spyOn(stat, 'getSlice');
+    imageLayer.renderSlice(10, [0, 0, 0], VIEWS.axial, new PIXI.Container());
+    // The pre-'world' behaviour: the reference index is reused and the heuristic runs.
     expect(getSlice).toHaveBeenCalledWith(10, VIEWS.axial);
     expect(imageLayer.getAlignmentCacheStats().size).toBeGreaterThan(0);
     imageLayer.dispose();
