@@ -19,6 +19,12 @@ in the pull request that makes the change.
 - `readVol` and the other NIfTI readers work when the library runs inside a
   `vm` context without a dynamic-import hook (vitest/vite-node on Node < 26,
   Jest). They failed with `ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING`.
+- The crosshair is drawn through the centre of the voxel it marks, not half a
+  voxel off, and a click anywhere inside a texel selects that voxel. **API
+  change:** the image-pixel methods of `SliceTransform` and
+  `CoordinateTransformer` now use texel-centre coordinates (voxel `c` maps to
+  pixel `c + 0.5`); the new `SliceTransform.sliceToImageCoord` /
+  `imageToSliceCoord` implement the convention. (#9)
 
 ### Security
 
