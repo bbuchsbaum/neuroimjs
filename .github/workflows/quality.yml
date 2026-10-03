@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  schedule:
+    # Weekly run of the optional network job against the real atlas files.
+    - cron: '17 6 * * 1'
 
 permissions:
   contents: read
@@ -15,22 +18,23 @@ concurrency:
 
 jobs:
   library:
+    if: github.event_name != 'schedule'
     name: Node ${{ matrix.node }} on ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
-            node: 20
+            node: 22
             canonical: true
           - os: ubuntu-latest
-            node: 22
-          - os: ubuntu-latest
             node: 24
+          - os: ubuntu-latest
+            node: 26
           - os: macos-latest
-            node: 20
+            node: 22
           - os: windows-latest
-            node: 20
+            node: 22
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -54,13 +58,45 @@ jobs:
         run: npm run audit:prod
 
   browser:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
+      # The MNI152 template the fixtures load is copied from the committed
+      # docs/public/data/mni152_t1.nii.gz (SHA-256 checked) by the Playwright
+      # globalSetup, so no download is needed.
       - run: npm run test:e2e
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-results
+          path: |
+            test-results/
+            playwright-report/
+            e2e/**/*-snapshots/
+          retention-days: 14
+
+  # Optional: the atlas loaders against the real Glasser/Schaefer downloads.
+  # The default suite serves synthetic files with the same geometry and label
+  # formats (tests/helpers/syntheticAtlas.ts). Runs weekly and on manual
+  # dispatch only, so upstream outages cannot block pull requests.
+  network:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    env:
+      NEUROIMJS_NETWORK_TESTS: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx vitest run tests/NeuroAtlas.test.ts tests/DenseNeuroVol.test.ts tests/SliceTransform.test.ts
