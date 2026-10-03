@@ -13,6 +13,10 @@ in the pull request that makes the change.
   runtime dependency, reads `navigator` when it loads, so `require('neuroimjs')`
   and `import 'neuroimjs'` already threw `ReferenceError: navigator is not
   defined` on Node 20, which reached end of life in April 2026.
+- The display logger starts at WARN instead of DEBUG, so viewers no longer flood
+  the host console. Opt in with `NEUROIMJS_LOG_LEVEL` / `NEUROIMJS_DEBUG`
+  (global or environment variable) or `setLogLevel()` / `enableDebugLogging()`;
+  the logging controls are exported from both entry points. (#5)
 
 ### Fixed
 

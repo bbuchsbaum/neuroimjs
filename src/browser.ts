@@ -165,3 +165,17 @@ export type {
 // Control panel components (Web Components for browser)
 export { LayerControlPanel } from './controls/LayerControlPanelLit';
 export type { LayerControlName, LayerControlState } from './controls/LayerControlPanelLit';
+
+// Logging: quiet (WARN) by default; opt in to diagnostics with
+// enableDebugLogging() / setLogLevel('debug') or globalThis.NEUROIMJS_DEBUG.
+export {
+  Logger,
+  LogLevel,
+  DEFAULT_LOG_LEVEL,
+  setLogLevel,
+  getLogLevel,
+  enableDebugLogging,
+  enableConsoleLogging,
+  parseLogLevel,
+} from './display/logging/Logger';
+export type { LogEntry, LoggerOptions, LogLevelName } from './display/logging/Logger';
