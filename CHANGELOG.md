@@ -57,6 +57,11 @@ in the pull request that makes the change.
   coronal and sagittal views: `DenseNeuroVol.getSlice` and
   `SparseNeuroVol.getSlice` use their LPI-only fast paths only for LPI-stored
   sources, and slice indices are taken in the volume's own voxel order. (#10)
+- `VolStack` can hold layers stored in a different orientation from the
+  reference layer: `FacadeVolLayer` no longer throws a MobX error on
+  construction (`VolLayer` uses `makeObservable`), maps world coordinates
+  without mirroring, forwards display setters, and keeps the wrapped layer's id.
+  (#11, fixes #7)
 
 ### Security
 
