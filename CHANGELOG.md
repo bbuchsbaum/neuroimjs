@@ -20,6 +20,12 @@ in the pull request that makes the change.
   pixdim (e.g. an oblique or rescaled sform) previously reported a spacing
   that contradicted the affine, and the two decoders disagreed.
   `readHeader().spacing` still returns the raw `pixdim[1..3]`.
+- `nearestAnatomy()` reports the correct axis codes for non-orthogonal
+  (sheared) affines. Its Gram-Schmidt step scaled the i column in place by
+  `dot(i, j)`, so a sheared RAS image could be reported as LAS, giving
+  `readVol`, `readNiftiArrayBuffer` and any `NeuroSpace` built from such an
+  affine the wrong `axes`, and making `reorient()` pick the wrong frame. It now
+  orthonormalises copies of the columns and matches nibabel's `aff2axcodes`.
 
 ## 0.5.0 - 2026-10-03
 

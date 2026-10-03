@@ -50,9 +50,6 @@ const PRECEDENCE =
 const NO_XFORM =
   'qform_code = sform_code = 0: nibabel returns the Analyze base affine (x flipped, grid centred at 0); ' +
   'neuroimjs returns diag(pixdim) with zero offset (NIfTI-1 "method 1")';
-const SHEAR_AXES =
-  'nearestAnatomy(): orthogonalize() calls ml-matrix col1.mul(dotp), which scales col1 IN PLACE; for ' +
-  'non-orthogonal (sheared) affines the i axis is negated (RAS reported as LAS) and reorient() picks the wrong frame';
 const READVEC_AFFINE =
   'readVec affine loss, fixed on fix/readvec-geometry: readVec builds its [T,X,Y,Z] NeuroSpace from ' +
   'spacing/origin only, dropping rotation/shear and shifting the axes';
@@ -72,11 +69,6 @@ const READVOL_ALL = [
 ];
 const all = (checks: string[], reason: string): Record<string, string> =>
   Object.fromEntries(checks.map(check => [check, reason]));
-const shearAxes = {
-  'readVol: orientation matches nibabel aff2axcodes': SHEAR_AXES,
-  'readVol: reorient to RAS matches nibabel as_closest_canonical': SHEAR_AXES,
-  'browser: orientation matches nibabel aff2axcodes': SHEAR_AXES,
-};
 
 const KNOWN: KnownDiscrepancies = {
   dtype_uint16_le: all(READVOL_ALL, UINT_READVOL),
@@ -107,9 +99,7 @@ const KNOWN: KnownDiscrepancies = {
     ],
     NO_XFORM
   ),
-  xform_sform_only_shear: shearAxes,
-  vec4d_int16_be_shear: { ...shearAxes, 'readVec: spatial affine matches nibabel': READVEC_AFFINE },
-  nifti2_float32_be_gz: shearAxes,
+  vec4d_int16_be_shear: { 'readVec: spatial affine matches nibabel': READVEC_AFFINE },
   vec4d_int16_sform_oblique: { 'readVec: spatial affine matches nibabel': READVEC_AFFINE },
   vec4d_float32_qform_negqfac_gz: { 'readVec: spatial affine matches nibabel': READVEC_AFFINE },
   nifti2_qform_only: {
