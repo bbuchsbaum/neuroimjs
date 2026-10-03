@@ -24,7 +24,17 @@ const importEsm = new Function(
 let niftiReaderPromise: Promise<NiftiReaderModule> | undefined;
 
 function loadNiftiReader(): Promise<NiftiReaderModule> {
-  niftiReaderPromise ??= importEsm('nifti-reader-js');
+  niftiReaderPromise ??= importEsm('nifti-reader-js').catch((error: unknown) => {
+    // Code evaluated through `vm` without an `importModuleDynamically` hook
+    // (vitest/vite-node on Node < 26, Jest, some sandboxes) cannot run an
+    // `import()` created by `new Function`. Those hosts do resolve a literal
+    // `import()` in this module, so retry with one. Plain Node never reaches
+    // this branch, so the CommonJS build keeps its native dynamic import.
+    if ((error as { code?: string } | null)?.code === 'ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING') {
+      return import('nifti-reader-js');
+    }
+    throw error;
+  });
   return niftiReaderPromise;
 }
 

@@ -4,6 +4,9 @@ const chromiumExecutable = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
 
 export default defineConfig({
   testDir: './e2e',
+  // Copies the committed MNI152 template into the git-ignored tests/data/,
+  // which the e2e fixtures load through the dev server.
+  globalSetup: './scripts/prepare-test-data.mjs',
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
