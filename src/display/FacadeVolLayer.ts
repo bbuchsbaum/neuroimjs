@@ -15,7 +15,9 @@ import { Range, Threshold } from '../types';
  *
  * The facade carries the wrapped layer's id and display state. Renderers read
  * that state (and track `version`) from the facade, while slices come from the
- * wrapped layer, so every display setter is applied to both.
+ * wrapped layer, so every display setter is applied to both. Change display
+ * settings through the layer in the stack (e.g. `stack.getLayerById(id)`):
+ * setters called on the original VolLayer do not reach the facade.
  */
 export class FacadeVolLayer extends VolLayer {
   private realLayer: VolLayer;
