@@ -19,6 +19,11 @@ in the pull request that makes the change.
 - `readVol` and the other NIfTI readers work when the library runs inside a
   `vm` context without a dynamic-import hook (vitest/vite-node on Node < 26,
   Jest). They failed with `ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING`.
+- `VolStack` can hold layers stored in a different orientation from the
+  reference layer: `FacadeVolLayer` no longer throws a MobX error on
+  construction (`VolLayer` uses `makeObservable`), maps world coordinates
+  without mirroring, forwards display setters, and keeps the wrapped layer's id.
+  (#11, fixes #7)
 
 ### Security
 
