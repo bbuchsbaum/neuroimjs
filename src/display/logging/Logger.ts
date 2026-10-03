@@ -11,6 +11,69 @@ export enum LogLevel {
   NONE = 4
 }
 
+/**
+ * Level used when nothing else is configured. Library code logs routine
+ * progress at DEBUG/INFO, which a host page should not see unless it asks.
+ */
+export const DEFAULT_LOG_LEVEL = LogLevel.WARN;
+
+const LEVEL_NAMES: Record<string, LogLevel> = {
+  debug: LogLevel.DEBUG,
+  info: LogLevel.INFO,
+  warn: LogLevel.WARN,
+  warning: LogLevel.WARN,
+  error: LogLevel.ERROR,
+  none: LogLevel.NONE,
+  off: LogLevel.NONE,
+  silent: LogLevel.NONE,
+};
+
+/** A log level by enum value or (case-insensitive) name. */
+export type LogLevelName = 'debug' | 'info' | 'warn' | 'warning' | 'error' | 'none' | 'off' | 'silent';
+
+/**
+ * Parses a log level given as a LogLevel value, a numeric string, or a name
+ * ('debug', 'info', 'warn', 'error', 'none'). Returns undefined if unrecognised.
+ */
+export function parseLogLevel(value: unknown): LogLevel | undefined {
+  if (typeof value === 'number' && LogLevel[value] !== undefined) return value as LogLevel;
+  if (typeof value !== 'string') return undefined;
+  const text = value.trim().toLowerCase();
+  if (text === '') return undefined;
+  if (/^\d+$/.test(text)) return parseLogLevel(Number(text));
+  return LEVEL_NAMES[text];
+}
+
+function isTruthyFlag(value: unknown): boolean {
+  if (value === true || value === 1) return true;
+  if (typeof value !== 'string') return false;
+  return /^(1|true|yes|on|debug)$/i.test(value.trim());
+}
+
+function readEnv(name: string): string | undefined {
+  try {
+    return typeof process === 'undefined' ? undefined : process.env?.[name];
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The level a fresh logger starts at. Opt in to more output without code
+ * changes by setting, before neuroimjs is loaded:
+ *  - in a browser: `globalThis.NEUROIMJS_LOG_LEVEL = 'debug'` or
+ *    `globalThis.NEUROIMJS_DEBUG = true`;
+ *  - in Node: the `NEUROIMJS_LOG_LEVEL` or `NEUROIMJS_DEBUG` environment variable.
+ * At runtime use {@link setLogLevel} or {@link enableDebugLogging}.
+ */
+export function resolveDefaultLogLevel(): LogLevel {
+  const g = globalThis as Record<string, unknown>;
+  const explicit = parseLogLevel(g.NEUROIMJS_LOG_LEVEL) ?? parseLogLevel(readEnv('NEUROIMJS_LOG_LEVEL'));
+  if (explicit !== undefined) return explicit;
+  if (isTruthyFlag(g.NEUROIMJS_DEBUG) || isTruthyFlag(readEnv('NEUROIMJS_DEBUG'))) return LogLevel.DEBUG;
+  return DEFAULT_LOG_LEVEL;
+}
+
 export interface LogEntry {
   timestamp: Date;
   level: LogLevel;
@@ -108,7 +171,7 @@ export class Logger {
 
   private constructor(options: LoggerOptions = {}) {
     this.options = {
-      level: options.level ?? LogLevel.DEBUG,
+      level: options.level ?? resolveDefaultLogLevel(),
       console: options.console ?? true,
       store: options.store ?? false,
       maxEntries: options.maxEntries ?? 1000,
@@ -143,6 +206,11 @@ export class Logger {
    */
   configure(options: Partial<LoggerOptions>): void {
     Object.assign(this.options, options);
+  }
+
+  /** The current minimum level. */
+  getLevel(): LogLevel {
+    return this.options.level;
   }
 
   /**
@@ -358,8 +426,23 @@ export function getLogger(category: string): CategoryLogger {
 /**
  * Log level helpers
  */
-export const setLogLevel = (level: LogLevel): void => {
-  Logger.getInstance().configure({ level });
+export const setLogLevel = (level: LogLevel | LogLevelName): void => {
+  const parsed = parseLogLevel(level);
+  if (parsed === undefined) {
+    throw new Error(`Unknown log level: ${String(level)}`);
+  }
+  Logger.getInstance().configure({ level: parsed });
+};
+
+/** The current minimum level written by the neuroimjs logger. */
+export const getLogLevel = (): LogLevel => Logger.getInstance().getLevel();
+
+/**
+ * Turns neuroimjs debug logging on (DEBUG level) or back off (the default,
+ * WARN). Equivalent to `setLogLevel('debug')` / `setLogLevel('warn')`.
+ */
+export const enableDebugLogging = (enabled = true): void => {
+  Logger.getInstance().configure({ level: enabled ? LogLevel.DEBUG : DEFAULT_LOG_LEVEL });
 };
 
 export const enableConsoleLogging = (enabled: boolean): void => {

@@ -8,7 +8,9 @@ import { ViewerStateInfo } from './ViewerStateInfo';
 import { ISliceModel, ISliceView, ISliceController } from './interfaces/index';
 import { ViewerFactory } from './ViewerFactory';
 import { CrossHair } from './CrossHair';
+import type { CrossHairOptions } from './CrossHair';
 import type { SliceViewOptions } from './SliceView';
+import type { ViewerTheme } from './ViewerTheme';
 import { OrientationLabelLayer, OrientationLabelOptions } from './OrientationLabelLayer';
 import { arraysNearlyEqual, COORDINATE_EPSILON } from './NumericalUtils';
 
@@ -62,6 +64,8 @@ export class SliceViewer implements ViewerStateInfo {
    */
   private readonly imageLayer: ImageLayer;
   private viewOptions: SliceViewOptions = {};
+  // Last orientation-label styling, reused when labels are re-shown.
+  private labelOptions: OrientationLabelOptions | undefined;
 
   /**
    * Stores the view axes for reference
@@ -202,7 +206,8 @@ export class SliceViewer implements ViewerStateInfo {
    * @param options - Optional styling (font size, color, margin, outline).
    */
   public setOrientationLabelsVisible(visible: boolean, options?: OrientationLabelOptions): void {
-    const v = this.view as any;
+    const v = this.view;
+    if (options !== undefined) this.labelOptions = { ...options };
     if (visible) {
       if (typeof v.addLayer === 'function') {
         // Replace any existing instance so styling/options stay in sync.
@@ -211,13 +216,65 @@ export class SliceViewer implements ViewerStateInfo {
         }
         v.addLayer('orientation-labels', new OrientationLabelLayer(
           this.imageLayer.neuroSpace,
-          options
+          this.labelOptions
         ));
       }
     } else {
       if (typeof v.removeLayer === 'function') {
         v.removeLayer('orientation-labels');
       }
+    }
+  }
+
+  /**
+   * Changes the canvas clear colour (and optionally alpha) in place.
+   */
+  public setBackground(color: number, alpha?: number): void {
+    this.viewOptions = { ...this.viewOptions, backgroundColor: color };
+    if (alpha !== undefined) this.viewOptions.backgroundAlpha = alpha;
+    this.view.setBackground?.(color, alpha);
+  }
+
+  /**
+   * Restyles the crosshair in place (colour, alpha, halo, width, gap). The
+   * styling is kept for a crosshair shown later via setCrosshairVisible(true).
+   */
+  public setCrosshairStyle(options: CrossHairOptions): void {
+    this.viewOptions = {
+      ...this.viewOptions,
+      crosshairOptions: { ...(this.viewOptions.crosshairOptions ?? {}), ...definedOnly(options) },
+    };
+    const layer = this.view.getLayer?.('crosshair');
+    if (layer instanceof CrossHair) {
+      layer.setStyle(options);
+      this.view.redraw?.();
+    }
+  }
+
+  /**
+   * Restyles the orientation labels in place (colour, alpha, stroke, shadow,
+   * font). The styling is kept for labels shown later.
+   */
+  public setOrientationLabelStyle(options: OrientationLabelOptions): void {
+    this.labelOptions = { ...(this.labelOptions ?? {}), ...definedOnly(options) };
+    const layer = this.view.getLayer?.('orientation-labels');
+    if (layer instanceof OrientationLabelLayer) {
+      layer.setStyle(options);
+      this.view.redraw?.();
+    }
+  }
+
+  /**
+   * Applies a (partial) theme: background, crosshair and orientation labels,
+   * without rebuilding the view.
+   */
+  public setTheme(theme: ViewerTheme): void {
+    if (theme.crosshair) this.setCrosshairStyle(theme.crosshair);
+    if (theme.orientationLabels) this.setOrientationLabelStyle(theme.orientationLabels);
+    if (theme.backgroundColor !== undefined) {
+      this.setBackground(theme.backgroundColor, theme.backgroundAlpha);
+    } else if (theme.backgroundAlpha !== undefined) {
+      this.setBackground(this.viewOptions.backgroundColor ?? 0x000000, theme.backgroundAlpha);
     }
   }
 
@@ -419,4 +476,13 @@ export class SliceViewer implements ViewerStateInfo {
     
     // Note: We don't dispose model or imageLayer as they may be shared
   }
+}
+
+/** Copy of an options object without its undefined fields. */
+function definedOnly<T extends object>(options: T): Partial<T> {
+  const out: Partial<T> = {};
+  (Object.keys(options) as Array<keyof T>).forEach(key => {
+    if (options[key] !== undefined) out[key] = options[key];
+  });
+  return out;
 }

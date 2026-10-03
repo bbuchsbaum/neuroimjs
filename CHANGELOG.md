@@ -7,18 +7,61 @@ in the pull request that makes the change.
 
 ## Unreleased
 
+### Added
+
+- `setTheme()`, `setBackground()`, `setCrosshairStyle()` and
+  `setOrientationLabelStyle()` on the slice viewers restyle the background,
+  crosshair and orientation labels in place, without rebuilding the viewer;
+  `ViewerTheme` is exported. `SimpleOrthogonalViewer.setBackground()` now
+  changes the rendered clear colour. (#4)
+- Alignment strategy `'world'`: a layer on a different voxel grid from layer 0
+  (voxel size, dimensions or origin) is sliced on its own grid at the plane
+  nearest the reference plane and drawn at its world position. It is left out
+  where the reference plane falls outside its slab.
+  `SimpleOrthogonalViewerOptions.alignmentStrategy` sets it at construction;
+  `OrthogonalImageViewer` per-view layers now inherit the strategy. (#6)
+
 ### Changed
 
 - Require Node.js 22 or later (`engines.node` was `>=20.19`). pixi.js 8, a
   runtime dependency, reads `navigator` when it loads, so `require('neuroimjs')`
   and `import 'neuroimjs'` already threw `ReferenceError: navigator is not
   defined` on Node 20, which reached end of life in April 2026.
+- The display logger starts at WARN instead of DEBUG, so viewers no longer flood
+  the host console. Opt in with `NEUROIMJS_LOG_LEVEL` / `NEUROIMJS_DEBUG`
+  (global or environment variable) or `setLogLevel()` / `enableDebugLogging()`;
+  the logging controls are exported from both entry points. (#5)
+- **Behaviour change:** `ImageLayer` defaults to `alignmentStrategy: 'world'`
+  (was `'auto'`), also when alignment options omit `strategy`. Overlays on a
+  different grid from layer 0 were previously drawn at the reference slice index
+  and fitted to the slice bounds, which misregistered them. Same-grid stacks are
+  unaffected. Pass `alignmentStrategy: 'auto'` / `{ strategy: 'auto' }` or call
+  `setAlignmentStrategy('auto')` for the old behaviour. (#6)
 
 ### Fixed
 
 - `readVol` and the other NIfTI readers work when the library runs inside a
   `vm` context without a dynamic-import hook (vitest/vite-node on Node < 26,
   Jest). They failed with `ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING`.
+- Disposing a `SliceView` or `OrthogonalImageViewer` cancels its pending resize
+  frames, so a resize just before `dispose()` no longer runs against the
+  destroyed PIXI application. `OrthogonalImageViewer.dispose()` is idempotent
+  and `SliceView.isDisposed` is new. (#2)
+- `OrthogonalImageViewer` handles ArrowLeft/ArrowRight only when focus is on the
+  page itself or inside one of its slice panes, so sliders and text fields
+  elsewhere on the page keep their arrow keys. (#3)
+- A pooled sprite reused as a reference sprite no longer keeps the position and
+  pivot of its previous use as an offset overlay (`SpritePool.acquire` resets
+  them). (#6)
+- Volumes not stored LPI (e.g. RPI, LAI, RAI) are no longer mirrored in the
+  coronal and sagittal views: `DenseNeuroVol.getSlice` and
+  `SparseNeuroVol.getSlice` use their LPI-only fast paths only for LPI-stored
+  sources, and slice indices are taken in the volume's own voxel order. (#10)
+- `VolStack` can hold layers stored in a different orientation from the
+  reference layer: `FacadeVolLayer` no longer throws a MobX error on
+  construction (`VolLayer` uses `makeObservable`), maps world coordinates
+  without mirroring, forwards display setters, and keeps the wrapped layer's id.
+  (#11, fixes #7)
 - The crosshair is drawn through the centre of the voxel it marks, not half a
   voxel off, and a click anywhere inside a texel selects that voxel. **API
   change:** the image-pixel methods of `SliceTransform` and

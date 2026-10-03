@@ -23,7 +23,7 @@ const volStack = new VolStack(referenceSpace);
 
 // Create ImageLayer with specific alignment options
 const imageLayer = new ImageLayer(volStack, {
-  strategy: 'auto',           // Automatic strategy selection
+  strategy: 'world',          // Default: draw each layer at its world position ('auto' = heuristic fit)
   enableCache: true,          // Cache alignment results
   maintainAspectRatio: false, // Allow non-uniform scaling
   maxScale: 10,              // Prevent excessive upscaling
@@ -33,7 +33,7 @@ const imageLayer = new ImageLayer(volStack, {
 
 ## Alignment Strategies
 
-### 1. Center Alignment (Default)
+### 1. Center Alignment (heuristic fallback)
 
 Aligns layers by their centers. Best for layers with similar FOV but different resolutions.
 

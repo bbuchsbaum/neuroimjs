@@ -4,7 +4,7 @@ import { NeuroSlice } from '../volume/NeuroSlice';
 import { AxisSet2D, AxisSet3D, NamedAxis } from '../geometry/Axis';
 import { NeuroSpace } from '../geometry/NeuroSpace';
 import { ImageSlice } from './ImageSlice';
-import { makeAutoObservable, observable, action } from 'mobx';
+import { makeObservable, observable, action } from 'mobx';
 import { Range, Threshold } from '../types';
 import { Matrix } from 'ml-matrix';
 import { LRUCache } from '../utils/LRUCache';
@@ -95,7 +95,7 @@ export class VolLayer {
    * Bumped only when the colour-mapped pixels change (not for opacity), so
    * renderers can reuse uploaded textures across opacity changes.
    */
-  public textureVersion: number = 0;
+  @observable public textureVersion: number = 0;
 
   /**
    * Texture sampling used when the slice is magnified on screen.
@@ -158,7 +158,11 @@ export class VolLayer {
     opacity: number = 1.0,
     cacheSize?: number
   ) {
-    makeAutoObservable(this);
+    // makeAutoObservable rejects subclasses such as FacadeVolLayer, so the
+    // decorators supply the annotations. Called before the assignments below,
+    // as makeAutoObservable was: only fields with initializers are observable,
+    // and renderers track `version`.
+    makeObservable(this);
 
     this.id = id;
     this.volume = volume;
@@ -275,6 +279,7 @@ export class VolLayer {
    * @param newVolume - A NeuroVol with matching geometry (dim, axes, spacing, origin).
    * @param opts - Optional display overrides (range/threshold/opacity/colormap).
    */
+  @action
   replaceVolume(
     newVolume: NeuroVol,
     opts?: { range?: Range | null; threshold?: Threshold; opacity?: number; colormap?: ColorMap }

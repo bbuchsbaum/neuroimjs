@@ -83,4 +83,13 @@ export interface ISliceView {
    * Remove a render layer by id
    */
   removeLayer?(id: string): void;
+
+  /** Look up a render layer by id. */
+  getLayer?(id: string): SliceLayer | undefined;
+
+  /** Change the canvas clear colour (and alpha) without rebuilding. */
+  setBackground?(color: number, alpha?: number): void;
+
+  /** Re-lay out screen-space overlays and render, without rebuilding textures. */
+  redraw?(): void;
 }

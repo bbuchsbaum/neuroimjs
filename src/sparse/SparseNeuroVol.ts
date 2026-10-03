@@ -5,7 +5,7 @@ import { AxisSet3D } from '../geometry/Axis';
 import { NeuroSlice } from '../volume/NeuroSlice';
 import { createNeuroSlice } from '../volume/NeuroIm';
 import { Matrix, inverse } from 'ml-matrix';
-import { VoxelIterator, SagittalVoxelIterator, CoronalVoxelIterator } from '../volume/VoxelIterator';
+import { VoxelIterator, SagittalVoxelIterator, CoronalVoxelIterator, computeVoxelMapping } from '../volume/VoxelIterator';
 import { extractSliceForView } from '../geometry/SliceHelpers';
 import { LogicalNeuroVol } from '../volume/LogicalNeuroVol';
 import { DenseNeuroVol } from '../volume/DenseNeuroVol';
@@ -274,6 +274,18 @@ export class SparseNeuroVol implements NeuroVol {
 
   getSlice(zlevel: number, outAxes: AxisSet3D): NeuroSlice {
     const reorientedSpace = this.space.reorient(outAxes);
+
+    // `zlevel` indexes this volume's own grid along the pinned axis; the
+    // reoriented grid counts it in reverse where outAxes runs it the other way
+    // (see DenseNeuroVol.getSlice).
+    const mapping = computeVoxelMapping(reorientedSpace, this.space);
+    const reorientedLevel = mapping.flipSource[2]
+      ? this.space.dim[mapping.sourceDimIndex[2]] - 1 - zlevel
+      : zlevel;
+    const sliceSpace = extractSliceForView(reorientedSpace, reorientedLevel, outAxes);
+    // The sagittal iterator hard-codes the mapping from an LPI-stored source.
+    const sourceIsLPI = AxisSet3D.AXIAL_LPI.equals(this.space.axes);
+
     const trans = this.space.getPermutationMatrixTo(reorientedSpace.axes);
     const isIdentity = this.isIdentityMatrix(trans);
 
@@ -300,12 +312,12 @@ export class SparseNeuroVol implements NeuroVol {
 
       const slice = createNeuroSlice(
         this.dataType,
-        extractSliceForView(reorientedSpace, zlevel, outAxes),
+        sliceSpace,
         sliceData
       );
       return slice;
 
-    } else if (AxisSet3D.SAGITTAL_AIL.equals(reorientedSpace.axes)) {
+    } else if (sourceIsLPI && AxisSet3D.SAGITTAL_AIL.equals(reorientedSpace.axes)) {
 
       let index = 0;
       const voxelIterator = new SagittalVoxelIterator(this, zlevel);
@@ -319,7 +331,7 @@ export class SparseNeuroVol implements NeuroVol {
 
       const slice = createNeuroSlice(
         this.dataType,
-        extractSliceForView(reorientedSpace, zlevel, outAxes),
+        sliceSpace,
         sliceData
       );
       return slice;
@@ -327,7 +339,7 @@ export class SparseNeuroVol implements NeuroVol {
     } else {
 
       let index = 0;
-      const voxelIterator = new VoxelIterator(this, reorientedSpace, zlevel);
+      const voxelIterator = new VoxelIterator(this, reorientedSpace, reorientedLevel);
       for (const voxel of voxelIterator) {
         const { sourceIndex3D, inBounds } = voxel;
         const value = inBounds
@@ -338,7 +350,7 @@ export class SparseNeuroVol implements NeuroVol {
 
       const slice = createNeuroSlice(
         this.dataType,
-        extractSliceForView(reorientedSpace, zlevel, outAxes),
+        sliceSpace,
         sliceData
       );
       return slice;

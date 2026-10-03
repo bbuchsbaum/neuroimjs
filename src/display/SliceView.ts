@@ -62,6 +62,8 @@ export class SliceView implements ISliceView {
   private boundOnResize: () => void = () => {};
   private resizeObserver: ResizeObserver | null = null;
   private disposed = false;
+  // Pending animation-frame ids scheduled by handleResize(), cancelled on dispose.
+  private pendingFrames = new Set<number>();
 
   // Zoom & Pan state
   private zoomLevel: number = 1.0;
@@ -305,6 +307,7 @@ export class SliceView implements ISliceView {
    *  - Fitting to screen
    */
   public renderSlice(): void {
+    if (this.disposed) return;
     // Pin the transform to the current slice
     this.coordinateTransformer.setSliceIndex(this.model.currentSliceIndex);
 
@@ -371,7 +374,7 @@ export class SliceView implements ISliceView {
    */
   public setFitRegion(region: { x0: number; y0: number; x1: number; y1: number } | null): void {
     this.fitRegion = region && region.x1 > region.x0 && region.y1 > region.y0 ? { ...region } : null;
-    if (this.mainContainer?.children.length) {
+    if (!this.disposed && this.mainContainer?.children.length) {
       this.fitContainerToScreen();
       this.app?.renderer?.render?.(this.app.stage);
     }
@@ -491,6 +494,10 @@ export class SliceView implements ISliceView {
    * This method is only needed for edge cases requiring manual resize.
    */
   private onResize(): void {
+    // A resize can be scheduled (or observed) just before the view is disposed;
+    // by the time it runs the PIXI application and its GL state are gone.
+    if (this.disposed || !this.app?.renderer) return;
+
     // PIXI's resizeTo option handles renderer.resize() automatically
     // We only need to re-fit container and force re-render
 
@@ -516,12 +523,25 @@ export class SliceView implements ISliceView {
    * Uses requestAnimationFrame to ensure DOM layout is settled before calculating sizes.
    */
   public handleResize(): void {
-    // Use double RAF to ensure DOM layout is fully settled
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
+    if (this.disposed) return;
+    // Use double RAF to ensure DOM layout is fully settled. Both frame ids are
+    // tracked so dispose() can cancel them before they touch freed GL state.
+    const outer = requestAnimationFrame(() => {
+      this.pendingFrames.delete(outer);
+      if (this.disposed) return;
+      const inner = requestAnimationFrame(() => {
+        this.pendingFrames.delete(inner);
+        if (this.disposed) return;
         this.onResize();
       });
+      this.pendingFrames.add(inner);
     });
+    this.pendingFrames.add(outer);
+  }
+
+  /** Whether dispose() has been called on this view. */
+  public get isDisposed(): boolean {
+    return this.disposed;
   }
 
   /**
@@ -569,6 +589,64 @@ export class SliceView implements ISliceView {
     if (idx >= 0) this.layers.splice(idx, 1);
     // re-render to reflect removal
     this.renderSlice();
+  }
+
+  /**
+   * Changes the canvas clear colour (and optionally its alpha) without
+   * rebuilding the view, e.g. when the host switches between a light and a
+   * dark ground.
+   *
+   * @param color - PIXI numeric colour, e.g. 0xfafaf7.
+   * @param alpha - Clear alpha in [0, 1]; unchanged when omitted.
+   */
+  public setBackground(color: number, alpha?: number): void {
+    this.options.backgroundColor = color;
+    if (alpha !== undefined) this.options.backgroundAlpha = Math.max(0, Math.min(1, alpha));
+    if (this.disposed || !this.app?.renderer) return;
+    const renderer = this.app.renderer as unknown as {
+      background?: { color: unknown; alpha: number };
+      backgroundColor?: number;
+      backgroundAlpha?: number;
+    };
+    if (renderer.background) {
+      // PIXI v7.2+ / v8 BackgroundSystem
+      renderer.background.color = color;
+      if (this.options.backgroundAlpha !== undefined) renderer.background.alpha = this.options.backgroundAlpha;
+    } else {
+      // Older renderers expose plain properties.
+      renderer.backgroundColor = color;
+      if (this.options.backgroundAlpha !== undefined) renderer.backgroundAlpha = this.options.backgroundAlpha;
+    }
+    this.redraw();
+  }
+
+  /** The current canvas clear colour and alpha. */
+  public getBackground(): { color: number; alpha: number } {
+    return {
+      color: this.options.backgroundColor ?? 0x000000,
+      alpha: this.options.backgroundAlpha ?? 1,
+    };
+  }
+
+  /**
+   * Looks up an overlay layer by the id it was added under (e.g. 'crosshair').
+   */
+  public getLayer(id: string): SliceLayer | undefined {
+    return this.layersMap.get(id);
+  }
+
+  /**
+   * Re-lays out screen-space overlays and renders the stage without rebuilding
+   * slice textures. Use after restyling an overlay in place.
+   */
+  public redraw(): void {
+    if (this.disposed || !this.app?.renderer) return;
+    if (this.mainContainer?.children.length) {
+      this.fitContainerToScreen();
+    }
+    if (typeof this.app.renderer.render === 'function') {
+      this.app.renderer.render(this.app.stage);
+    }
   }
 
   /**
@@ -707,6 +785,12 @@ export class SliceView implements ISliceView {
   public dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+
+    // Cancel resize frames scheduled by handleResize() that have not run yet.
+    if (typeof cancelAnimationFrame === 'function') {
+      this.pendingFrames.forEach(id => cancelAnimationFrame(id));
+    }
+    this.pendingFrames.clear();
 
     // Clean up ResizeObserver
     if (this.resizeObserver) {
