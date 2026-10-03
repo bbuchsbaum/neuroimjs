@@ -19,6 +19,9 @@ in the pull request that makes the change.
 - `readVol` and the other NIfTI readers work when the library runs inside a
   `vm` context without a dynamic-import hook (vitest/vite-node on Node < 26,
   Jest). They failed with `ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING`.
+- `OrthogonalImageViewer` handles ArrowLeft/ArrowRight only when focus is on the
+  page itself or inside one of its slice panes, so sliders and text fields
+  elsewhere on the page keep their arrow keys. (#3)
 
 ### Security
 
