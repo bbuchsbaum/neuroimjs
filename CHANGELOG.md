@@ -62,6 +62,12 @@ in the pull request that makes the change.
   construction (`VolLayer` uses `makeObservable`), maps world coordinates
   without mirroring, forwards display setters, and keeps the wrapped layer's id.
   (#11, fixes #7)
+- The crosshair is drawn through the centre of the voxel it marks, not half a
+  voxel off, and a click anywhere inside a texel selects that voxel. **API
+  change:** the image-pixel methods of `SliceTransform` and
+  `CoordinateTransformer` now use texel-centre coordinates (voxel `c` maps to
+  pixel `c + 0.5`); the new `SliceTransform.sliceToImageCoord` /
+  `imageToSliceCoord` implement the convention. (#9)
 
 ### Security
 

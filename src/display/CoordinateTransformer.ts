@@ -104,17 +104,10 @@ export class CoordinateTransformer implements ICoordinateTransformer {
     screenY: number,
     mainContainer: PIXI.Container
   ): { x: number; y: number } {
-    // First get image coordinates in pixels
+    // First get image coordinates in pixels, then convert to slice mm
+    // (voxel centres sit on texel centres; see SliceTransform.imageToSliceCoord)
     const imageCoord = this.screenToImageCoord(screenX, screenY, mainContainer);
-    
-    // Get pixel spacing (mm per pixel) from SliceTransform
-    const [xSpacing, ySpacing] = this.sliceTransform.pixelSpacing;
-    
-    // Scale the coordinates by pixel spacing to get mm
-    return {
-      x: imageCoord.x * xSpacing,
-      y: imageCoord.y * ySpacing
-    };
+    return this.sliceTransform.imageToSliceCoord(imageCoord);
   }
 
   /**
@@ -203,10 +196,7 @@ export class CoordinateTransformer implements ICoordinateTransformer {
     const imagePt = mainContainer.toLocal(new PIXI.Point(screenX, screenY));
     // Convert pixels → mm, then validate and map to volume
     return this.sliceTransform.sliceToVolumeCoordSafe(
-      {
-        x: imagePt.x * this.sliceTransform.pixelSpacing[0],
-        y: imagePt.y * this.sliceTransform.pixelSpacing[1]
-      },
+      this.sliceTransform.imageToSliceCoord({ x: imagePt.x, y: imagePt.y }),
       options
     );
   }
@@ -223,10 +213,7 @@ export class CoordinateTransformer implements ICoordinateTransformer {
   ): number[] | null {
     // Pixels → mm then validate via SliceTransform
     return this.sliceTransform.sliceToVolumeCoordSafe(
-      {
-        x: imagePt.x * this.sliceTransform.pixelSpacing[0],
-        y: imagePt.y * this.sliceTransform.pixelSpacing[1]
-      },
+      this.sliceTransform.imageToSliceCoord(imagePt),
       options
     );
   }
@@ -243,8 +230,7 @@ export class CoordinateTransformer implements ICoordinateTransformer {
   ): { x: number; y: number } | null {
     const slicePt = this.sliceTransform.volumeToSliceCoordSafe(volCoord, options);
     if (!slicePt) return null;
-    const [sx, sy] = this.sliceTransform.pixelSpacing;
-    return { x: slicePt.x / sx, y: slicePt.y / sy };
+    return this.sliceTransform.sliceToImageCoord(slicePt);
   }
 
   /**
