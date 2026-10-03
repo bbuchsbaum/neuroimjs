@@ -19,11 +19,20 @@ const log = getLogger('atlas');
  */
 export interface AtlasMetadata {
   name: string;
+  /**
+   * Region names, one per id. These need not be unique: Glasser and Schaefer
+   * use the same region name in both hemispheres.
+   */
   labels: string[];
   ids: number[];
   cmap: number[][];
   hemi?: string[];
   network?: string[];
+  /**
+   * Unique, hemisphere-qualified names as they appear in the atlas' label file
+   * (e.g. `Left_V1`, `7Networks_LH_Vis_1`). When present they key the
+   * volume's label map; otherwise `labels` do.
+   */
   origLabels?: string[];
   dimensions?: number[];
   spacing?: number[];
@@ -79,6 +88,12 @@ export class NeuroAtlas {
 
   /**
    * Retrieves an ROI by label or id.
+   *
+   * `label` is looked up first among the unique label-map keys (`origLabels`
+   * when the atlas has them, e.g. `Left_V1`), then among the region names in
+   * `labels`. A region name shared by several regions (e.g. `V1`, present in
+   * both hemispheres) is ambiguous and throws; use the qualified name or `id`.
+   *
    * @param params Object containing either 'label' or 'id'.
    */
   public getROI(params: { label?: string; id?: number }): ROIVol | null {
@@ -88,11 +103,7 @@ export class NeuroAtlas {
 
     let targetId: number | undefined;
     if (params.label) {
-      // Use labelMap to get ID from label
-      targetId = this.atlas.labelMap[params.label];
-      if (targetId === undefined) {
-        throw new Error(`Label '${params.label}' not found in atlas.`);
-      }
+      targetId = this.resolveLabel(params.label);
     } else if (params.id !== undefined) {
       targetId = params.id;
       // Check if the ID exists in the cluster map
@@ -114,6 +125,39 @@ export class NeuroAtlas {
 
     // ROI_improved.ROIVol signature: (data, space, coords)
     return new ROIVol(data, this.atlas.space, coords);
+  }
+
+  /**
+   * Resolve a label (unique label-map key or unambiguous region name) to an id.
+   */
+  private resolveLabel(label: string): number {
+    const direct = this.atlas.labelMap[label];
+    if (direct !== undefined) return direct;
+    const matches: number[] = [];
+    this.labels.forEach((name, i) => {
+      if (name === label) matches.push(i);
+    });
+    if (matches.length === 1) return this.ids[matches[0]];
+    if (matches.length > 1) {
+      const names = matches.map(i => this.origLabels?.[i] ?? String(this.ids[i]));
+      throw new Error(
+        `Label '${label}' is ambiguous in atlas ${this.name}: it names ${matches.length} regions ` +
+          `(${names.join(', ')}). Use one of those names or an id.`
+      );
+    }
+    throw new Error(`Label '${label}' not found in atlas.`);
+  }
+
+  /**
+   * Build the label map (unique label -> id) for atlas metadata. Keys are
+   * `origLabels` when present, since region names repeat across hemispheres.
+   */
+  private static labelMapFor(metadata: AtlasMetadata): LabelMap {
+    const labelMap: LabelMap = {};
+    metadata.ids.forEach((id, index) => {
+      labelMap[metadata.origLabels?.[index] ?? metadata.labels[index]] = id;
+    });
+    return labelMap;
   }
 
   /**
@@ -158,7 +202,7 @@ export class NeuroAtlas {
     // Add other atlas labels with potentially offset IDs
     otherAtlas.ids.forEach((id, index) => {
       const newId = offset ? id + offset : id;
-      const label = otherAtlas.labels[index];
+      const label = otherAtlas.origLabels?.[index] ?? otherAtlas.labels[index];
       mergedLabelMap[label] = newId;
     });
 
@@ -205,7 +249,7 @@ export class NeuroAtlas {
   private extractLabelMapFromAtlas(otherAtlas: NeuroAtlas): LabelMap {
     const labelMap: LabelMap = {};
     otherAtlas.ids.forEach((id, index) => {
-      labelMap[otherAtlas.labels[index]] = id;
+      labelMap[otherAtlas.origLabels?.[index] ?? otherAtlas.labels[index]] = id;
     });
     return labelMap;
   }
@@ -286,12 +330,7 @@ export class NeuroAtlas {
 
     const space = new NeuroSpace(dimensions, spacing);
 
-    // Create labelMap from metadata.ids and metadata.labels
-    // LabelMap maps labels (strings) to IDs (numbers)
-    const labelMap: LabelMap = {};
-    metadata.ids.forEach((id, index) => {
-      labelMap[metadata.labels[index]] = id;
-    });
+    const labelMap = NeuroAtlas.labelMapFor(metadata);
 
     const atlasVol = NeuroAtlas.clusteredFromLabels(space, toInt32Labels(atlasData), labelMap);
 
@@ -352,14 +391,11 @@ export class NeuroAtlas {
       ids,
       cmap,
       hemi,
+      // `Right_V1` / `Left_V1`: unique keys for the label map.
+      origLabels: labels,
     };
 
-    // Create labelMap from metadata.ids and metadata.labels
-    // LabelMap maps labels (strings) to IDs (numbers)
-    const labelMap: LabelMap = {};
-    metadata.ids.forEach((id, index) => {
-      labelMap[metadata.labels[index]] = id;
-    });
+    const labelMap = NeuroAtlas.labelMapFor(metadata);
 
     // Convert labels by value; any integer or integral float datatype works.
     const atlasVolInt32 = toInt32Labels(atlasVol);
@@ -449,12 +485,7 @@ export class NeuroAtlas {
       spacing: atlasVol.space.spacing,
     };
 
-    // Create labelMap from metadata.ids and metadata.labels
-    // LabelMap maps labels (strings) to IDs (numbers)
-    const labelMap: LabelMap = {};
-    metadata.ids.forEach((id, index) => {
-      labelMap[metadata.labels[index]] = id;
-    });
+    const labelMap = NeuroAtlas.labelMapFor(metadata);
 
     // Convert labels by value; any integer or integral float datatype works.
     const atlasVolInt32 = toInt32Labels(atlasVol);

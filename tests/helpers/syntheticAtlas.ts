@@ -203,11 +203,16 @@ const NETWORK_NAMES: Record<7 | 17, string[]> = {
 export function schaeferLut(parcels: number, networks: 7 | 17): string {
   const names = NETWORK_NAMES[networks];
   const rows: string[] = [];
+  // As in the published LUTs, <k> counts parcels within each hemisphere and
+  // network, so the same `<Net>_<k>` occurs in both hemispheres.
+  const counts = new Map<string, number>();
   for (let id = 1; id <= parcels; id++) {
     const hemi = id <= parcels / 2 ? 'LH' : 'RH';
     const net = names[(id - 1) % names.length];
+    const k = (counts.get(`${hemi}_${net}`) ?? 0) + 1;
+    counts.set(`${hemi}_${net}`, k);
     const rgb = [(id * 37) % 256, (id * 91) % 256, (id * 151) % 256];
-    rows.push(`${id}\t${networks}Networks_${hemi}_${net}_${id}\t${rgb.join('\t')}\t0`);
+    rows.push(`${id}\t${networks}Networks_${hemi}_${net}_${k}\t${rgb.join('\t')}\t0`);
   }
   return rows.join('\n') + '\n';
 }

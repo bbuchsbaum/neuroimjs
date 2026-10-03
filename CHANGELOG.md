@@ -28,6 +28,14 @@ in the pull request that makes the change.
 
 - `partition(x, k, method, mask, seed)` throws `RangeError` for a NaN or
   infinite `seed`; such seeds were previously coerced to 0.
+- The label map of a Glasser or Schaefer `NeuroAtlas` (`atlas.atlas.labelMap`,
+  and the labels returned by `getClusterInfo`/`getClusterLabel`) is keyed by
+  the hemisphere-qualified names from the label file, e.g. `Right_V1` /
+  `Left_V1` and `7Networks_LH_Vis_1`. `loadGlasserAtlas` now sets
+  `origLabels` to those names; `labels` still holds the bare region names.
+  `getROI({ label })` accepts either form, but a bare name shared by both
+  hemispheres (`V1`) now throws an ambiguity error instead of returning the
+  left-hemisphere region.
 
 ### Fixed
 
@@ -37,6 +45,9 @@ in the pull request that makes the change.
   `RangeError` for an odd voxel count) and Glasser threw `Unsupported data type`
   for int8, uint8 and int16. Labels made non-integer by `scl_slope`/`scl_inter`
   now raise an error instead of being rounded silently. (#13)
+- Right-hemisphere Glasser and Schaefer regions can be looked up by label.
+  The label map was keyed by region name, which both hemispheres share, so each
+  left-hemisphere entry replaced its right-hemisphere twin.
 - `readVol` reads uint16 NIfTI volumes (datatype 512) as `UInt16NeuroVol`; it
   threw `Unsupported TypedArray type: uint16`.
 - `loadSchaeferAtlas` no longer writes diagnostics to the console; they go to
