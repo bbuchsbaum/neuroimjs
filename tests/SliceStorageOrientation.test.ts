@@ -6,11 +6,13 @@
 
 import { describe, it, expect } from 'vitest';
 import { NeuroSpace } from '../src/geometry/NeuroSpace';
-import { AxisSet3D } from '../src/geometry/Axis';
+import { AxisSet3D, NamedAxis } from '../src/geometry/Axis';
 import { FloatNeuroVol } from '../src/volume/DenseNeuroVol';
 import { VolLayer } from '../src/display/VolLayer';
 import { SliceModel } from '../src/display/SliceModel';
 import { ColorMap } from '../src/display/ColorMap';
+import { SparseNeuroVol } from '../src/sparse/SparseNeuroVol';
+import { NeuroVol } from '../src/volume/NeuroVol';
 
 const DIM = [19, 23, 17];
 
@@ -131,3 +133,58 @@ describe('slice extraction is independent of storage order', () => {
     expect(rgba(makeVolume(rpiSpace(), true, pattern))).toEqual(want);
   });
 });
+
+// Every storage order with flipped in-plane axes, as dense and sparse volumes.
+// LAI and RAI flip the posterior-anterior axis, which is the pinned axis of
+// the coronal view.
+const STORAGE = [
+  ['RPI', true, false],
+  ['LAI', false, true],
+  ['RAI', true, true],
+] as const;
+
+function storedSpace(flipX: boolean, flipY: boolean): NeuroSpace {
+  const axes = new AxisSet3D(
+    flipX ? NamedAxis.RIGHT_LEFT : NamedAxis.LEFT_RIGHT,
+    flipY ? NamedAxis.ANT_POST : NamedAxis.POST_ANT,
+    NamedAxis.INF_SUP
+  );
+  const sx = flipX ? -2 : 2;
+  const sy = flipY ? -2 : 2;
+  const ox = flipX ? 18 : -18;
+  const oy = flipY ? 22 : -22;
+  return new NeuroSpace(DIM, [2, 2, 2], [ox, oy, -16], axes,
+    [[sx, 0, 0, ox], [0, sy, 0, oy], [0, 0, 2, -16], [0, 0, 0, 1]]);
+}
+
+function storedVolume(flipX: boolean, flipY: boolean): FloatNeuroVol {
+  const [nx, ny, nz] = DIM;
+  const data = new Float32Array(nx * ny * nz);
+  for (let k = 0; k < nz; k++)
+    for (let j = 0; j < ny; j++)
+      for (let i = 0; i < nx; i++)
+        data[i + nx * (j + ny * k)] = value(flipX ? nx - 1 - i : i, flipY ? ny - 1 - j : j, k);
+  return new FloatNeuroVol(storedSpace(flipX, flipY), data);
+}
+
+describe.each(STORAGE)('%s storage gives the LPI slices', (_name, flipX, flipY) => {
+  const sliceIndexAt = (vol: NeuroVol, axes: AxisSet3D, world: number[]) =>
+    Math.round(vol.space.coordToGrid(world)[vol.space.whichDim(axes.k)]);
+  const worlds = [[-14, 4, 2], [10, -20, 14], [0, 18, -16], [18, 22, 16]];
+
+  it.each([
+    ['dense', (v: FloatNeuroVol): NeuroVol => v],
+    ['sparse', (v: FloatNeuroVol): NeuroVol => SparseNeuroVol.fromDense(v)],
+  ] as const)('%s', (_kind, wrap) => {
+    const reference = lpi();
+    const vol = wrap(storedVolume(flipX, flipY));
+    for (const [, axes] of VIEWS) {
+      for (const world of worlds) {
+        const want = reference.getSlice(sliceIndexAt(reference, axes, world), axes);
+        const got = vol.getSlice(sliceIndexAt(vol, axes, world), axes);
+        expect(Array.from(got.data)).toEqual(Array.from(want.data));
+      }
+    }
+  });
+});
+
