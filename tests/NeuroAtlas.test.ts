@@ -7,9 +7,12 @@ import { ROIVol } from '../src/roi/ROI_improved';
 import { useSyntheticAtlasDownloads } from './helpers/syntheticAtlas';
 
 // The Glasser/Schaefer loaders download their files. Serve synthetic files with
-// the published geometry and label formats instead, unless
-// NEUROIMJS_NETWORK_TESTS=1 asks for the real downloads.
-beforeAll(() => useSyntheticAtlasDownloads());
+// the published datatypes, affines and label formats instead, unless
+// NEUROIMJS_NETWORK_TESTS=1 asks for the real downloads. These tests check
+// labels, ids and colours, not geometry, so the small grid suffices; the
+// published grids are exercised in tests/atlas/labelDatatypes.test.ts,
+// DenseNeuroVol.test.ts and SliceTransform.test.ts.
+beforeAll(() => useSyntheticAtlasDownloads({ grid: 'small' }));
 
 describe('NeuroAtlas', () => {
   let mockAtlasVol: ClusteredNeuroVol;

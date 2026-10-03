@@ -9,8 +9,10 @@ import { toInt32Labels } from '../../src/atlas/labels';
 import { Downloader } from '../../src/utils/Downloader';
 import {
   GLASSER_SPEC,
+  SMALL_GLASSER_SPEC,
   buildLabelVolume,
   schaeferSpec,
+  smallSchaeferSpec,
   syntheticAtlasText,
   type LabelVolumeOptions,
   type LabelVolumeSpec,
@@ -19,9 +21,16 @@ import {
 
 type Loader = 'glasser' | 'schaefer';
 
+// Small grids keep each file's datatype, spacing and affine; their voxel
+// counts are odd (23x27x21, 21x25x19), which made the old int16 path throw.
 const SPECS: Record<Loader, LabelVolumeSpec> = {
+  glasser: SMALL_GLASSER_SPEC,
+  schaefer: smallSchaeferSpec(2),
+};
+
+// The published grids (97x115x97, 91x109x91), for one end-to-end case each.
+const PUBLISHED_SPECS: Record<Loader, LabelVolumeSpec> = {
   glasser: GLASSER_SPEC,
-  // 91x109x91: an odd voxel count, which made the old int16 path throw.
   schaefer: schaeferSpec(2),
 };
 
@@ -40,9 +49,10 @@ async function load(
   loader: Loader,
   datatype: NiftiLabelDatatype,
   nLabels: number,
-  options: LabelVolumeOptions = {}
+  options: LabelVolumeOptions = {},
+  spec: LabelVolumeSpec = SPECS[loader]
 ): Promise<NeuroAtlas> {
-  volume = buildLabelVolume({ ...SPECS[loader], datatype }, nLabels, options);
+  volume = buildLabelVolume({ ...spec, datatype }, nLabels, options);
   return loader === 'glasser'
     ? NeuroAtlas.loadGlasserAtlas(false)
     : NeuroAtlas.loadSchaeferAtlas({ parcels: 100, networks: 7, resolution: 2, useCache: false });
@@ -65,8 +75,13 @@ function expectedLabels(spec: LabelVolumeSpec, nLabels: number): Int32Array {
   return out;
 }
 
-function expectLabels(atlas: NeuroAtlas, loader: Loader, nLabels: number): void {
-  const expected = expectedLabels(SPECS[loader], nLabels);
+function expectLabels(
+  atlas: NeuroAtlas,
+  loader: Loader,
+  nLabels: number,
+  spec: LabelVolumeSpec = SPECS[loader]
+): void {
+  const expected = expectedLabels(spec, nLabels);
   const actual = atlas.atlas.getData();
   expect(actual.length).toBe(expected.length);
   // Compare in bulk; toEqual on ~1M-element arrays is slow.
@@ -93,6 +108,12 @@ describe.each<Loader>(['glasser', 'schaefer'])('%s loader label datatypes', load
   it.each(CASES)('converts %s label volumes by value', async (_name, datatype, nLabels) => {
     const atlas = await load(loader, datatype, nLabels);
     expectLabels(atlas, loader, nLabels);
+  });
+
+  it('converts an int16 volume on the published grid', async () => {
+    const spec = PUBLISHED_SPECS[loader];
+    const atlas = await load(loader, 4, 100, {}, spec);
+    expectLabels(atlas, loader, 100, spec);
   });
 
   it('honours scl_slope/scl_inter applied by the reader (int16 * 2 - 4)', async () => {

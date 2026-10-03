@@ -179,7 +179,8 @@ export function buildLabelVolume(
     }
   }
 
-  const gz = pako.gzip(new Uint8Array(buf));
+  // Fastest compression: the fixtures only need to be valid gzip.
+  const gz = pako.gzip(new Uint8Array(buf), { level: 1 });
   return gz.buffer.slice(gz.byteOffset, gz.byteOffset + gz.byteLength) as ArrayBuffer;
 }
 
@@ -217,10 +218,37 @@ export function schaeferLut(parcels: number, networks: 7 | 17): string {
   return rows.join('\n') + '\n';
 }
 
-export async function syntheticAtlasBuffer(url: string): Promise<ArrayBuffer> {
-  if (GLASSER_VOLUME.test(url)) return buildLabelVolume(GLASSER_SPEC, 360);
+/**
+ * Grid for synthetic atlas volumes: `'published'` mirrors the real files'
+ * geometry (~1M voxels for Glasser360, 7.2M for Schaefer 1 mm); `'small'`
+ * keeps each file's datatype, spacing and affine but uses a grid of a few
+ * thousand voxels (odd voxel count), large enough for 1000 parcels. Use
+ * `'small'` where only labels, not geometry, matter.
+ */
+export type SyntheticGrid = 'published' | 'small';
+
+/** {@link GLASSER_SPEC} on a small 23x27x21 grid (odd voxel count). */
+export const SMALL_GLASSER_SPEC: LabelVolumeSpec = { ...GLASSER_SPEC, dims: [23, 27, 21] };
+
+/** {@link schaeferSpec} on a small grid (odd voxel count, room for 1000 parcels). */
+export function smallSchaeferSpec(resolution: 1 | 2): LabelVolumeSpec {
+  const dims: [number, number, number] = resolution === 1 ? [25, 29, 23] : [21, 25, 19];
+  return { ...schaeferSpec(resolution), dims };
+}
+
+export async function syntheticAtlasBuffer(
+  url: string,
+  grid: SyntheticGrid = 'published'
+): Promise<ArrayBuffer> {
+  const small = grid === 'small';
+  if (GLASSER_VOLUME.test(url)) {
+    return buildLabelVolume(small ? SMALL_GLASSER_SPEC : GLASSER_SPEC, 360);
+  }
   const m = SCHAEFER_VOLUME.exec(url);
-  if (m) return buildLabelVolume(schaeferSpec(Number(m[3]) as 1 | 2), Number(m[1]));
+  if (m) {
+    const res = Number(m[3]) as 1 | 2;
+    return buildLabelVolume(small ? smallSchaeferSpec(res) : schaeferSpec(res), Number(m[1]));
+  }
   throw new Error(`syntheticAtlasBuffer: no offline fixture for ${url}`);
 }
 
@@ -235,10 +263,17 @@ export async function syntheticAtlasText(url: string): Promise<string> {
  * Route atlas downloads to the synthetic fixtures unless
  * NEUROIMJS_NETWORK_TESTS=1. Call from a `beforeAll`; the spies are restored
  * by `vi.restoreAllMocks()` or the returned function.
+ *
+ * @param options.grid - `'published'` (default) or `'small'`; see {@link SyntheticGrid}.
  */
-export function useSyntheticAtlasDownloads(): () => void {
+export function useSyntheticAtlasDownloads(
+  options: { grid?: SyntheticGrid } = {}
+): () => void {
   if (NETWORK_TESTS) return () => undefined;
-  const buffer = vi.spyOn(Downloader, 'downloadBuffer').mockImplementation(syntheticAtlasBuffer);
+  const grid = options.grid ?? 'published';
+  const buffer = vi
+    .spyOn(Downloader, 'downloadBuffer')
+    .mockImplementation(url => syntheticAtlasBuffer(url, grid));
   const text = vi.spyOn(Downloader, 'downloadText').mockImplementation(syntheticAtlasText);
   return () => {
     buffer.mockRestore();

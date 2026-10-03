@@ -2,7 +2,7 @@
  * Randomness in analysis/atlas code comes from a seedable generator
  * (src/utils/rng.ts) instead of Math.random.
  */
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRng, resolveRng, randomIndex } from '../src/utils/rng';
 import { randomSearchlight, bootstrapSearchlight } from '../src/searchlight/searchlight';
 import { NeuroAtlas, GLASSER_DEFAULT_COLOR_SEED } from '../src/atlas/NeuroAtlas';
@@ -46,11 +46,15 @@ describe('createRng', () => {
 
   it('returns numbers in [0, 1)', () => {
     const r = createRng(7);
+    let min = Infinity;
+    let max = -Infinity;
     for (let i = 0; i < 10000; i++) {
       const v = r();
-      expect(v).toBeGreaterThanOrEqual(0);
-      expect(v).toBeLessThan(1);
+      if (v < min) min = v;
+      if (v > max) max = v;
     }
+    expect(min).toBeGreaterThanOrEqual(0);
+    expect(max).toBeLessThan(1);
   });
 
   it('matches the mulberry32 reference sequence used by partition()', () => {
@@ -158,7 +162,10 @@ describe('bootstrapSearchlight seeding', () => {
 });
 
 describe('Glasser atlas colours', () => {
-  beforeAll(() => useSyntheticAtlasDownloads());
+  // Colours do not depend on the grid; a small one keeps these loads fast.
+  beforeEach(() => {
+    useSyntheticAtlasDownloads({ grid: 'small' });
+  });
 
   it('same seed gives identical colours', async () => {
     const a = await NeuroAtlas.loadGlasserAtlas({ seed: 21 });
