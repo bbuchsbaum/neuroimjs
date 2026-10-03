@@ -84,6 +84,15 @@ describe('OrthogonalImageViewer', () => {
     expect(viewer.currentCoord).toHaveLength(3);
   });
 
+  test('per-view image layers inherit the alignment strategy', async () => {
+    imageLayer.setAlignmentStrategy('world');
+    viewer = await OrthogonalImageViewer.create({ container, imageLayer });
+
+    const strategies: Array<string | undefined> = [];
+    viewer.applyToImageLayers(layer => strategies.push(layer.getAlignmentOptions().strategy));
+    expect(strategies).toEqual(['world', 'world', 'world', 'world']);
+  });
+
   test('should initialize with center coordinate', async () => {
     viewer = await OrthogonalImageViewer.create({
       container,

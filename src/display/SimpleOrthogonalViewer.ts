@@ -13,6 +13,7 @@ import type { SlicePointerEvent } from './types/display';
 import type { OrientationLabelOptions } from './OrientationLabelLayer';
 import type { CrossHairOptions } from './CrossHair';
 import type { ViewerTheme } from './ViewerTheme';
+import type { AlignmentStrategyType } from './alignment/AlignmentManager';
 
 export type LayoutMode = 'left-tall' | 'top-bottom' | 'ortho';
 
@@ -40,6 +41,15 @@ export interface SimpleOrthogonalViewerOptions {
   stackedLegendHeightPx?: number;
   /** 'ortho' layout: stacked views as a column or one at a time. */
   stackMode?: 'column' | 'single';
+  /**
+   * How layers that are not on the first layer's voxel grid are placed.
+   * 'world' slices each one on its own grid and draws it at its true world
+   * position (e.g. a 2 mm statistical map over a 1 mm template); this is the
+   * default. 'auto' restores the earlier heuristic fit, which fits slice
+   * bounds and reuses the first layer's slice index. Can be changed later with
+   * {@link SimpleOrthogonalViewer.setAlignmentStrategy}.
+   */
+  alignmentStrategy?: AlignmentStrategyType;
 }
 
 /**
@@ -103,6 +113,7 @@ export class SimpleOrthogonalViewer {
     options?: SimpleOrthogonalViewerOptions
   ): Promise<SimpleOrthogonalViewer> {
     const imageLayer = new ImageLayer(volStack);
+    if (options?.alignmentStrategy) imageLayer.setAlignmentStrategy(options.alignmentStrategy);
     imageLayer.initialize();
 
     const wrapper = new SimpleOrthogonalViewer(container, imageLayer);
@@ -270,6 +281,8 @@ export class SimpleOrthogonalViewer {
 
   /**
    * Read the nearest raw voxel value for a layer at a world coordinate.
+   * Each layer is read on its own voxel grid, so layers on different grids
+   * each report their own voxel at the same world position.
    * Returns null when the coordinate is outside the volume or the voxel is not finite.
    */
   getValue(layerId: string, worldCoord: number[] = this.getWorldCoord()): number | null {
