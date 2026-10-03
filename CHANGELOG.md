@@ -19,6 +19,10 @@ in the pull request that makes the change.
 - `readVol` and the other NIfTI readers work when the library runs inside a
   `vm` context without a dynamic-import hook (vitest/vite-node on Node < 26,
   Jest). They failed with `ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING`.
+- Volumes not stored LPI (e.g. RPI, LAI, RAI) are no longer mirrored in the
+  coronal and sagittal views: `DenseNeuroVol.getSlice` and
+  `SparseNeuroVol.getSlice` use their LPI-only fast paths only for LPI-stored
+  sources, and slice indices are taken in the volume's own voxel order. (#10)
 
 ### Security
 
