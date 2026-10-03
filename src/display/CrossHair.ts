@@ -187,4 +187,32 @@ export class CrossHair implements SliceLayer {
   public setCrosshairGap(gap: number): void {
     this.crosshairGap = gap;
   }
+
+  /**
+   * Updates any subset of the crosshair styling in place (e.g. to follow a
+   * light/dark theme switch) and redraws against the last viewport layout.
+   * The owning view still has to render the stage for the change to show;
+   * {@link SliceViewer.setCrosshairStyle} does both.
+   */
+  public setStyle(options: CrossHairOptions): void {
+    if (options.crossColor !== undefined) this.crossColor = options.crossColor;
+    if (options.crossAlpha !== undefined) this.crosshairAlpha = options.crossAlpha;
+    if (options.crossThickness !== undefined) this.crossThickness = options.crossThickness;
+    if (options.crosshairGap !== undefined) this.crosshairGap = options.crosshairGap;
+    if (options.haloColor !== undefined) this.haloColor = options.haloColor;
+    if (options.haloAlpha !== undefined) this.haloAlpha = options.haloAlpha;
+    if (this.lastCtx) this.layoutScreen(this.lastCtx);
+  }
+
+  /** The styling currently in effect. */
+  public getStyle(): Required<Pick<CrossHairOptions, 'crossColor' | 'crossAlpha' | 'crossThickness' | 'crosshairGap' | 'haloColor' | 'haloAlpha'>> {
+    return {
+      crossColor: this.crossColor,
+      crossAlpha: this.crosshairAlpha,
+      crossThickness: this.crossThickness,
+      crosshairGap: this.crosshairGap,
+      haloColor: this.haloColor,
+      haloAlpha: this.haloAlpha,
+    };
+  }
 }

@@ -9,6 +9,11 @@ in the pull request that makes the change.
 
 ### Added
 
+- `setTheme()`, `setBackground()`, `setCrosshairStyle()` and
+  `setOrientationLabelStyle()` on the slice viewers restyle the background,
+  crosshair and orientation labels in place, without rebuilding the viewer;
+  `ViewerTheme` is exported. `SimpleOrthogonalViewer.setBackground()` now
+  changes the rendered clear colour. (#4)
 - Alignment strategy `'world'`: a layer on a different voxel grid from layer 0
   (voxel size, dimensions or origin) is sliced on its own grid at the plane
   nearest the reference plane and drawn at its world position. It is left out
@@ -22,6 +27,10 @@ in the pull request that makes the change.
   runtime dependency, reads `navigator` when it loads, so `require('neuroimjs')`
   and `import 'neuroimjs'` already threw `ReferenceError: navigator is not
   defined` on Node 20, which reached end of life in April 2026.
+- The display logger starts at WARN instead of DEBUG, so viewers no longer flood
+  the host console. Opt in with `NEUROIMJS_LOG_LEVEL` / `NEUROIMJS_DEBUG`
+  (global or environment variable) or `setLogLevel()` / `enableDebugLogging()`;
+  the logging controls are exported from both entry points. (#5)
 - **Behaviour change:** `ImageLayer` defaults to `alignmentStrategy: 'world'`
   (was `'auto'`), also when alignment options omit `strategy`. Overlays on a
   different grid from layer 0 were previously drawn at the reference slice index
@@ -34,6 +43,13 @@ in the pull request that makes the change.
 - `readVol` and the other NIfTI readers work when the library runs inside a
   `vm` context without a dynamic-import hook (vitest/vite-node on Node < 26,
   Jest). They failed with `ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING`.
+- Disposing a `SliceView` or `OrthogonalImageViewer` cancels its pending resize
+  frames, so a resize just before `dispose()` no longer runs against the
+  destroyed PIXI application. `OrthogonalImageViewer.dispose()` is idempotent
+  and `SliceView.isDisposed` is new. (#2)
+- `OrthogonalImageViewer` handles ArrowLeft/ArrowRight only when focus is on the
+  page itself or inside one of its slice panes, so sliders and text fields
+  elsewhere on the page keep their arrow keys. (#3)
 - A pooled sprite reused as a reference sprite no longer keeps the position and
   pivot of its previous use as an offset overlay (`SpritePool.acquire` resets
   them). (#6)

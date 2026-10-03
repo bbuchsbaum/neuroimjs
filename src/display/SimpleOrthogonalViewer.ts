@@ -12,6 +12,7 @@ import { EventEmitter } from './EventEmitter';
 import type { SlicePointerEvent } from './types/display';
 import type { OrientationLabelOptions } from './OrientationLabelLayer';
 import type { CrossHairOptions } from './CrossHair';
+import type { ViewerTheme } from './ViewerTheme';
 import type { AlignmentStrategyType } from './alignment/AlignmentManager';
 
 export type LayoutMode = 'left-tall' | 'top-bottom' | 'ortho';
@@ -302,13 +303,51 @@ export class SimpleOrthogonalViewer {
     return this.viewer.getSliceViewer(view).view.getCanvas();
   }
 
-  // Background (applied per sub-view)
-  setBackground(color: number): void {
-    const css = `#${(color >>> 0).toString(16).padStart(6, '0')}`;
+  /**
+   * Changes the canvas clear colour of every view in place, without a rebuild.
+   *
+   * @param color - PIXI numeric colour, e.g. 0x111619.
+   * @param alpha - Optional clear alpha in [0, 1].
+   */
+  setBackground(color: number, alpha?: number): void {
+    this.viewer.setBackground(color, alpha);
+    this.syncCanvasBackground(color);
+  }
+
+  // Keep the canvas element background in step for hosts that render with a
+  // transparent clear colour.
+  private syncCanvasBackground(color: number): void {
+    const css = `#${(color >>> 0).toString(16).padStart(6, '0').slice(-6)}`;
     (['axial', 'sagittal', 'coronal'] as const).forEach(v => {
       const canvas = this.viewer.getSliceViewer(v).view.getCanvas();
       (canvas as HTMLCanvasElement).style.background = css;
     });
+  }
+
+  /**
+   * Restyles the crosshair in every view (colour, alpha, halo, width, gap).
+   * Omitted fields keep their current value.
+   */
+  setCrosshairStyle(options: CrossHairOptions): void {
+    this.viewer.setCrosshairStyle(options);
+  }
+
+  /**
+   * Restyles the orientation labels in every view (colour, alpha, stroke,
+   * shadow, font). Omitted fields keep their current value.
+   */
+  setOrientationLabelStyle(options: OrientationLabelOptions): void {
+    this.viewer.setOrientationLabelStyle(options);
+  }
+
+  /**
+   * Applies a (partial) theme — background, crosshair and orientation-label
+   * styling — in place. Switching a viewer between a light and a dark ground
+   * no longer requires disposing and re-creating it.
+   */
+  setTheme(theme: ViewerTheme): void {
+    this.viewer.setTheme(theme);
+    if (theme.backgroundColor !== undefined) this.syncCanvasBackground(theme.backgroundColor);
   }
 
   // Runtime crosshair toggle across all views
