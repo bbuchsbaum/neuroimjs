@@ -99,7 +99,9 @@ export {
   clusteredSearchlight,
   bootstrapSearchlight,
 } from './searchlight/searchlight';
-export type { SearchlightOptions } from './searchlight/searchlight';
+export type { SearchlightOptions, RandomSearchlightOptions } from './searchlight/searchlight';
+export { createRng } from './utils/rng';
+export type { Rng, RandomOptions } from './utils/rng';
 
 // Overlay review / subject consistency helpers
 export {

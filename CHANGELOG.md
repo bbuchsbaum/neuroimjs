@@ -13,6 +13,16 @@ in the pull request that makes the change.
   `Int32Array` by value, for every typed-array datatype. It rejects
   non-finite, non-integer and out-of-range values with an error naming the
   voxel. (#13)
+- `createRng(seed)` returns a seeded generator (mulberry32) of numbers in
+  [0, 1); `Rng` and `RandomOptions` are exported.
+- `randomSearchlight(mask, radius, { seed, rng })` and
+  `bootstrapSearchlight(mask, radius, iter, { seed, rng })` take an options
+  argument for reproducible centers. Without one, each call still draws a
+  fresh seed, so successive calls give different searchlights as before.
+- `NeuroAtlas.loadGlasserAtlas({ useCache, seed, rng })` chooses the random
+  region colours from a seeded generator. By default it uses
+  `GLASSER_DEFAULT_COLOR_SEED`, so colours are now the same on every load;
+  `loadGlasserAtlas(useCache)` still works.
 
 ### Fixed
 

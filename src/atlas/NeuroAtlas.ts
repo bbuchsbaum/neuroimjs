@@ -10,6 +10,7 @@ import { read_vol } from '../io/nifti'; // Ensure this import is correct
 import { deepEqual } from '../utils/deepEqual';
 import { getLogger } from '../display/logging/Logger';
 import { toInt32Labels } from './labels';
+import { resolveRng, type RandomOptions } from '../utils/rng';
 
 const log = getLogger('atlas');
 
@@ -36,6 +37,21 @@ export interface SchaeferAtlasOptions {
   useCache?: boolean;
 }
 
+/**
+ * Options for {@link NeuroAtlas.loadGlasserAtlas}.
+ *
+ * The Glasser label file has no colours, so each region gets a random colour.
+ * `seed` or `rng` choose the colours; without either the default seed
+ * {@link GLASSER_DEFAULT_COLOR_SEED} is used, so colours are the same on every
+ * load.
+ */
+export interface GlasserAtlasOptions extends RandomOptions {
+  /** Use cached downloads when available (default true). */
+  useCache?: boolean;
+}
+
+/** Seed for the Glasser region colours when no `seed` or `rng` is given. */
+export const GLASSER_DEFAULT_COLOR_SEED = 360;
 
 /**
  * NeuroAtlas Class
@@ -284,9 +300,20 @@ export class NeuroAtlas {
 
   /**
    * Static method to load the Glasser atlas.
-   * @param useCache Whether to use cached data if available.
+   *
+   * Region colours are drawn from a seeded generator (see
+   * {@link GlasserAtlasOptions}); they are reproducible, and identical across
+   * loads unless a different `seed` or `rng` is passed.
+   *
+   * @param options Options, or a boolean for `useCache` (the former signature).
    */
-  public static async loadGlasserAtlas(useCache = true): Promise<NeuroAtlas> {
+  public static async loadGlasserAtlas(
+    options: boolean | GlasserAtlasOptions = {}
+  ): Promise<NeuroAtlas> {
+    const opts: GlasserAtlasOptions =
+      typeof options === 'boolean' ? { useCache: options } : options;
+    const useCache = opts.useCache ?? true;
+    const rng = resolveRng(opts, GLASSER_DEFAULT_COLOR_SEED);
     const atlasUrl = 'https://github.com/PennBBL/xcpEngine/raw/master/atlas/glasser360/glasser360MNI.nii.gz';
     const labelsUrl = 'https://github.com/PennBBL/xcpEngine/raw/master/atlas/glasser360/glasser360NodeNames.txt';
 
@@ -315,7 +342,7 @@ export class NeuroAtlas {
 
     const labels = labelsData.trim().split('\n').map(line => line.trim());
     const ids = labels.map((_, index) => index + 1);
-    const cmap = ids.map(() => [Math.random() * 255, Math.random() * 255, Math.random() * 255]); // Random colors
+    const cmap = ids.map(() => [rng() * 255, rng() * 255, rng() * 255]); // Random colors
     const hemi = labels.map(label => label.split('_')[0].toLowerCase());
     const region = labels.map(label => label.split('_')[1]);
 

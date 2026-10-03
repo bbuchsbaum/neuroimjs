@@ -32,6 +32,14 @@ import {
 } from 'neuroimjs'
 ```
 
+`randomSearchlight` and `bootstrapSearchlight` draw a fresh seed on every call. Pass a seed (or your own generator) to make the centers reproducible:
+
+```ts
+const tiles = randomSearchlight(mask, 6, { seed: 42 })
+const boot = bootstrapSearchlight(mask, 8, 200, { seed: 42 })
+// or share one generator across calls: { rng: createRng(42) }
+```
+
 ::: tip Radius units
 The radius is interpreted in **millimeters** and is spacing-aware per axis, so it behaves correctly on anisotropic volumes — not just isotropic 1 mm data.
 :::
