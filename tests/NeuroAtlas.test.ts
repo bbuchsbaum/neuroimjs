@@ -1,9 +1,15 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
 import { NeuroAtlas } from '../src/atlas/NeuroAtlas';
 import { ClusteredNeuroVol } from '../src/volume/ClusteredNeuroVol';
 import { LogicalNeuroVol } from '../src/volume/LogicalNeuroVol';
 import { NeuroSpace } from '../src/geometry/NeuroSpace';
 import { ROIVol } from '../src/roi/ROI_improved';
+import { useSyntheticAtlasDownloads } from './helpers/syntheticAtlas';
+
+// The Glasser/Schaefer loaders download their files. Serve synthetic files with
+// the published geometry and label formats instead, unless
+// NEUROIMJS_NETWORK_TESTS=1 asks for the real downloads.
+beforeAll(() => useSyntheticAtlasDownloads());
 
 describe('NeuroAtlas', () => {
   let mockAtlasVol: ClusteredNeuroVol;

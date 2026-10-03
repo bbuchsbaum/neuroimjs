@@ -47,7 +47,11 @@ Unit and integration tests for neuroimjs using Vitest with jsdom environment. Te
 
 ### Working In This Directory
 - Always import mocks from `tests/mocks/` when testing display code.
-- Test data lives in `tests/data/volumes/` — the MNI152 template is available.
+- Test data lives in `tests/data/volumes/` (git-ignored). The vitest/Playwright global setup
+  (`scripts/prepare-test-data.mjs`) copies the MNI152 template there from the committed
+  `docs/public/data/mni152_t1.nii.gz`; run it directly if a script needs the file.
+- Tests must not need the network. Atlas loader tests use `tests/helpers/syntheticAtlas.ts`;
+  `NEUROIMJS_NETWORK_TESTS=1` switches them to the real downloads.
 - Use `TestVolumeFactory` from `src/testing/` for creating test volumes.
 - Vitest with jsdom — no real DOM or WebGL available.
 

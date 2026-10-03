@@ -1,50 +1,14 @@
-import { describe, it, expect, beforeAll, vi } from 'vitest';
+import { describe, it, expect, beforeAll } from 'vitest';
 import { NeuroAtlas } from '../src/atlas/NeuroAtlas';
 import { AxisSet3D } from '../src/geometry/Axis';
-import { NeuroSpace } from '../src/geometry/NeuroSpace';
-import { DenseNeuroVol, FloatNeuroVol } from '../src/volume/DenseNeuroVol';
+import { useSyntheticAtlasDownloads } from './helpers/syntheticAtlas';
 
-// Mock the Downloader and Cache to avoid actual network requests
-vi.mock('../utils/Downloader', () => ({
-  Downloader: {
-    downloadBuffer: vi.fn().mockResolvedValue(new ArrayBuffer(100)),
-    downloadText: vi.fn().mockResolvedValue(`1\t17Networks_LH_VisCent_ExStr_1\t255\t0\t0
-2\t17Networks_LH_VisCent_ExStr_2\t255\t0\t0
-3\t17Networks_LH_VisCent_ExStr_3\t255\t0\t0
-4\t17Networks_LH_VisCent_ExStr_4\t255\t0\t0
-5\t17Networks_LH_VisCent_ExStr_5\t255\t0\t0`),
-  }
-}));
-
-vi.mock('../utils/Cache', () => ({
-  Cache: {
-    getInstance: vi.fn().mockReturnValue({
-      get: vi.fn().mockReturnValue(null),
-      set: vi.fn(),
-    }),
-  }
-}));
-
-// Mock read_vol to return a simple volume
-vi.mock('../io/nifti', () => ({
-  read_vol: vi.fn().mockImplementation(() => {
-    // Create a simple 10x10x10 volume with RPI orientation
-    const space = new NeuroSpace(
-      [10, 10, 10],
-      [2, 2, 2],
-      [90, -126, -72], // Origin similar to Schaefer atlas
-      AxisSet3D.AXIAL_RPI // RPI orientation
-    );
-    
-    // Create a simple volume with values equal to their index
-    const data = new Float32Array(10 * 10 * 10);
-    for (let i = 0; i < data.length; i++) {
-      data[i] = i;
-    }
-    
-    return new FloatNeuroVol(space, data);
-  }),
-}));
+// The Schaefer loader downloads its files. Serve a synthetic file with the
+// published 2 mm geometry (91x109x91, RPI, origin [90, -126, -72]) unless
+// NEUROIMJS_NETWORK_TESTS=1. (The vi.mock calls that used to sit here named
+// '../utils/...' paths relative to tests/, so they never applied and this test
+// silently depended on the network.)
+beforeAll(() => useSyntheticAtlasDownloads());
 
 describe('DenseNeuroVol', () => {
   let atlas: NeuroAtlas;

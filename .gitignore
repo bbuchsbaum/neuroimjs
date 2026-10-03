@@ -65,8 +65,10 @@ examples/output/
 # ...except the small sample volume the docs site ships for its live demos.
 !docs/public/data/*.nii.gz
 
-# Playwright snapshots
-e2e/**/*-snapshots/
+# Playwright snapshots: only the Linux baselines are committed (CI renders on
+# ubuntu-latest); other platforms' baselines stay local.
+e2e/**/*-snapshots/*
+!e2e/**/*-snapshots/*-linux.png
 
 # Documentation site (VitePress + TypeDoc)
 docs/.vitepress/dist/

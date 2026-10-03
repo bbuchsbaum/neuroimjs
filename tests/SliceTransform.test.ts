@@ -4,6 +4,7 @@ import { NamedAxis, AxisSet3D } from '../src/geometry/Axis';
 import { NeuroAtlas } from '../src/atlas/NeuroAtlas';
 import { NeuroSpace } from '../src/geometry/NeuroSpace';
 import { SliceTransform } from '../src/display/SliceTransform';
+import { useSyntheticAtlasDownloads } from './helpers/syntheticAtlas';
 
 describe('SliceTransform.sliceToVolumeCoord (Vitest)', () => {
   // Helper to create a simple 3D NeuroSpace with the given axes, dims, and spacing
@@ -663,6 +664,9 @@ describe('MNI Template Volume Space', () => {
     let atlasSpace: NeuroSpace | null = null;
   
     beforeAll(async () => {
+      // Offline unless NEUROIMJS_NETWORK_TESTS=1: the synthetic file has the
+      // published Schaefer 2 mm geometry (see tests/helpers/syntheticAtlas.ts).
+      useSyntheticAtlasDownloads();
       // 1) Load the Schaefer atlas with resolution=2, 400 parcels, 17 networks
       const schaeferAtlas = await NeuroAtlas.loadSchaeferAtlas({
         parcels: 400,
