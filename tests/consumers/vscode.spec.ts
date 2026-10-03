@@ -30,7 +30,7 @@ test('known gap: <layer-control-panel> lists overlays added to its volStack late
   // selector. Expected to fail until the panel observes VolStack mutations;
   // Playwright reports it as unexpectedly passing once that is fixed, at which
   // point drop test.fail().
-  test.fail(true, 'LayerControlPanel does not observe VolStack#addLayer');
+  test.fail(true, 'bd-01M41YY40G9ZGA6958PXB7NSVX: LayerControlPanel does not observe VolStack#addLayer');
   const report = await runContractPage(page, '/vscode.html', STEPS);
   expect(report.results.addOverlay).toMatchObject({ panelListsOverlay: true });
 });

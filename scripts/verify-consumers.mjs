@@ -72,7 +72,32 @@ const log = message => console.log(`[consumers ${((Date.now() - started) / 1000)
 const consumer = createPackedConsumer({ prefix: 'neuroimjs-consumers-', name: 'neuroimjs-consumer-contracts' });
 const { consumerRoot, tarballName, run } = consumer;
 let server;
+let playwright;
 let status = 1;
+let finished = false;
+
+// Idempotent teardown: stop the server and any test run, remove the temp
+// project (unless asked to keep it).
+function teardown() {
+  if (finished) return;
+  finished = true;
+  playwright?.kill('SIGTERM');
+  server?.close();
+  if (process.env.NEUROIMJS_KEEP_CONSUMER) {
+    log(`kept ${consumer.temporaryRoot}`);
+  } else {
+    consumer.cleanup();
+  }
+}
+
+// Interrupted runs must not leave $TMPDIR/neuroimjs-consumers-* behind.
+for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143]]) {
+  process.on(signal, () => {
+    log(`${signal}: cleaning up`);
+    teardown();
+    process.exit(code);
+  });
+}
 
 try {
   log(`installed ${tarballName} into ${consumerRoot}`);
@@ -142,7 +167,7 @@ try {
   server = await serve(siteRoot);
   const { port } = server.address();
   // Async spawn: the static server lives in this process's event loop.
-  const playwright = spawn(process.execPath, [
+  playwright = spawn(process.execPath, [
     join(repositoryRoot, 'node_modules', '@playwright', 'test', 'cli.js'),
     'test',
     '--config',
@@ -167,12 +192,8 @@ try {
   console.error(error instanceof Error ? error.message : error);
   status = 1;
 } finally {
-  server?.close();
-  if (process.env.NEUROIMJS_KEEP_CONSUMER) {
-    log(`kept ${consumer.temporaryRoot}`);
-  } else {
-    consumer.cleanup();
-  }
+  playwright = undefined; // already exited
+  teardown();
 }
 
 process.exit(status);

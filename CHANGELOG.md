@@ -7,6 +7,27 @@ in the pull request that makes the change.
 
 ## Unreleased
 
+### Fixed
+
+- The browser bundles are built with a relative base, so the ES bundle refers
+  to the scatter-field worker chunk relative to itself
+  (`new URL('assets/...', import.meta.url)`) instead of the origin root
+  (`/assets/...`). Apps that re-bundle `dist/neuroimjs.es.js` or
+  `neuroimjs/browser` with Vite failed to build against 0.5.0 because the
+  worker entry could not be resolved.
+- `buildScatterFieldAsync()` now builds the field on the main thread when the
+  worker fails to load or run, returns an unreadable message, or exceeds
+  `workerTimeoutMs`; previously these rejected and the synchronous fallback was
+  used only when the `Worker` constructor threw. This covers UMD hosts that do
+  not serve the bundle's `assets/` directory: the UMD bundle resolves the
+  worker URL against the page, not the bundle, so the worker 404s there.
+
+### Added
+
+- Downstream consumer contract tests (`npm run test:consumers`, part of
+  `verify:release` and CI): the call surfaces of neuromosaic, FROIAtlas,
+  neuroimjs-vscode and xnat2bids, run against the packed tarball.
+
 ## 0.5.0 - 2026-10-03
 
 Upgrading from 0.4.0: Node.js 22 or later is required; `ImageLayer` defaults

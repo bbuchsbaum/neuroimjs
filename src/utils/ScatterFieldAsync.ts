@@ -8,10 +8,18 @@ import { buildScatterField } from './ScatterFieldBuilder';
 import { FloatNeuroVol } from '../volume/DenseNeuroVol';
 import { NeuroSpace } from '../geometry/NeuroSpace';
 import { AxisSet3D, matchAxis } from '../geometry/Axis';
+import { getCategoryLogger, LogCategories } from '../display/logging/LoggerConfig';
+
+const logger = getCategoryLogger(LogCategories.WORKER);
 
 /**
  * Build scatter field off the main thread when possible.
  * Returns the same shape as buildScatterField.
+ *
+ * If the worker cannot be constructed, fails to load or run (for example a
+ * UMD host that does not serve the bundle's `assets/` worker chunk), returns
+ * an unreadable message, or exceeds `workerTimeoutMs`, the field is built
+ * synchronously on the main thread instead.
  */
 export function buildScatterFieldAsync(opts: ScatterFieldOptions): Promise<ScatterFieldResult> {
   if (typeof Worker === 'undefined' || opts.reuseBuffer || opts.kernel) {
@@ -28,16 +36,32 @@ export function buildScatterFieldAsync(opts: ScatterFieldOptions): Promise<Scatt
   return new Promise((resolve, reject) => {
     let worker: Worker | undefined;
     let timeout: ReturnType<typeof setTimeout> | undefined;
+    let settled = false;
 
     const cleanup = (): void => {
       if (timeout !== undefined) clearTimeout(timeout);
       worker?.terminate();
     };
 
+    // Main-thread fallback: the worker could not deliver a result.
+    const fallBack = (reason: string, detail?: unknown): void => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      logger.debug(`Scatter field worker unavailable (${reason}); building on the main thread`, detail);
+      try {
+        resolve(buildScatterField(opts));
+      } catch (e) {
+        reject(e);
+      }
+    };
+
     try {
       // @ts-ignore import.meta is only valid in ESM builds; CJS builds will hit the catch and fall back
       worker = new Worker(new URL('./ScatterFieldWorker.ts', import.meta.url), { type: 'module' });
       worker.onmessage = (ev: MessageEvent<ScatterFieldMessage>) => {
+        if (settled) return;
+        settled = true;
         try {
           const msg = ev.data;
           const axes = new AxisSet3D(...msg.volumeMeta.axisNames.map(matchAxis) as [
@@ -66,12 +90,10 @@ export function buildScatterFieldAsync(opts: ScatterFieldOptions): Promise<Scatt
         }
       };
       worker.onerror = (event) => {
-        cleanup();
-        reject(event.error ?? new Error(event.message || 'Scatter field worker failed'));
+        fallBack('error', event?.error ?? event?.message);
       };
       worker.onmessageerror = () => {
-        cleanup();
-        reject(new Error('Scatter field worker returned an unreadable message'));
+        fallBack('unreadable message');
       };
       const axisNames = opts.space.axes.names();
       if (axisNames.length !== 3) {
@@ -91,19 +113,12 @@ export function buildScatterFieldAsync(opts: ScatterFieldOptions): Promise<Scatt
         combine: opts.combine,
       };
       timeout = setTimeout(() => {
-        cleanup();
-        reject(new Error(`Scatter field worker timed out after ${workerTimeoutMs} ms`));
+        fallBack(`timed out after ${workerTimeoutMs} ms`);
       }, workerTimeoutMs);
       worker.postMessage(request);
-    } catch {
-      cleanup();
-      // Fallback to sync build if worker construction fails
-      try {
-        const res = buildScatterField(opts);
-        resolve(res);
-      } catch (e) {
-        reject(e);
-      }
+    } catch (error) {
+      // Worker construction or request preparation failed.
+      fallBack('construction failed', error);
     }
   });
 }

@@ -1,7 +1,7 @@
 {
   "name": "neuroimjs",
   "version": "0.5.0",
-  "description": "A neuroimaging library for JavaScript \u2014 volumetric data, NIfTI I/O, spatial transforms, and WebGL orthogonal viewers",
+  "description": "A neuroimaging library for JavaScript — volumetric data, NIfTI I/O, spatial transforms, and WebGL orthogonal viewers",
   "main": "./dist/cjs/index.js",
   "module": "./dist/esm/index.js",
   "types": "./dist/types/index.d.ts",

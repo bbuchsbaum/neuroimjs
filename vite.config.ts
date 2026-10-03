@@ -18,10 +18,13 @@ export default defineConfig({
       },
     },
   },
-  // Relative base: asset URLs in the library bundles (the ScatterField worker
-  // chunk) must resolve next to the bundle via import.meta.url, not against the
-  // host page's origin root, or consumers that re-bundle neuroimjs.es.js (Vite
-  // apps) fail to resolve '/assets/...' and plain <script> hosts 404 it.
+  // Relative base: the ES bundle references the ScatterField worker chunk
+  // relative to import.meta.url ('assets/...'), so consumers that re-bundle
+  // neuroimjs.es.js (Vite apps) can resolve it; with the default '/' base the
+  // build fails on '/assets/...'. The UMD bundle resolves the chunk against
+  // document.baseURI at worker-creation time (the page, not the bundle), so a
+  // UMD host that does not serve assets/ there falls back to building on the
+  // main thread (see buildScatterFieldAsync).
   base: './',
   build: {
     // Do NOT wipe dist: the tsc CJS/ESM/types output (dist/cjs, dist/esm,
