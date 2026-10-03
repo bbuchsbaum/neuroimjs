@@ -18,6 +18,7 @@
  */
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { findAnatomy3D } from '../../src/geometry/Axis';
 import type { NeuroSpace } from '../../src/geometry/NeuroSpace';
@@ -36,6 +37,8 @@ import {
   manifest,
   type ConformanceCase,
   type KnownDiscrepancies,
+  type KnownDiscrepancy,
+  staleKnownEntries,
 } from './manifest';
 
 // ---------------------------------------------------------------------------
@@ -67,15 +70,49 @@ const READVOL_ALL = [
   'readVol: ArrayBuffer input decodes like a path',
   'decoder parity: readVol and readNiftiArrayBuffer agree',
 ];
-const all = (checks: string[], reason: string): Record<string, string> =>
-  Object.fromEntries(checks.map(check => [check, reason]));
+
+/**
+ * The assertion message each check produces when its value genuinely
+ * mismatches nibabel (as opposed to crashing). Used for discrepancies whose
+ * symptom is a wrong value rather than a thrown error.
+ */
+const AXCODES_MISMATCH = /^expected \[ '[LR]', '[AP]', '[SI]' \] to deeply equal \[ '[LR]', '[AP]', '[SI]' \]$/;
+const MISMATCH: Record<string, RegExp> = {
+  'readHeader: affine matches nibabel get_best_affine': /^readHeader\.affine: element \d+ = /,
+  'readVol: affine and dims (every volume)': /^volume \d+: affine: element \d+ = /,
+  'readVol: spacing equals affine voxel sizes': /^spacing: element \d+ = /,
+  'readVol: grid <-> world matches nibabel apply_affine': /^readVol: gridToCoord\([^)]*\): element \d+ = /,
+  'readVol: orientation matches nibabel aff2axcodes': AXCODES_MISMATCH,
+  'readVol: reorient to RAS matches nibabel as_closest_canonical': /^readVol: canonical affine: element \d+ = /,
+  'browser: affine, spacing, grid <-> world': /^browser: affine: element \d+ = /,
+  'browser: orientation matches nibabel aff2axcodes': AXCODES_MISMATCH,
+  'readVec: spatial affine matches nibabel': /^readVec space affine: element \d+ = /,
+};
+
+/** Checks that fail by throwing an error whose message matches `match`. */
+const throwing = (checks: string[], reason: string, match: RegExp): Record<string, KnownDiscrepancy> =>
+  Object.fromEntries(checks.map(check => [check, { reason, match }]));
+
+/** Checks that fail with their own value-mismatch assertion (see MISMATCH). */
+const mismatching = (checks: string[], reason: string): Record<string, KnownDiscrepancy> =>
+  Object.fromEntries(
+    checks.map(check => {
+      const match = MISMATCH[check];
+      if (!match) throw new Error(`no mismatch matcher for check "${check}"`);
+      return [check, { reason, match }];
+    })
+  );
+
+const UINT_THROWS = /^Unsupported TypedArray type: uint(16|32)$/;
+// The all-zero NIfTI-2 srow reaches nearestAnatomy(), which rejects it.
+const SINGULAR_THROWS = /^Invalid matrix input, (columns are degenerate|determinant is 0)$/;
 
 const KNOWN: KnownDiscrepancies = {
-  dtype_uint16_le: all(READVOL_ALL, UINT_READVOL),
-  dtype_uint16_be: all(READVOL_ALL, UINT_READVOL),
-  dtype_uint32_le: all(READVOL_ALL, UINT_READVOL),
-  dtype_uint32_be: all(READVOL_ALL, UINT_READVOL),
-  xform_both_qform_code_higher: all(
+  dtype_uint16_le: throwing(READVOL_ALL, UINT_READVOL, UINT_THROWS),
+  dtype_uint16_be: throwing(READVOL_ALL, UINT_READVOL, UINT_THROWS),
+  dtype_uint32_le: throwing(READVOL_ALL, UINT_READVOL, UINT_THROWS),
+  dtype_uint32_be: throwing(READVOL_ALL, UINT_READVOL, UINT_THROWS),
+  xform_both_qform_code_higher: mismatching(
     [
       'readHeader: affine matches nibabel get_best_affine',
       'readVol: affine and dims (every volume)',
@@ -87,7 +124,7 @@ const KNOWN: KnownDiscrepancies = {
     ],
     PRECEDENCE
   ),
-  xform_none: all(
+  xform_none: mismatching(
     [
       'readHeader: affine matches nibabel get_best_affine',
       'readVol: affine and dims (every volume)',
@@ -99,15 +136,22 @@ const KNOWN: KnownDiscrepancies = {
     ],
     NO_XFORM
   ),
-  vec4d_int16_be_shear: { 'readVec: spatial affine matches nibabel': READVEC_AFFINE },
-  vec4d_int16_sform_oblique: { 'readVec: spatial affine matches nibabel': READVEC_AFFINE },
-  vec4d_float32_qform_negqfac_gz: { 'readVec: spatial affine matches nibabel': READVEC_AFFINE },
+  vec4d_int16_be_shear: mismatching(['readVec: spatial affine matches nibabel'], READVEC_AFFINE),
+  vec4d_int16_sform_oblique: mismatching(['readVec: spatial affine matches nibabel'], READVEC_AFFINE),
+  vec4d_float32_qform_negqfac_gz: mismatching(['readVec: spatial affine matches nibabel'], READVEC_AFFINE),
   nifti2_qform_only: {
-    ...all(READVOL_ALL, NIFTI2_QFORM),
-    'readHeader: affine matches nibabel get_best_affine': NIFTI2_QFORM,
-    'browser: voxel values (every volume)': NIFTI2_QFORM,
-    'browser: affine, spacing, grid <-> world': NIFTI2_QFORM,
-    'browser: orientation matches nibabel aff2axcodes': NIFTI2_QFORM,
+    ...throwing(
+      [
+        ...READVOL_ALL,
+        'browser: voxel values (every volume)',
+        'browser: affine, spacing, grid <-> world',
+        'browser: orientation matches nibabel aff2axcodes',
+      ],
+      NIFTI2_QFORM,
+      SINGULAR_THROWS
+    ),
+    // readHeader does not build a NeuroSpace, so it returns the zero affine instead of throwing.
+    ...mismatching(['readHeader: affine matches nibabel get_best_affine'], NIFTI2_QFORM),
   },
 };
 
@@ -175,6 +219,29 @@ describe(`nibabel conformance manifest (nibabel ${manifest.generator.nibabel}, n
   it('lists only known-discrepancy ids that exist', () => {
     const ids = new Set(manifest.cases.map(c => c.id));
     for (const id of Object.keys(KNOWN)) expect(ids.has(id), id).toBe(true);
+  });
+
+  it('lists only known discrepancies for checks that are actually registered', () => {
+    // Runs after collection, so every conformanceIt registration has happened.
+    expect(staleKnownEntries(KNOWN)).toEqual([]);
+  });
+
+  it('was produced by the committed generator script', () => {
+    const script = readFileSync(join(__dirname, '..', '..', manifest.generator.script));
+    expect(createHash('sha256').update(script).digest('hex')).toBe(manifest.generator.sha256);
+  });
+
+  it('documents the FIXED_FLOAT reference for the NaN-intercept case nibabel cannot load', () => {
+    const nanInter = manifest.cases.find(c => c.id === 'scl_inter_nan');
+    expect(nanInter?.header.scl_slope).toBe(2);
+    expect(nanInter?.header.scl_inter).toBeNull();
+    expect(nanInter?.scaling).toEqual({ slope: 2, inter: 0 });
+    expect(nanInter?.reference_note).toMatch(/FIXED_FLOAT/);
+    // A NaN slope disables scaling: nibabel itself loads this one.
+    const nanSlope = manifest.cases.find(c => c.id === 'scl_slope_nan');
+    expect(nanSlope?.header.scl_slope).toBeNull();
+    expect(nanSlope?.scaling).toEqual({ slope: 1, inter: 0 });
+    expect(nanSlope?.reference_note).toBeUndefined();
   });
 });
 

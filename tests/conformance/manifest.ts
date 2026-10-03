@@ -47,6 +47,11 @@ export interface ConformanceCase {
   canonical: { shape: number[]; affine: Matrix4; axcodes: string[] };
   samples: { ijk: number[]; xyz: number[] }[];
   volumes: { scaled: number[]; unscaled: number[] }[];
+  /**
+   * Present only when nibabel cannot load the file; explains where the
+   * expected values come from instead (e.g. nifti1_io's FIXED_FLOAT rule).
+   */
+  reference_note?: string;
 }
 
 export interface ConformanceManifest {
@@ -146,12 +151,31 @@ export function axcodes(axes: readonly NamedAxis[]): string[] {
 }
 
 /**
- * Known neuroimjs/nibabel discrepancies, keyed by case id then check name.
- * Each entry turns the corresponding test into `it.fails`, so the suite stays
- * green while the bug exists and goes red (prompting removal of the entry)
- * once it is fixed. NEVER loosen a tolerance instead of adding an entry here.
+ * One known neuroimjs/nibabel discrepancy. `reason` is the human-readable bug
+ * description; `match` must match the message of the error the check throws
+ * while the bug exists (an assertion message for value/geometry mismatches,
+ * the thrown error for crashes). A failure for any OTHER reason is reported.
  */
-export type KnownDiscrepancies = Record<string, Record<string, string>>;
+export interface KnownDiscrepancy {
+  reason: string;
+  match: RegExp;
+}
+
+/**
+ * Known discrepancies, keyed by case id (or '*' for every case) then check
+ * name. Each entry turns the check into an expected failure, so the suite
+ * stays green while the bug exists and goes red (prompting removal of the
+ * entry) once it is fixed, or if the check starts failing differently.
+ * NEVER loosen a tolerance instead of adding an entry here.
+ */
+export type KnownDiscrepancies = Record<string, Record<string, KnownDiscrepancy>>;
+
+/** Every (case id, check) pair registered through conformanceIt. */
+export const registeredChecks = new Map<string, Set<string>>();
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 export function conformanceIt(
   known: KnownDiscrepancies,
@@ -159,10 +183,49 @@ export function conformanceIt(
   check: string,
   fn: () => unknown | Promise<unknown>
 ): void {
-  const reason = known[caseId]?.[check] ?? known['*']?.[check];
-  if (reason) {
-    it.fails(`${check} [known discrepancy: ${reason}]`, fn);
-  } else {
+  let checks = registeredChecks.get(caseId);
+  if (!checks) registeredChecks.set(caseId, (checks = new Set()));
+  checks.add(check);
+
+  const entry = known[caseId]?.[check] ?? known['*']?.[check];
+  if (!entry) {
     it(check, fn);
+    return;
   }
+  it(`${check} [known discrepancy: ${entry.reason}]`, async () => {
+    let failure: unknown;
+    try {
+      await fn();
+    } catch (error) {
+      failure = error;
+    }
+    if (failure === undefined) {
+      expect.fail(
+        `known discrepancy no longer reproduces for ${caseId} / "${check}": remove its KNOWN entry`
+      );
+    }
+    const message = errorMessage(failure);
+    if (!entry.match.test(message)) {
+      expect.fail(
+        `${caseId} / "${check}" failed, but not with the known discrepancy ` +
+          `(expected a message matching ${entry.match}): ${message}`
+      );
+    }
+  });
+}
+
+/**
+ * KNOWN entries that name a case or check never registered via
+ * conformanceIt. Call only once collection has finished (inside a test).
+ */
+export function staleKnownEntries(known: KnownDiscrepancies): string[] {
+  const stale: string[] = [];
+  const allChecks = new Set([...registeredChecks.values()].flatMap(set => [...set]));
+  for (const [caseId, checks] of Object.entries(known)) {
+    for (const check of Object.keys(checks)) {
+      const ok = caseId === '*' ? allChecks.has(check) : registeredChecks.get(caseId)?.has(check);
+      if (!ok) stale.push(`${caseId} / ${check}`);
+    }
+  }
+  return stale;
 }

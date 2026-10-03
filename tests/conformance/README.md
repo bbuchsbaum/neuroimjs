@@ -63,10 +63,31 @@ orders of magnitude larger than the 1e-6 tolerance.
 ### Known discrepancies
 
 Mismatches with nibabel are recorded in the `KNOWN` table in
-`nifti.conformance.test.ts`. Each entry gives a precise reason, and its check
-runs as `it.fails`. When a fix lands, the `it.fails` test starts passing, which
-vitest reports as a failure. That failure means the entry must be removed.
-**Do not loosen a tolerance to make a mismatch pass.**
+`nifti.conformance.test.ts`. Each entry has a human-readable `reason` and a
+`match` pattern for the error the check throws while the bug exists. For a
+wrong value this is the check's own mismatch assertion; for a crash it is the
+thrown error, such as `Unsupported TypedArray type: uint16`. The test passes
+only if the check fails with a matching message. It fails in two other cases:
+
+- **The check passes.** The bug is fixed and the entry must be removed.
+- **The check fails for a different reason.** A new problem is hiding behind
+  the known one.
+
+Every `KNOWN` entry must also name a check that is registered for that case.
+A stale entry, such as a typo or a `readVec` check on a 3D case, fails the
+manifest suite. **Do not loosen a tolerance to make a mismatch pass.**
+
+### Cases nibabel cannot load
+
+nibabel 5.3.2 refuses to load `scl_inter_nan` (a valid `scl_slope` of 2 with
+`scl_inter` NaN). It raises `HeaderDataError: Valid slope but invalid
+intercept`. For this case only, the generator computes the expected values
+with nifti1_io's `FIXED_FLOAT` rule instead, which reads a non-finite
+`scl_slope` or `scl_inter` as 0. The expected data are therefore
+`value * 2`. Geometry and the raw header fields still come from nibabel. The
+manifest entry records this in `reference_note`. neuroimjs applies the same
+rule. By contrast, nibabel loads `scl_slope_nan`, where a NaN slope disables
+scaling (and `scl_inter`) entirely.
 
 ## Regenerating the fixtures
 
@@ -86,7 +107,9 @@ numpy 2.1.3. Nothing is installed globally.
   exactly.
 - **Recorded metadata:** the manifest stores the generator's SHA-256, the
   exact command, and the Python, nibabel and numpy versions.
-- **Integrity check:** each case's fixture SHA-256 is checked by the tests.
+- **Integrity check:** the tests check each case's fixture SHA-256, and also
+  check that the generator script's SHA-256 equals `generator.sha256` in the
+  manifest. Editing the generator without regenerating therefore fails.
 
 To add a case, add an `add(...)` entry in `cases()` in the generator,
 regenerate, and review the diff of `manifest.json`. Keep fixtures tiny. The

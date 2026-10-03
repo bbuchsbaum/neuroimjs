@@ -30,6 +30,7 @@ import nibabel as nib
 import numpy as np
 from nibabel.affines import apply_affine, voxel_sizes
 from nibabel.orientations import aff2axcodes
+from nibabel.spatialimages import HeaderDataError
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT_DIR = ROOT / "tests" / "conformance" / "fixtures"
@@ -230,8 +231,42 @@ SAMPLE_VOXELS = [
 ]
 
 
+def load_fixed_float(path: Path):
+    """Load `path` after applying nifti1_io's FIXED_FLOAT rule to the scaling fields.
+
+    nifti1_io.c reads scl_slope and scl_inter through FIXED_FLOAT, which maps
+    any non-finite value to 0. With scl_inter -> 0 a valid slope still scales;
+    with scl_slope -> 0 scaling is disabled. Only the in-memory copy is
+    patched; the committed fixture keeps its original bytes.
+    """
+    data = path.read_bytes()
+    if path.suffix == ".gz":
+        data = gzip.decompress(data)
+    raw = bytearray(data)
+    endian = "<" if struct.unpack("<i", raw[0:4])[0] == 348 else ">"
+    for offset in (N1_SCL_SLOPE, N1_SCL_INTER):
+        (value,) = struct.unpack_from(endian + "f", raw, offset)
+        if not np.isfinite(value):
+            patch_n1(raw, offset, 0.0)
+    return nib.Nifti1Image.from_bytes(bytes(raw))
+
+
 def describe(case_id: str, path: Path, spec: dict) -> dict:
-    img = nib.load(str(path))
+    reference_note = None
+    try:
+        img = nib.load(str(path))
+        if spec.get("fixed_float"):
+            raise SystemExit(f"{case_id}: nibabel now loads this file; drop fixed_float")
+    except HeaderDataError as err:
+        if not spec.get("fixed_float"):
+            raise
+        img = load_fixed_float(path)
+        reference_note = (
+            f"nibabel {nib.__version__} refuses to load this file ({err}). Expected values "
+            "follow nifti1_io's FIXED_FLOAT rule instead: a non-finite scl_slope or "
+            "scl_inter is read as 0, so a valid slope with a NaN intercept scales by "
+            "value * slope. Geometry and raw header fields still come from nibabel."
+        )
     hdr = img.header  # as nibabel interprets it (check_fix applied, scaling moved to dataobj)
     with nib.openers.ImageOpener(str(path)) as fobj:
         raw = type(hdr).from_fileobj(fobj, check=False)  # field values exactly as stored
@@ -269,7 +304,7 @@ def describe(case_id: str, path: Path, spec: dict) -> dict:
 
     canonical = nib.as_closest_canonical(img)
     shape3 = img.shape[:3]
-    return {
+    entry = {
         "id": case_id,
         "description": spec["description"],
         "file": path.relative_to(OUT_DIR).as_posix(),
@@ -320,6 +355,9 @@ def describe(case_id: str, path: Path, spec: dict) -> dict:
         ],
         "_shape3": list(shape3),
     }
+    if reference_note:
+        entry["reference_note"] = reference_note
+    return entry
 
 
 # --------------------------------------------------------------------------
@@ -345,6 +383,7 @@ def cases():
         scode=0,
         patches=None,
         tags=(),
+        fixed_float=False,
     ):
         out.append(
             dict(
@@ -361,6 +400,7 @@ def cases():
                 scode=scode,
                 patches=patches or [],
                 tags=list(tags),
+                fixed_float=fixed_float,
             )
         )
 
@@ -462,6 +502,23 @@ def cases():
         scode=2,
         patches=[(N1_SCL_SLOPE, 0.0), (N1_SCL_INTER, 5.0)],
         tags=["scaling", "edge"],
+    )
+    add(
+        "scl_slope_nan",
+        "scl_slope=NaN (=> no scaling) with a nonzero scl_inter=5",
+        sform=RAS,
+        scode=2,
+        patches=[(N1_SCL_SLOPE, float("nan")), (N1_SCL_INTER, 5.0)],
+        tags=["scaling", "edge"],
+    )
+    add(
+        "scl_inter_nan",
+        "valid scl_slope=2 with scl_inter=NaN (nibabel raises; FIXED_FLOAT reference)",
+        sform=RAS,
+        scode=2,
+        patches=[(N1_SCL_SLOPE, 2.0), (N1_SCL_INTER, float("nan"))],
+        tags=["scaling", "edge"],
+        fixed_float=True,
     )
     add(
         "scl_slope_one_inter_zero",
@@ -695,6 +752,7 @@ def main() -> int:
             "affine": "nibabel header.get_best_affine(): sform if sform_code != 0, else qform if qform_code != 0, else base affine.",
             "samples": "xyz = nibabel.affines.apply_affine(affine, ijk).",
             "null": "NaN or infinite header floats are serialized as null.",
+            "reference_note": "Present only on cases nibabel cannot load; explains where the expected values come from instead.",
         },
         "cases": entries,
     }
