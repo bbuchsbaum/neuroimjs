@@ -87,9 +87,23 @@ export function resolveRng(options: RandomOptions = {}, defaultSeed?: number): R
 }
 
 /**
- * Draw a uniform integer index in [0, n) from `rng`. Clamps to `n - 1` so a
- * custom generator that returns exactly 1 cannot index past the end.
+ * Draw a uniform integer index in [0, n) from `rng`.
+ *
+ * The generator's output is clamped to [0, 1) first, so a custom generator
+ * that returns exactly 1 (or a value slightly outside the range) cannot index
+ * outside the array.
+ *
+ * @throws {RangeError} If `n` is not a positive safe integer, or the generator
+ *   returns a non-finite value.
  */
 export function randomIndex(rng: Rng, n: number): number {
-  return Math.min(n - 1, Math.floor(rng() * n));
+  if (!Number.isSafeInteger(n) || n < 1) {
+    throw new RangeError(`n must be a positive integer, got ${String(n)}`);
+  }
+  const u = rng();
+  if (typeof u !== 'number' || !Number.isFinite(u)) {
+    throw new RangeError(`rng must return finite numbers in [0, 1), got ${String(u)}`);
+  }
+  const clamped = u < 0 ? 0 : u >= 1 ? 1 - Number.EPSILON / 2 : u;
+  return Math.min(n - 1, Math.floor(clamped * n));
 }

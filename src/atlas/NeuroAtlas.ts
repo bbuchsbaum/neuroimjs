@@ -8,7 +8,7 @@ import { Cache } from '../utils/Cache';
 import { TypedArray } from '../types';
 import { read_vol } from '../io/nifti'; // Ensure this import is correct
 import { deepEqual } from '../utils/deepEqual';
-import { getLogger } from '../display/logging/Logger';
+import { getLogger, getLogLevel, LogLevel } from '../display/logging/Logger';
 import { toInt32Labels } from './labels';
 import { resolveRng, type RandomOptions } from '../utils/rng';
 
@@ -459,13 +459,16 @@ export class NeuroAtlas {
     // Convert labels by value; any integer or integral float datatype works.
     const atlasVolInt32 = toInt32Labels(atlasVol);
     const clusteredVol = NeuroAtlas.clusteredFromLabels(atlasVol.space, atlasVolInt32, labelMap);
-    log.debug('Loaded Schaefer atlas', {
-      parcels,
-      networks,
-      labels: ids.length,
-      datatype: atlasVol.getData().constructor.name,
-      range: clusteredVol.getRange(),
-    });
+    if (getLogLevel() <= LogLevel.DEBUG) {
+      // getRange() scans every voxel; only pay for it when DEBUG is on.
+      log.debug('Loaded Schaefer atlas', {
+        parcels,
+        networks,
+        labels: ids.length,
+        datatype: atlasVol.getData().constructor.name,
+        range: clusteredVol.getRange(),
+      });
+    }
 
     // Return the NeuroAtlas
     return new NeuroAtlas(clusteredVol, metadata);

@@ -631,7 +631,10 @@ export function splitScale(
  * @param k - Number of partitions/clusters
  * @param method - Clustering method (currently only "kmeans")
  * @param mask - Optional mask to restrict clustering to specific voxels
+ * @param seed - Seed for the k-means++ initialisation (default 1); the same
+ *   seed gives the same partition. Must be finite.
  * @returns Clustered volume with partition labels
+ * @throws {RangeError} If `seed` is NaN or infinite.
  */
 export function partition(
   x: NeuroVol,

@@ -78,6 +78,25 @@ describe('createRng', () => {
     expect(randomIndex(() => 1, 4)).toBe(3);
     expect(randomIndex(() => 0, 4)).toBe(0);
   });
+
+  it('randomIndex clamps out-of-range generator output on both ends', () => {
+    expect(randomIndex(() => -0.25, 4)).toBe(0);
+    expect(randomIndex(() => 1.5, 4)).toBe(3);
+    expect(randomIndex(() => 0.999999, 1)).toBe(0);
+  });
+
+  it('randomIndex rejects an empty range and non-finite generator output', () => {
+    expect(() => randomIndex(() => 0.5, 0)).toThrow(RangeError);
+    expect(() => randomIndex(() => 0.5, -2)).toThrow(RangeError);
+    expect(() => randomIndex(() => 0.5, 2.5)).toThrow(RangeError);
+    expect(() => randomIndex(() => Number.NaN, 4)).toThrow(RangeError);
+  });
+
+  it('a searchlight driven by a misbehaving rng stays in the mask', () => {
+    const mask = cubeMask();
+    const windows = bootstrapSearchlight(mask, 1, 5, { rng: () => 1 });
+    expect(windows).toHaveLength(5);
+  });
 });
 
 describe('randomSearchlight seeding', () => {

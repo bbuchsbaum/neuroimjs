@@ -24,6 +24,11 @@ in the pull request that makes the change.
   `GLASSER_DEFAULT_COLOR_SEED`, so colours are now the same on every load;
   `loadGlasserAtlas(useCache)` still works.
 
+### Changed
+
+- `partition(x, k, method, mask, seed)` throws `RangeError` for a NaN or
+  infinite `seed`; such seeds were previously coerced to 0.
+
 ### Fixed
 
 - `NeuroAtlas.loadSchaeferAtlas`, `loadGlasserAtlas` and `loadAtlas` accept
