@@ -11,7 +11,7 @@ import { Matrix } from 'ml-matrix';
 import { createNeuroVol } from '../volume/NeuroIm';
 import { ValueError, TypeError as TypeErrorType, SliceTypedArrayType, TypedArray } from '../types';
 import { FileFormat, NIFTIFormat, findDescriptor, getFormat } from './formats';
-import { niftiScaling } from './niftiGeometry';
+import { affineVoxelSizes, niftiScaling } from './niftiGeometry';
 
 type NiftiReaderModule = typeof import('nifti-reader-js');
 
@@ -78,9 +78,17 @@ export interface WriteVolOptions {
 
 /**
  * Header information from neuroimaging file.
+ *
+ * Fields are raw header values, not the interpreted geometry or intensities
+ * that `readVol` produces.
  */
 export interface HeaderInfo {
   dim: number[];
+  /**
+   * Raw `pixdim[1..3]` from the header. This can differ from the voxel sizes
+   * of `affine` (for example when the sform's scaling disagrees with pixdim);
+   * `readVol` sets `space.spacing` from the affine's column norms instead.
+   */
   spacing: number[];
   origin: number[];
   datatype: string;
@@ -500,7 +508,10 @@ function createVolFromBuffer(
   header: any,
   dim: number[]
 ): NeuroVol {
-  const spacing = Array.from(header.pixDims.slice(1, 4)) as number[];
+  // Voxel sizes come from the selected affine (as in readNiftiArrayBuffer and
+  // nibabel), not pixdim[1..3]: pixdim describes the qform and can disagree
+  // with an sform, which would make space.spacing contradict space.trans.
+  const spacing = affineVoxelSizes(header.affine);
   const origin = [header.affine[0][3], header.affine[1][3], header.affine[2][3]] as number[];
   const affine = new Matrix(header.affine);
   const orientation = nearestAnatomy(affine);

@@ -14,6 +14,12 @@ in the pull request that makes the change.
   spec, nibabel), so voxel values are now returned exactly as stored; before,
   every voxel was offset by `scl_inter`. A valid slope still yields
   `value * scl_slope + scl_inter`.
+- `readVol` sets `space.spacing` to the voxel sizes of the selected transform
+  (the column norms of `space.trans`) rather than `pixdim[1..3]`, matching
+  `readNiftiArrayBuffer` and nibabel. Files whose sform scaling differs from
+  pixdim (e.g. an oblique or rescaled sform) previously reported a spacing
+  that contradicted the affine, and the two decoders disagreed.
+  `readHeader().spacing` still returns the raw `pixdim[1..3]`.
 
 ## 0.5.0 - 2026-10-03
 

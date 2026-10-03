@@ -50,9 +50,6 @@ const PRECEDENCE =
 const NO_XFORM =
   'qform_code = sform_code = 0: nibabel returns the Analyze base affine (x flipped, grid centred at 0); ' +
   'neuroimjs returns diag(pixdim) with zero offset (NIfTI-1 "method 1")';
-const SPACING_PIXDIM =
-  "readVol takes NeuroSpace.spacing from pixdim[1..3] rather than the selected affine's column norms " +
-  '(browser decoder uses the column norms), so spacing contradicts space.trans when pixdim describes a different transform';
 const SHEAR_AXES =
   'nearestAnatomy(): orthogonalize() calls ml-matrix col1.mul(dotp), which scales col1 IN PLACE; for ' +
   'non-orthogonal (sheared) affines the i axis is negated (RAS reported as LAS) and reorient() picks the wrong frame';
@@ -80,19 +77,12 @@ const shearAxes = {
   'readVol: reorient to RAS matches nibabel as_closest_canonical': SHEAR_AXES,
   'browser: orientation matches nibabel aff2axcodes': SHEAR_AXES,
 };
-const spacingPixdim = {
-  'readVol: spacing equals affine voxel sizes': SPACING_PIXDIM,
-  'decoder parity: readVol and readNiftiArrayBuffer agree': SPACING_PIXDIM,
-};
 
 const KNOWN: KnownDiscrepancies = {
   dtype_uint16_le: all(READVOL_ALL, UINT_READVOL),
   dtype_uint16_be: all(READVOL_ALL, UINT_READVOL),
   dtype_uint32_le: all(READVOL_ALL, UINT_READVOL),
   dtype_uint32_be: all(READVOL_ALL, UINT_READVOL),
-  xform_both_sform_code_higher: spacingPixdim,
-  xform_both_equal_codes: spacingPixdim,
-  xform_sform_pixdim_mismatch: spacingPixdim,
   xform_both_qform_code_higher: all(
     [
       'readHeader: affine matches nibabel get_best_affine',

@@ -148,6 +148,26 @@ describe('NIfTI read-path correctness', () => {
     }
   });
 
+  it('takes NeuroSpace spacing from the sform column norms, not pixdim, in both decoders', async () => {
+    // Oblique sform (rotation about z) whose voxel sizes (2, 3, 4) deliberately
+    // disagree with pixdim[1..3] = (1, 1, 1).
+    const c = Math.cos(Math.PI / 6);
+    const s = Math.sin(Math.PI / 6);
+    const srow = [
+      [2 * c, -3 * s, 0, 10],
+      [2 * s, 3 * c, 0, 20],
+      [0, 0, 4, 30],
+    ];
+    const buf = buildNiftiInt16({ dims: [2, 2, 2], values: [0, 1, 2, 3, 4, 5, 6, 7], spacing: [1, 1, 1], srow });
+    const nodeVol = await readVol(buf);
+    const browserVol = readNiftiArrayBuffer(buf);
+    for (const vol of [nodeVol, browserVol]) {
+      expect(vol.space.spacing[0]).toBeCloseTo(2, 5);
+      expect(vol.space.spacing[1]).toBeCloseTo(3, 5);
+      expect(vol.space.spacing[2]).toBeCloseTo(4, 5);
+    }
+  });
+
   it('reconstructs an anisotropic, translated affine from the sform', async () => {
     const srow = [
       [2, 0, 0, 100],

@@ -2,7 +2,7 @@ import * as nifti from 'nifti-reader-js';
 import { Matrix } from 'ml-matrix';
 import { nearestAnatomy } from '../geometry/Axis';
 import { NeuroSpace } from '../geometry/NeuroSpace';
-import { niftiScaling } from './niftiGeometry';
+import { affineVoxelSizes, niftiScaling } from './niftiGeometry';
 import type { NeuroVol } from '../volume/NeuroVol';
 import {
   Float64NeuroVol,
@@ -143,9 +143,7 @@ export function readNiftiArrayBuffer(input: ArrayBuffer, options: BrowserNiftiOp
 
   const affineValues = header.affine.map(row => Array.from(row, Number));
   const affine = new Matrix(affineValues);
-  const spacing = [0, 1, 2].map(column =>
-    Math.hypot(affine.get(0, column), affine.get(1, column), affine.get(2, column))
-  );
+  const spacing = affineVoxelSizes(affineValues);
   const origin = [affine.get(0, 3), affine.get(1, 3), affine.get(2, 3)];
   const space = new NeuroSpace(dimensions, spacing, origin, nearestAnatomy(affine), affineValues);
   return createVolume(space, scaledImage(typedImage(image, header), header));

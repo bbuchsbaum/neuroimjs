@@ -18,3 +18,15 @@ export function niftiScaling(rawSlope: unknown, rawInter: unknown): { slope: num
   const inter = Number(rawInter);
   return { slope, inter: Number.isFinite(inter) ? inter : 0 };
 }
+
+/**
+ * Voxel sizes implied by a 4x4 voxel-to-world affine: the Euclidean norms of
+ * its first three columns. This is what nibabel reports as the zooms of the
+ * selected transform. Unlike `pixdim[1..3]` it always agrees with the affine,
+ * including when the sform's scaling differs from pixdim.
+ */
+export function affineVoxelSizes(affine: ArrayLike<ArrayLike<number>>): number[] {
+  return [0, 1, 2].map(column =>
+    Math.hypot(Number(affine[0][column]), Number(affine[1][column]), Number(affine[2][column]))
+  );
+}
