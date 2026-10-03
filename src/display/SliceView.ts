@@ -572,6 +572,64 @@ export class SliceView implements ISliceView {
   }
 
   /**
+   * Changes the canvas clear colour (and optionally its alpha) without
+   * rebuilding the view, e.g. when the host switches between a light and a
+   * dark ground.
+   *
+   * @param color - PIXI numeric colour, e.g. 0xfafaf7.
+   * @param alpha - Clear alpha in [0, 1]; unchanged when omitted.
+   */
+  public setBackground(color: number, alpha?: number): void {
+    this.options.backgroundColor = color;
+    if (alpha !== undefined) this.options.backgroundAlpha = Math.max(0, Math.min(1, alpha));
+    if (this.disposed || !this.app?.renderer) return;
+    const renderer = this.app.renderer as unknown as {
+      background?: { color: unknown; alpha: number };
+      backgroundColor?: number;
+      backgroundAlpha?: number;
+    };
+    if (renderer.background) {
+      // PIXI v7.2+ / v8 BackgroundSystem
+      renderer.background.color = color;
+      if (this.options.backgroundAlpha !== undefined) renderer.background.alpha = this.options.backgroundAlpha;
+    } else {
+      // Older renderers expose plain properties.
+      renderer.backgroundColor = color;
+      if (this.options.backgroundAlpha !== undefined) renderer.backgroundAlpha = this.options.backgroundAlpha;
+    }
+    this.redraw();
+  }
+
+  /** The current canvas clear colour and alpha. */
+  public getBackground(): { color: number; alpha: number } {
+    return {
+      color: this.options.backgroundColor ?? 0x000000,
+      alpha: this.options.backgroundAlpha ?? 1,
+    };
+  }
+
+  /**
+   * Looks up an overlay layer by the id it was added under (e.g. 'crosshair').
+   */
+  public getLayer(id: string): SliceLayer | undefined {
+    return this.layersMap.get(id);
+  }
+
+  /**
+   * Re-lays out screen-space overlays and renders the stage without rebuilding
+   * slice textures. Use after restyling an overlay in place.
+   */
+  public redraw(): void {
+    if (this.disposed || !this.app?.renderer) return;
+    if (this.mainContainer?.children.length) {
+      this.fitContainerToScreen();
+    }
+    if (typeof this.app.renderer.render === 'function') {
+      this.app.renderer.render(this.app.stage);
+    }
+  }
+
+  /**
    * Get the coordinate transformer for this view
    */
   public getCoordinateTransformer(): ICoordinateTransformer {

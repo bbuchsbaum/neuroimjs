@@ -3,6 +3,7 @@ import { SliceViewer } from './SliceViewer';
 import { ImageLayer } from './ImageLayer';
 import { OrientationLabelOptions } from './OrientationLabelLayer';
 import type { CrossHairOptions } from './CrossHair';
+import type { ViewerTheme } from './ViewerTheme';
 import { observable, action, makeObservable, computed, reaction, IReactionDisposer, makeAutoObservable } from 'mobx';
 import { ViewerStateInfo } from './ViewerStateInfo';
 import { arraysNearlyEqual, COORDINATE_EPSILON } from './NumericalUtils';
@@ -752,6 +753,51 @@ export class OrthogonalImageViewer implements ViewerStateInfo {
     Object.values(this.sliceViewers).forEach((viewer) => {
       viewer.setOrientationLabelsVisible(visible, options);
     });
+  }
+
+  /**
+   * Changes the canvas clear colour of every view in place (no rebuild).
+   *
+   * @param color - PIXI numeric colour.
+   * @param alpha - Optional clear alpha in [0, 1].
+   */
+  public setBackground(color: number, alpha?: number): void {
+    this.options.backgroundColor = color;
+    Object.values(this.sliceViewers).forEach(viewer => viewer.setBackground(color, alpha));
+  }
+
+  /**
+   * Restyles the crosshair of every view in place (colour, alpha, halo, width,
+   * gap). Omitted fields keep their current value.
+   */
+  public setCrosshairStyle(options: CrossHairOptions): void {
+    this.options.crosshairOptions = { ...(this.options.crosshairOptions ?? {}), ...options };
+    Object.values(this.sliceViewers).forEach(viewer => viewer.setCrosshairStyle(options));
+  }
+
+  /**
+   * Restyles the orientation labels of every view in place. Omitted fields keep
+   * their current value.
+   */
+  public setOrientationLabelStyle(options: OrientationLabelOptions): void {
+    this.options.orientationLabelOptions = { ...(this.options.orientationLabelOptions ?? {}), ...options };
+    Object.values(this.sliceViewers).forEach(viewer => viewer.setOrientationLabelStyle(options));
+  }
+
+  /**
+   * Applies a (partial) theme — background, crosshair and orientation-label
+   * colours — to every view without rebuilding the viewer, e.g. when the host
+   * switches between a light and a dark ground.
+   */
+  public setTheme(theme: ViewerTheme): void {
+    if (theme.crosshair) {
+      this.options.crosshairOptions = { ...(this.options.crosshairOptions ?? {}), ...theme.crosshair };
+    }
+    if (theme.orientationLabels) {
+      this.options.orientationLabelOptions = { ...(this.options.orientationLabelOptions ?? {}), ...theme.orientationLabels };
+    }
+    if (theme.backgroundColor !== undefined) this.options.backgroundColor = theme.backgroundColor;
+    Object.values(this.sliceViewers).forEach(viewer => viewer.setTheme(theme));
   }
 
   private applyResponsiveLayout(): void {
