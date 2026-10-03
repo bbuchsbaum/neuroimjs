@@ -2,7 +2,7 @@
  * Logger configuration and initialization for display components
  */
 
-import { Logger, LogLevel, CategoryLogger } from './Logger';
+import { Logger, LogLevel, CategoryLogger, parseLogLevel, resolveDefaultLogLevel } from './Logger';
 
 /**
  * Logger categories for display components
@@ -51,10 +51,10 @@ function environmentVariable(name: string): string | undefined {
  */
 export function initializeLogger(): void {
   const isDevelopment = environmentVariable('NODE_ENV') === 'development';
-  const logLevel = environmentVariable('LOG_LEVEL') as keyof typeof LogLevel | undefined;
-  
+  const logLevel = parseLogLevel(environmentVariable('LOG_LEVEL'));
+
   Logger.getInstance({
-    level: logLevel ? LogLevel[logLevel] : (isDevelopment ? LogLevel.DEBUG : LogLevel.INFO),
+    level: logLevel ?? (isDevelopment ? LogLevel.DEBUG : resolveDefaultLogLevel()),
     console: true,
     store: isDevelopment,
     maxEntries: 5000,
@@ -86,7 +86,7 @@ export class PerformanceLogger {
     if (start) {
       const duration = performance.now() - start;
       this.timers.delete(label);
-      this.logger.info(`Completed: ${label}`, {
+      this.logger.debug(`Completed: ${label}`, {
         duration: `${duration.toFixed(2)}ms`,
         ...metadata
       });

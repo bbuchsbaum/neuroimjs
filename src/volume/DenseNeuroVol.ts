@@ -4,7 +4,7 @@ import { NeuroSlice } from './NeuroSlice';
 import { NeuroVol } from './NeuroVol';
 import { AxisSet2D, AxisSet3D } from '../geometry/Axis';
 import { SliceTypedArrayType, TypedArray } from '../types';
-import { VoxelIterator } from './VoxelIterator';
+import { VoxelIterator, computeVoxelMapping } from './VoxelIterator';
 import { createNeuroSlice } from './NeuroIm';
 import { CoronalVoxelIterator, SagittalVoxelIterator } from './VoxelIterator';
 import { extractSliceForView } from '../geometry/SliceHelpers';
@@ -130,8 +130,18 @@ export abstract class DenseNeuroVol implements NeuroVol {
 
   getSlice(zlevel: number, outAxes: AxisSet3D): NeuroSlice {
     const reorientedSpace = this.space.reorient(outAxes);
+
+    // `zlevel` indexes this volume's own grid along the pinned axis (as
+    // SliceModel and extract*Slice compute it). Where outAxes runs that axis
+    // the other way (e.g. the left-right axis of an RPI volume in a sagittal
+    // view), the reoriented grid counts the slices in reverse.
+    const mapping = computeVoxelMapping(reorientedSpace, this.space);
+    const reorientedLevel = mapping.flipSource[2]
+      ? this.space.dim[mapping.sourceDimIndex[2]] - 1 - zlevel
+      : zlevel;
+
     // Use extractSliceForView to properly handle different orientations
-    const sliceSpace = extractSliceForView(reorientedSpace, zlevel, outAxes);
+    const sliceSpace = extractSliceForView(reorientedSpace, reorientedLevel, outAxes);
     if (!sliceSpace) {
       throw new Error("Failed to create slice space");
     }
@@ -142,6 +152,11 @@ export abstract class DenseNeuroVol implements NeuroVol {
     const sliceDims = reorientedSpace.dim.slice();
     sliceDims[2] = 1;
     const [nx, ny] = sliceDims.slice(0, 2);
+
+    // The coronal and sagittal iterators hard-code the index mapping from an
+    // LPI-stored source; any other storage order (e.g. RPI) takes the general
+    // iterator, which derives the permutation and flips from the axes.
+    const sourceIsLPI = AxisSet3D.AXIAL_LPI.equals(this.space.axes);
 
     if (isIdentity && zlevel >= 0 && zlevel < this.dim[2]) {
 
@@ -162,7 +177,7 @@ export abstract class DenseNeuroVol implements NeuroVol {
         sliceData
       );
       return slice;
-    } else if (AxisSet3D.CORONAL_LIP.equals(reorientedSpace.axes)) {
+    } else if (sourceIsLPI && AxisSet3D.CORONAL_LIP.equals(reorientedSpace.axes)) {
 
       const sliceData = new (this.getDataConstructor())(nx * ny);
       let index = 0;
@@ -183,7 +198,7 @@ export abstract class DenseNeuroVol implements NeuroVol {
       );
       return slice;
 
-    } else if (AxisSet3D.SAGITTAL_AIL.equals(reorientedSpace.axes)) {
+    } else if (sourceIsLPI && AxisSet3D.SAGITTAL_AIL.equals(reorientedSpace.axes)) {
 
       const sliceData = new (this.getDataConstructor())(nx * ny);
       let index = 0;
@@ -210,7 +225,7 @@ export abstract class DenseNeuroVol implements NeuroVol {
       let index = 0;
 
       // Use the standard VoxelIterator
-      const voxelIterator = new VoxelIterator(this, reorientedSpace, zlevel);
+      const voxelIterator = new VoxelIterator(this, reorientedSpace, reorientedLevel);
       for (const voxel of voxelIterator) {
         const { sourceIndex3D, inBounds } = voxel;
         const value = inBounds

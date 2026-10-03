@@ -20,10 +20,14 @@ import { NeuroVol } from '../volume/NeuroVol';
  *     functional, or label data).
  *   - Querying slices across all layers, to combine or composite them.
  *
- * Constraints enforced by VolStack:
- *   - All layers must share the same spatial orientation (AxisSet3D).
- *   - All layers must share the same field of view dimensions in the first
- *     three axes (width, height, depth).
+ * Geometry:
+ *   - The first layer is the reference: its NeuroSpace is the stack's space
+ *     and defines slice indices, navigation and image-content space.
+ *   - A layer whose axes differ from the reference's is wrapped in a
+ *     FacadeVolLayer.
+ *   - Layers need not share the reference's voxel grid. How a layer on another
+ *     grid is drawn is decided by the renderer's alignment strategy ('world'
+ *     places it at its true world position; see ImageLayer.renderSlice).
  *   - Each layer must have a unique string ID.
  */
 export class VolStack {

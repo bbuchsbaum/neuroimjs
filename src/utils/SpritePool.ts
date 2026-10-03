@@ -36,6 +36,10 @@ export class SpritePool {
       sprite.alpha = 1;
       sprite.scale.set(1, 1);
       sprite.anchor.set(0, 0);
+      // Placement is per use: a sprite last drawn as an offset overlay must
+      // not carry that offset into its next use as the reference slice.
+      sprite.position?.set?.(0, 0);
+      sprite.pivot?.set?.(0, 0);
       sprite.rotation = 0;
       sprite.tint = 0xFFFFFF;
       

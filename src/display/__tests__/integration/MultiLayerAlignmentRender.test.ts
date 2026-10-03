@@ -323,22 +323,49 @@ describe('Multi-Layer Alignment Test', () => {
       
       const stack = new VolStack(layer1, layer2);
       const imgLayer = new ImageLayer(stack);
+      const getSlice = vi.spyOn(layer2, 'getSlice');
       
       // Use slice 10 which is within bounds for loRes volume (Z dimension of 20)
       const container = imgLayer.renderSlice(10, [100, 100, 10], AxisSet3D.fromStr('XYZ'), new PIXI.Container());
+      expect(getSlice).toHaveBeenCalledWith(2, AxisSet3D.fromStr('XYZ'));
       
       const sprite2 = container!.children[1];
       const alignment = spriteAlignments.get(sprite2);
       
-      // Low res should be scaled based on spacing, not pixel dimensions
-      // With center alignment strategy:
-      // Volume1: spacing [0.8, 0.8, 1.6]
-      // Volume2: spacing [4, 4, 8]
-      // Scale = targetSpacing / refSpacing = 4 / 0.8 = 5
-      // But this might be clamped by maxScale in alignment options
-      const expectedScale = Math.min(4 / 0.8, 10); // 5, clamped by default maxScale of 10
-      expect(alignment!.scale.x).toBeCloseTo(2.6, 1); // Accept the actual value
-      
+      // Both grids are LPI with voxel (0, 0, 0) at world (0, 0, 0), and the
+      // view is LPI, so loRes voxel (m, n, k) lies at reference voxel
+      // (4m / 0.8, 4n / 0.8, 8k / 1.6) = (5m, 5n, 5k). Under the default
+      // 'world' strategy each loRes texel therefore spans 5 reference pixels,
+      // and its centre (5m + 0.5 in reference pixel space) is reached by
+      // position 0.5 * (1 - 5) = -2. Reference plane 10 (z = 16 mm) is loRes
+      // plane 16 / 8 = 2.
+      // This test used to pin a scale of 2.6, which the 'auto' heuristic got by
+      // fitting slice bounds instead of using the voxel spacing. That value
+      // drew the low-resolution map at about half its true size.
+      expect(alignment!.scale.x).toBeCloseTo(5, 10);
+      expect(alignment!.scale.y).toBeCloseTo(5, 10);
+      expect(alignment!.position.x).toBeCloseTo(-2, 10);
+      expect(alignment!.position.y).toBeCloseTo(-2, 10);
+
+      imgLayer.dispose();
+    });
+    
+    it("keeps the old heuristic fit for very different resolutions when 'auto' is requested", () => {
+      const hiRes = createTestBrainVolume([200, 200, 100], [0.8, 0.8, 1.6]);
+      const loRes = createTestBrainVolume([40, 40, 20], [4, 4, 8]);
+      const layer2 = new VolLayer('loRes', loRes, hotColorMap);
+      const stack = new VolStack(new VolLayer('hiRes', hiRes, grayColorMap), layer2);
+      const imgLayer = new ImageLayer(stack, { strategy: 'auto', enableCache: true, maintainAspectRatio: false, maxScale: 10, minScale: 0.1 });
+      const getSlice = vi.spyOn(layer2, 'getSlice');
+
+      const container = imgLayer.renderSlice(10, [100, 100, 10], AxisSet3D.fromStr('XYZ'), new PIXI.Container());
+
+      // 'auto' reuses the reference slice index and fits slice bounds, giving
+      // the 2.6x scale this suite pinned before 'world' became the default
+      // (the true spacing ratio is 5; see the test above).
+      expect(getSlice).toHaveBeenCalledWith(10, AxisSet3D.fromStr('XYZ'));
+      expect(spriteAlignments.get(container!.children[1])!.scale.x).toBeCloseTo(2.6, 1);
+
       imgLayer.dispose();
     });
     
