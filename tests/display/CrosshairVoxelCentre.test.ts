@@ -97,5 +97,12 @@ describe('crosshair and picking use voxel centres', () => {
       expect(transformer.sliceToVolumeCoordSafe(pt, { clamp: true })!.map(Math.round)).toEqual(VOXEL);
     }
     expect(transformer.volumeToLocalSliceCoordSafe(VOXEL)).toEqual({ x: c + 0.5, y: r + 0.5 });
+
+    // Screen -> slice mm agrees with the voxel's own slice mm at its texel
+    // centre. (The PIXI mock has no Point, so stub the screen -> image step.)
+    vi.spyOn(transformer, 'screenToImageCoord').mockReturnValue({ x: c + 0.5, y: r + 0.5 });
+    const xform = new SliceTransform(s, axes, index);
+    expect(transformer.screenToScaledImageCoord(0, 0, new PIXI.Container()))
+      .toEqual(xform.volumeToSliceCoord(VOXEL));
   });
 });

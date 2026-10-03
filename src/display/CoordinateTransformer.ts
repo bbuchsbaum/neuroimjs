@@ -104,17 +104,10 @@ export class CoordinateTransformer implements ICoordinateTransformer {
     screenY: number,
     mainContainer: PIXI.Container
   ): { x: number; y: number } {
-    // First get image coordinates in pixels
+    // First get image coordinates in pixels, then convert to slice mm
+    // (voxel centres sit on texel centres; see SliceTransform.imageToSliceCoord)
     const imageCoord = this.screenToImageCoord(screenX, screenY, mainContainer);
-    
-    // Get pixel spacing (mm per pixel) from SliceTransform
-    const [xSpacing, ySpacing] = this.sliceTransform.pixelSpacing;
-    
-    // Scale the coordinates by pixel spacing to get mm
-    return {
-      x: imageCoord.x * xSpacing,
-      y: imageCoord.y * ySpacing
-    };
+    return this.sliceTransform.imageToSliceCoord(imageCoord);
   }
 
   /**
