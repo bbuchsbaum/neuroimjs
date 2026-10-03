@@ -11,7 +11,11 @@ import { safeDivide, MIN_SPACING } from './NumericalUtils';
  * 
  * Coordinate Systems:
  * - Volume Space: 3D voxel indices [i, j, k]
- * - Slice Space: 2D coordinates [x, y] in millimeters within the slice plane
+ * - Slice Space: 2D coordinates [x, y] in millimeters within the slice plane,
+ *   with voxel centres at multiples of the spacing (0 at the first voxel)
+ * - Image Space: 2D texture coordinates [x, y] in pixels. The slice texture
+ *   occupies [0, width] x [0, height] and texel c covers [c, c + 1], so a voxel
+ *   centre lies at a half-integer pixel coordinate.
  * - World Space: 3D coordinates [x, y, z] in millimeters (LPI convention)
  * 
  * The LPI (Left-Posterior-Inferior) convention is used for world coordinates,
@@ -226,17 +230,7 @@ export class SliceTransform {
    * @returns A 3-element array [i, j, k] in the volume's voxel coordinate system.
    */
   public imageToVolumeCoord(imagePt: { x: number; y: number }): number[] {
-    // Get pixel spacing from volume
-    const [xSpacing, ySpacing] = this.getPixelSpacing();
-    
-    // Convert image pixel coordinates to slice mm coordinates
-    const slicePt = {
-      x: imagePt.x * xSpacing,
-      y: imagePt.y * ySpacing
-    };
-    
-    // Use existing slice to volume conversion
-    return this.sliceToVolumeCoord(slicePt);
+    return this.sliceToVolumeCoord(this.imageToSliceCoord(imagePt));
   }
 
   /**
@@ -247,17 +241,7 @@ export class SliceTransform {
    * @returns A 3-element array [X, Y, Z] in real-world coordinates (mm).
    */
   public imageToWorldCoord(imagePt: { x: number; y: number }): number[] {
-    // Get pixel spacing from volume
-    const [xSpacing, ySpacing] = this.getPixelSpacing();
-    
-    // Convert image pixel coordinates to slice mm coordinates
-    const slicePt = {
-      x: imagePt.x * xSpacing,
-      y: imagePt.y * ySpacing
-    };
-    
-    // Use existing slice to world conversion
-    return this.sliceToWorldCoord(slicePt);
+    return this.sliceToWorldCoord(this.imageToSliceCoord(imagePt));
   }
 
   /**
@@ -268,17 +252,7 @@ export class SliceTransform {
    * @returns { x, y } in image space (in pixels).
    */
   public volumeToImageCoord(volCoord: number[]): { x: number; y: number } {
-    // First convert to slice mm coordinates
-    const slicePt = this.volumeToSliceCoord(volCoord);
-    
-    // Get pixel spacing from volume
-    const [xSpacing, ySpacing] = this.getPixelSpacing();
-    
-    // Then convert from mm to pixels (using safe division)
-    return {
-      x: safeDivide(slicePt.x, xSpacing, 0),
-      y: safeDivide(slicePt.y, ySpacing, 0)
-    };
+    return this.sliceToImageCoord(this.volumeToSliceCoord(volCoord));
   }
 
   /**
@@ -289,16 +263,37 @@ export class SliceTransform {
    * @returns { x, y } in image space (in pixels).
    */
   public worldToImageCoord(worldPt: number[]): { x: number; y: number } {
-    // First convert to slice mm coordinates
-    const slicePt = this.worldToSliceCoord(worldPt);
-    
-    // Get pixel spacing from volume
+    return this.sliceToImageCoord(this.worldToSliceCoord(worldPt));
+  }
+
+  /**
+   * sliceToImageCoord converts slice millimeters to image pixels. Slice mm put
+   * the first voxel's centre at 0, while that voxel's texel spans [0, 1] in
+   * image space, so voxel centres land on texel centres (+0.5 pixel).
+   *
+   * @param slicePt - The { x, y } coordinate in slice space (mm).
+   * @returns { x, y } in image space (in pixels).
+   */
+  public sliceToImageCoord(slicePt: { x: number; y: number }): { x: number; y: number } {
     const [xSpacing, ySpacing] = this.getPixelSpacing();
-    
-    // Then convert from mm to pixels (using safe division)
     return {
-      x: safeDivide(slicePt.x, xSpacing, 0),
-      y: safeDivide(slicePt.y, ySpacing, 0)
+      x: safeDivide(slicePt.x, xSpacing, 0) + 0.5,
+      y: safeDivide(slicePt.y, ySpacing, 0) + 0.5
+    };
+  }
+
+  /**
+   * imageToSliceCoord is the inverse of sliceToImageCoord: image pixels to
+   * slice millimeters, so a point anywhere inside a texel rounds to its voxel.
+   *
+   * @param imagePt - The { x, y } coordinate in image space (in pixels).
+   * @returns { x, y } in slice space (mm).
+   */
+  public imageToSliceCoord(imagePt: { x: number; y: number }): { x: number; y: number } {
+    const [xSpacing, ySpacing] = this.getPixelSpacing();
+    return {
+      x: (imagePt.x - 0.5) * xSpacing,
+      y: (imagePt.y - 0.5) * ySpacing
     };
   }
 

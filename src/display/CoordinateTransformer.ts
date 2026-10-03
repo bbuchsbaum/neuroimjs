@@ -203,10 +203,7 @@ export class CoordinateTransformer implements ICoordinateTransformer {
     const imagePt = mainContainer.toLocal(new PIXI.Point(screenX, screenY));
     // Convert pixels → mm, then validate and map to volume
     return this.sliceTransform.sliceToVolumeCoordSafe(
-      {
-        x: imagePt.x * this.sliceTransform.pixelSpacing[0],
-        y: imagePt.y * this.sliceTransform.pixelSpacing[1]
-      },
+      this.sliceTransform.imageToSliceCoord({ x: imagePt.x, y: imagePt.y }),
       options
     );
   }
@@ -223,10 +220,7 @@ export class CoordinateTransformer implements ICoordinateTransformer {
   ): number[] | null {
     // Pixels → mm then validate via SliceTransform
     return this.sliceTransform.sliceToVolumeCoordSafe(
-      {
-        x: imagePt.x * this.sliceTransform.pixelSpacing[0],
-        y: imagePt.y * this.sliceTransform.pixelSpacing[1]
-      },
+      this.sliceTransform.imageToSliceCoord(imagePt),
       options
     );
   }
@@ -243,8 +237,7 @@ export class CoordinateTransformer implements ICoordinateTransformer {
   ): { x: number; y: number } | null {
     const slicePt = this.sliceTransform.volumeToSliceCoordSafe(volCoord, options);
     if (!slicePt) return null;
-    const [sx, sy] = this.sliceTransform.pixelSpacing;
-    return { x: slicePt.x / sx, y: slicePt.y / sy };
+    return this.sliceTransform.sliceToImageCoord(slicePt);
   }
 
   /**

@@ -668,8 +668,9 @@ export class OrthogonalImageViewer implements ViewerStateInfo {
       if (!transformer || typeof transformer.volumeToLocalSliceCoord !== 'function') return;
       const xs: number[] = [];
       const ys: number[] = [];
-      // Project voxel indices (not edges): a flipped axis maps index v to
-      // dim-1-v, so the pixel span is [min projected, max projected + 1).
+      // Project voxel indices (not edges): each lands on its texel centre and
+      // a flipped axis maps index v to dim-1-v, so the pixel span is
+      // [min projected - 0.5, max projected + 0.5).
       for (const i of [fb.min[0], fb.max[0]]) {
         for (const j of [fb.min[1], fb.max[1]]) {
           for (const k of [fb.min[2], fb.max[2]]) {
@@ -680,7 +681,8 @@ export class OrthogonalImageViewer implements ViewerStateInfo {
         }
       }
       sliceView.setFitRegion({
-        x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs) + 1, y1: Math.max(...ys) + 1,
+        x0: Math.min(...xs) - 0.5, y0: Math.min(...ys) - 0.5,
+        x1: Math.max(...xs) + 0.5, y1: Math.max(...ys) + 0.5,
       });
     });
   }
