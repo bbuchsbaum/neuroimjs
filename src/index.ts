@@ -100,21 +100,6 @@ export type { SliceLayer, ScreenLayoutContext } from './display/SliceLayer';
 export { OrientationLabelLayer } from './display/OrientationLabelLayer';
 export type { OrientationLabelOptions } from './display/OrientationLabelLayer';
 export type { CrossHairOptions } from './display/CrossHair';
-
-// Logging: quiet (WARN) by default; opt in to diagnostics with
-// enableDebugLogging() / setLogLevel('debug') or globalThis.NEUROIMJS_DEBUG.
-export {
-  Logger,
-  LogLevel,
-  DEFAULT_LOG_LEVEL,
-  setLogLevel,
-  getLogLevel,
-  enableDebugLogging,
-  enableConsoleLogging,
-  parseLogLevel,
-} from './display/logging/Logger';
-export type { LogEntry, LoggerOptions, LogLevelName } from './display/logging/Logger';
-
 export type { SliceInterpolation } from './display/VolLayer';
 
 // Export concrete classes for backward compatibility
@@ -326,3 +311,17 @@ export { SliceCoordinator } from './core/SliceCoordinator';
 // test-only helper. Tests import it directly via relative path.
 
 // Add other exports as needed
+
+// Logging: quiet (WARN) by default; opt in to diagnostics with
+// enableDebugLogging() / setLogLevel('debug') or globalThis.NEUROIMJS_DEBUG.
+export {
+  Logger,
+  LogLevel,
+  DEFAULT_LOG_LEVEL,
+  setLogLevel,
+  getLogLevel,
+  enableDebugLogging,
+  enableConsoleLogging,
+  parseLogLevel,
+} from './display/logging/Logger';
+export type { LogEntry, LoggerOptions, LogLevelName } from './display/logging/Logger';
