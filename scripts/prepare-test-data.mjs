@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * Materialise the test data that the unit, browser and example code expect
  * under tests/data/ (which is git-ignored) from files committed to the repo.
