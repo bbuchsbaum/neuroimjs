@@ -1,0 +1,168 @@
+name: Release
+
+# Publishing a GitHub release is the ONLY way a version reaches npm.
+# Manual dispatch runs the identical build and release gate, then
+# `npm publish --dry-run`; it never publishes. See RELEASING.md.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Tag (e.g. v0.6.0) or branch to dry-run. Tags must match package.json.'
+        required: true
+        default: main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.event.release.tag_name || inputs.ref }}
+  cancel-in-progress: false
+
+env:
+  REF: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.ref }}
+
+jobs:
+  build:
+    name: Build and gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      dist_tag: ${{ steps.version.outputs.dist_tag }}
+      tarball: ${{ steps.pack.outputs.tarball }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.REF }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          # No dependency cache in release builds (cache poisoning).
+          package-manager-cache: false
+
+      - name: Check tag matches package.json version
+        id: version
+        shell: bash
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if [[ "$REF" == v[0-9]* ]]; then
+            if [[ "${REF#v}" != "$version" ]]; then
+              echo "::error::Tag $REF does not match package.json version $version"
+              exit 1
+            fi
+          elif [[ "$GITHUB_EVENT_NAME" == "release" ]]; then
+            echo "::error::Release tag '$REF' must look like v<version>"
+            exit 1
+          else
+            echo "::warning::Dry run of non-tag ref '$REF' (package.json version $version)"
+          fi
+          # Prereleases (1.2.0-rc.1) go to the 'next' dist-tag, never 'latest'.
+          if [[ "$version" == *-* ]]; then dist_tag=next; else dist_tag=latest; fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "dist_tag=$dist_tag" >> "$GITHUB_OUTPUT"
+          echo "Releasing neuroimjs@$version with dist-tag '$dist_tag'"
+
+      - run: npm ci
+
+      # The release gate runs here, explicitly, exactly once. `prepublishOnly`
+      # also runs verify:release, so every later npm pack/publish passes
+      # --ignore-scripts: the gate is a visible step in the log, and the bytes
+      # that were tested are the bytes that get packed and published.
+      - name: Release gate (verify:release)
+        run: npm run verify:release
+
+      - name: Pack
+        id: pack
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/pack"
+          tarball=$(npm pack --ignore-scripts --json --pack-destination "$RUNNER_TEMP/pack" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(JSON.parse(s)[0].filename))")
+          echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
+          sha256sum "$RUNNER_TEMP/pack/$tarball"
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: npm-tarball
+          path: ${{ runner.temp }}/pack/${{ steps.pack.outputs.tarball }}
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish dry run
+        if: github.event_name == 'workflow_dispatch'
+        run: npm publish "$RUNNER_TEMP/pack/${{ steps.pack.outputs.tarball }}" --dry-run --ignore-scripts --access public --tag ${{ steps.version.outputs.dist_tag }}
+
+  publish:
+    name: Publish to npm
+    if: github.event_name == 'release'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Must match the environment configured for the Trusted Publisher on npmjs.com.
+    environment:
+      name: npm
+      url: https://www.npmjs.com/package/neuroimjs/v/${{ needs.build.outputs.version }}
+    permissions:
+      contents: read
+      id-token: write # OIDC token for npm Trusted Publishing + provenance; no NPM_TOKEN
+    steps:
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      # Trusted publishing needs npm >= 11.5.1. Stay on the 11.x line for
+      # reproducibility, and assert the floor in case the bundled npm is used.
+      - name: Install npm with trusted-publishing support
+        shell: bash
+        run: |
+          npm install -g npm@11
+          v=$(npm --version)
+          node -e "const [a,b,c]=process.argv[1].split('.').map(Number); if (a<11||(a===11&&(b<5||(b===5&&c<1)))) { console.error('npm '+process.argv[1]+' < 11.5.1'); process.exit(1) }" "$v"
+          echo "npm $v"
+
+      - uses: actions/download-artifact@v7
+        with:
+          name: npm-tarball
+          path: ${{ runner.temp }}/pack
+
+      # Publishes exactly the tarball the gate produced. --provenance is the
+      # default under trusted publishing; it is explicit so a misconfigured
+      # OIDC setup fails loudly instead of silently publishing without it.
+      - name: npm publish
+        run: npm publish "$RUNNER_TEMP/pack/${{ needs.build.outputs.tarball }}" --provenance --access public --ignore-scripts --tag ${{ needs.build.outputs.dist_tag }}
+
+  verify:
+    name: Verify published package
+    if: github.event_name == 'release'
+    needs: [build, publish]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.REF }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - uses: actions/download-artifact@v7
+        with:
+          name: npm-tarball
+          path: ${{ runner.temp }}/pack
+
+      # Registry tarball vs. the tarball CI built from the tag: same file list,
+      # same per-file SHA-256, and an SLSA provenance attestation. Retries cover
+      # registry propagation delay right after publish.
+      - name: Compare registry tarball with CI build
+        run: >-
+          node scripts/verify-published.mjs ${{ needs.build.outputs.version }}
+          --local-tarball "$RUNNER_TEMP/pack/${{ needs.build.outputs.tarball }}"
+          --require-provenance --retries 10 --retry-delay 30
