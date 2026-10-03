@@ -18,6 +18,11 @@ export default defineConfig({
       },
     },
   },
+  // Relative base: asset URLs in the library bundles (the ScatterField worker
+  // chunk) must resolve next to the bundle via import.meta.url, not against the
+  // host page's origin root, or consumers that re-bundle neuroimjs.es.js (Vite
+  // apps) fail to resolve '/assets/...' and plain <script> hosts 404 it.
+  base: './',
   build: {
     // Do NOT wipe dist: the tsc CJS/ESM/types output (dist/cjs, dist/esm,
     // dist/types) is produced by `npm run build` and the browser bundle is
