@@ -15,18 +15,20 @@ import { Buffer } from 'buffer';
 class MemoryMappedArray {
   /** Undefined for purely in-memory storage (no backing file). */
   private fd?: number;
+  private closed = false;
   private buffer: Buffer;
   private _shape: number[];
   private _dtype: string;
   private itemSize: number;
   private totalSize: number;
-  
+
   constructor(
     filename: string | null,
     dtype: string = 'float32',
     mode: string = 'r+',
     shape?: number[],
-    order: string = 'C'
+    order: string = 'C',
+    deferAlloc = false
   ) {
     this._dtype = dtype;
     this._shape = shape || [];
@@ -53,7 +55,8 @@ class MemoryMappedArray {
     this.totalSize = shape ? shape.reduce((a, b) => a * b, 1) * this.itemSize : 0;
 
     if (filename === null) {
-      this.buffer = Buffer.alloc(this.totalSize);
+      // Allocated lazily by load() when it adopts the caller's memory.
+      this.buffer = deferAlloc ? Buffer.alloc(0) : Buffer.alloc(this.totalSize);
       return;
     }
 
@@ -215,6 +218,9 @@ class MemoryMappedArray {
    */
   flush(): void {
     if (this.fd === undefined) return;
+    if (this.closed) {
+      throw new ValueError('Cannot flush a closed BigNeuroVec file');
+    }
     fs.writeSync(this.fd, this.buffer, 0, this.totalSize, 0);
     fs.fsyncSync(this.fd);
   }
@@ -223,26 +229,40 @@ class MemoryMappedArray {
    * Close the file
    */
   close(): void {
-    if (this.fd === undefined) return;
+    if (this.fd === undefined || this.closed) return;
     this.flush();
     fs.closeSync(this.fd);
-    this.fd = undefined;
+    this.closed = true;
+  }
+
+  private ensureAllocated(): void {
+    if (this.buffer.length !== this.totalSize) {
+      this.buffer = Buffer.alloc(this.totalSize);
+    }
   }
 
   /**
    * Copy `data` (in storage order) into the array. Uses a bulk byte copy when
-   * the typed array matches the dtype on a little-endian host.
+   * the typed array matches the dtype on a little-endian host. With
+   * `share: true` (in-memory storage only) the array's memory is used
+   * directly, without a copy.
    */
-  load(data: TypedArray): void {
+  load(data: TypedArray, share = false): void {
     const sameType =
       (this._dtype === 'float32' && data instanceof Float32Array) ||
       (this._dtype === 'float64' && data instanceof Float64Array) ||
       (this._dtype === 'int32' && data instanceof Int32Array) ||
       (this._dtype === 'uint8' && data instanceof Uint8Array);
     if (sameType && os.endianness() === 'LE' && data.byteLength === this.totalSize) {
+      if (share && this.fd === undefined) {
+        this.buffer = Buffer.from(data.buffer, data.byteOffset, data.byteLength);
+        return;
+      }
+      this.ensureAllocated();
       this.buffer.set(new Uint8Array(data.buffer, data.byteOffset, data.byteLength));
       return;
     }
+    this.ensureAllocated();
     for (let i = 0; i < data.length; i++) {
       this.set(i, data[i]);
     }
@@ -285,6 +305,10 @@ export class BigNeuroVec implements NeuroVec {
    *
    * `volumeSpace` is the 3D space of each volume, including its affine. When
    * omitted, it is derived from the time-first `space` without orientation.
+   *
+   * `shareData` (memory storage only) uses the memory of `data` directly
+   * instead of copying it, so later writes are visible through both. It
+   * applies when `data` already has the storage dtype on a little-endian host.
    */
   constructor(
     dataOrFilename: TypedArray | string,
@@ -295,6 +319,7 @@ export class BigNeuroVec implements NeuroVec {
       dtype?: string;
       storage?: 'file' | 'memory';
       volumeSpace?: NeuroSpace;
+      shareData?: boolean;
     }
   ) {
     this.storage = 'file';
@@ -375,9 +400,11 @@ export class BigNeuroVec implements NeuroVec {
         this.storage === 'memory' ? null : this.filename,
         dtype,
         'w+',
-        space.dim
+        space.dim,
+        'C',
+        this.storage === 'memory' && options?.shareData === true
       );
-      this._data.load(data);
+      this._data.load(data, this.storage === 'memory' && options?.shareData === true);
       this._data.flush();
     }
 
@@ -557,7 +584,10 @@ export class BigNeuroVec implements NeuroVec {
   
   subVector(indices: number[] | number): BigNeuroVec {
     const idxArray = Array.isArray(indices) ? indices : [indices];
-    
+    if (idxArray.length === 0) {
+      throw new ValueError('indices must select at least one volume');
+    }
+
     // Create new shape
     const newShape = [idxArray.length, ...this.shape.slice(1)];
 
@@ -577,7 +607,11 @@ export class BigNeuroVec implements NeuroVec {
         [1, ...this.volumeSpace.spacing],
         [0, ...this.volumeSpace.origin]
       );
-      return new BigNeuroVec(subset, subSpace, { storage: 'memory', volumeSpace: this._volumeSpace });
+      return new BigNeuroVec(subset, subSpace, {
+        storage: 'memory',
+        volumeSpace: this._volumeSpace,
+        shareData: true,
+      });
     }
 
     // Create new BigNeuroVec
@@ -700,7 +734,7 @@ export class BigNeuroVec implements NeuroVec {
   
   toString(): string {
     return `BigNeuroVec
-  Type      : BigNeuroVec (memory-mapped)
+  Type      : BigNeuroVec (${this.storage === 'memory' ? 'in memory' : 'memory-mapped'})
   Dimension : ${this.shape.join(' X ')}
   Spacing   : ${this.space.spacing.join(' X ')}
   Origin    : ${this.space.origin.join(', ')}
@@ -710,7 +744,8 @@ export class BigNeuroVec implements NeuroVec {
 }
 
 /**
- * Create BigNeuroVec from a sequence of volumes
+ * Create an in-memory BigNeuroVec from a sequence of volumes. The first
+ * volume's space (including its affine) becomes `volumeSpace`.
  */
 export function bigNeuroVecSeq(vols: NeuroVol[]): BigNeuroVec {
   if (vols.length === 0) {
@@ -749,5 +784,9 @@ export function bigNeuroVecSeq(vols: NeuroVol[]): BigNeuroVec {
     offset += volSize;
   }
   
-  return new BigNeuroVec(data, space4d);
+  return new BigNeuroVec(data, space4d, {
+    storage: 'memory',
+    volumeSpace: firstVol.space,
+    shareData: true,
+  });
 }

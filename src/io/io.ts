@@ -396,7 +396,7 @@ export async function readVec(
     [1, ...volumeSpace!.spacing],
     [0, ...volumeSpace!.origin]
   );
-  return new BigNeuroVec(data!, space4d, { storage: 'memory', volumeSpace });
+  return new BigNeuroVec(data!, space4d, { storage: 'memory', volumeSpace, shareData: true });
 }
 
 /**

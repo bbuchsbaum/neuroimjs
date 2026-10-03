@@ -13,7 +13,7 @@ in the pull request that makes the change.
   `vols()` dropped the rotation of an oblique affine. It also re-read and
   re-decompressed the whole file once per volume, and above 100 volumes (or
   with `useBigVec`) it wrote a `<file>.bigvec.tmp` next to the input that was
-  never deleted. Each call also wrote a `.dat` copy to `$TMPDIR`. `readVec` now
+  never deleted; otherwise it wrote a `.dat` copy to `$TMPDIR`. `readVec` now
   decodes the file once, keeps the data in memory, writes nothing to disk, and
   carries the file's full 3D space on the result as `volumeSpace`.
   `getVolume(t)` uses that space. The time-first shape (`dim = [T, X, Y, Z]`)
@@ -22,8 +22,18 @@ in the pull request that makes the change.
 
 ### Added
 
-- `BigNeuroVec` accepts `storage: 'memory'` (no backing file) and
-  `volumeSpace` options, and exposes `storage` and `volumeSpace`.
+- `BigNeuroVec` accepts `storage: 'memory'` (no backing file), `volumeSpace`
+  and `shareData` options, and exposes `storage` and `volumeSpace`.
+
+### Changed
+
+- `bigNeuroVecSeq` returns an in-memory `BigNeuroVec` that keeps the first
+  volume's space (including its affine) as `volumeSpace`; it previously wrote
+  an untracked `.dat` file to `$TMPDIR` and dropped the affine.
+- `BigNeuroVec.subVector` on an in-memory vector stays in memory and keeps
+  `volumeSpace`; an empty selection throws a `ValueError`.
+- Flushing a file-backed `BigNeuroVec` after `close()` throws instead of
+  failing with `EBADF`; a second `close()` is a no-op.
 
 ## 0.5.0 - 2026-10-03
 

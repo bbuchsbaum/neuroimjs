@@ -10,7 +10,7 @@ vi.mock('pako', async (importOriginal) => {
 });
 
 import { readVol, readVec } from '../src/io/io';
-import { BigNeuroVec } from '../src/vector/BigNeuroVec';
+import { BigNeuroVec, bigNeuroVecSeq } from '../src/vector/BigNeuroVec';
 
 /**
  * Build a 4D int16 NIfTI-1 (.nii) with an oblique sform, so geometry loss is
@@ -138,12 +138,40 @@ describe('readVec geometry and side effects', () => {
     const beforeData = await listing(dataDir);
 
     const vec = (await readVec(file, opts)) as BigNeuroVec;
+    expect(await listing(dataDir)).toEqual(beforeData);
+    expect(await listing(tmpDir)).toEqual([]);
+
     expect(vec.dim[0]).toBe(nt);
     expect(vec.getVolume(nt - 1).space.trans.to2DArray()).toEqual(
       (await readVol(file, { index: nt - 1 })).space.trans.to2DArray()
     );
+  });
 
-    expect(await listing(dataDir)).toEqual(beforeData);
+  it('keeps geometry through subVector and rejects an empty selection', async () => {
+    const file = path.join(dataDir, 'sub.nii');
+    await fs.writeFile(file, new Uint8Array(buildNifti4D([3, 2, 2, 4], OBLIQUE)));
+    const vec = (await readVec(file)) as BigNeuroVec;
+
+    const sub = vec.subVector([3, 0]);
+    expect(sub.storage).toBe('memory');
+    expect(sub.dim).toEqual([2, 3, 2, 2]);
+    expect(sub.getAt(2, 1, 1, 0)).toBe(3000 + 100 + 10 + 2);
+    expect(sub.getVolume(1).space.trans.to2DArray()).toEqual(
+      (await readVol(file, { index: 0 })).space.trans.to2DArray()
+    );
+    expect(() => vec.subVector([])).toThrow('indices must select at least one volume');
+    expect(await listing(tmpDir)).toEqual([]);
+  });
+
+  it('bigNeuroVecSeq keeps the first volume space and writes no files', async () => {
+    const file = path.join(dataDir, 'seq.nii');
+    await fs.writeFile(file, new Uint8Array(buildNifti4D([2, 2, 2, 3], OBLIQUE)));
+    const vols = await Promise.all([0, 1, 2].map(index => readVol(file, { index })));
+
+    const vec = bigNeuroVecSeq(vols);
+    expect(vec.storage).toBe('memory');
+    expect(vec.getVolume(2).space.trans.to2DArray()).toEqual(vols[2].space.trans.to2DArray());
+    expect(vec.getAt(1, 1, 1, 2)).toBe(2000 + 100 + 10 + 1);
     expect(await listing(tmpDir)).toEqual([]);
   });
 
