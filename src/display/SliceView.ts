@@ -62,6 +62,8 @@ export class SliceView implements ISliceView {
   private boundOnResize: () => void = () => {};
   private resizeObserver: ResizeObserver | null = null;
   private disposed = false;
+  // Pending animation-frame ids scheduled by handleResize(), cancelled on dispose.
+  private pendingFrames = new Set<number>();
 
   // Zoom & Pan state
   private zoomLevel: number = 1.0;
@@ -305,6 +307,7 @@ export class SliceView implements ISliceView {
    *  - Fitting to screen
    */
   public renderSlice(): void {
+    if (this.disposed) return;
     // Pin the transform to the current slice
     this.coordinateTransformer.setSliceIndex(this.model.currentSliceIndex);
 
@@ -371,7 +374,7 @@ export class SliceView implements ISliceView {
    */
   public setFitRegion(region: { x0: number; y0: number; x1: number; y1: number } | null): void {
     this.fitRegion = region && region.x1 > region.x0 && region.y1 > region.y0 ? { ...region } : null;
-    if (this.mainContainer?.children.length) {
+    if (!this.disposed && this.mainContainer?.children.length) {
       this.fitContainerToScreen();
       this.app?.renderer?.render?.(this.app.stage);
     }
@@ -491,6 +494,10 @@ export class SliceView implements ISliceView {
    * This method is only needed for edge cases requiring manual resize.
    */
   private onResize(): void {
+    // A resize can be scheduled (or observed) just before the view is disposed;
+    // by the time it runs the PIXI application and its GL state are gone.
+    if (this.disposed || !this.app?.renderer) return;
+
     // PIXI's resizeTo option handles renderer.resize() automatically
     // We only need to re-fit container and force re-render
 
@@ -516,12 +523,25 @@ export class SliceView implements ISliceView {
    * Uses requestAnimationFrame to ensure DOM layout is settled before calculating sizes.
    */
   public handleResize(): void {
-    // Use double RAF to ensure DOM layout is fully settled
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
+    if (this.disposed) return;
+    // Use double RAF to ensure DOM layout is fully settled. Both frame ids are
+    // tracked so dispose() can cancel them before they touch freed GL state.
+    const outer = requestAnimationFrame(() => {
+      this.pendingFrames.delete(outer);
+      if (this.disposed) return;
+      const inner = requestAnimationFrame(() => {
+        this.pendingFrames.delete(inner);
+        if (this.disposed) return;
         this.onResize();
       });
+      this.pendingFrames.add(inner);
     });
+    this.pendingFrames.add(outer);
+  }
+
+  /** Whether dispose() has been called on this view. */
+  public get isDisposed(): boolean {
+    return this.disposed;
   }
 
   /**
@@ -765,6 +785,12 @@ export class SliceView implements ISliceView {
   public dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+
+    // Cancel resize frames scheduled by handleResize() that have not run yet.
+    if (typeof cancelAnimationFrame === 'function') {
+      this.pendingFrames.forEach(id => cancelAnimationFrame(id));
+    }
+    this.pendingFrames.clear();
 
     // Clean up ResizeObserver
     if (this.resizeObserver) {

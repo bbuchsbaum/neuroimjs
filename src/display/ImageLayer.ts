@@ -52,7 +52,7 @@ export class ImageLayer implements SliceLayer {
     this.neuroSpace = volStack.space;
     this.layerId = `image-layer-${Date.now()}`;
     
-    this.logger.info('Creating ImageLayer', {
+    this.logger.debug('Creating ImageLayer', {
       layerId: this.layerId,
       volumeCount: volStack.length,
       space: volStack.space.dim
@@ -106,13 +106,13 @@ export class ImageLayer implements SliceLayer {
   }
 
   public addVolLayer(volLayer: VolLayer): void {
-    this.logger.info('Adding volume layer', { layerId: volLayer.id });
+    this.logger.debug('Adding volume layer', { layerId: volLayer.id });
     this.volumeStack.addLayer(volLayer);
     this.needsRefresh = true;
   }
 
   public removeVolLayer(volLayer: VolLayer): void {
-    this.logger.info('Removing volume layer', { layerId: volLayer.id });
+    this.logger.debug('Removing volume layer', { layerId: volLayer.id });
     this.volumeStack.removeLayer(volLayer);
     this.needsRefresh = true;
   }
@@ -167,7 +167,7 @@ export class ImageLayer implements SliceLayer {
     
     // Get sprite from pool
     const sprite = this.spritePool.acquire(texture);
-    this.logger.info('Sprite created', {
+    this.logger.debug('Sprite created', {
       layerId: cacheKey.split('_')[0],
       layerIndex: 0,
       spriteAlpha: sprite.alpha,
@@ -259,7 +259,7 @@ export class ImageLayer implements SliceLayer {
       sprite.visible = layer.visible;
 
       // Debug logging
-      this.logger.info('Sprite created', {
+      this.logger.debug('Sprite created', {
         layerIndex: i,
         layerId: layer.id,
         spriteWidth: sprite.width,
@@ -395,7 +395,7 @@ export class ImageLayer implements SliceLayer {
     return false;
   }
   dispose(): void {
-    this.logger.info('Disposing ImageLayer', { layerId: this.layerId });
+    this.logger.debug('Disposing ImageLayer', { layerId: this.layerId });
     
     // Release all active containers
     this.releaseActiveContainers();

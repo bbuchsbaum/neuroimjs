@@ -21,12 +21,23 @@ in the pull request that makes the change.
   runtime dependency, reads `navigator` when it loads, so `require('neuroimjs')`
   and `import 'neuroimjs'` already threw `ReferenceError: navigator is not
   defined` on Node 20, which reached end of life in April 2026.
+- The display logger starts at WARN instead of DEBUG, so viewers no longer flood
+  the host console. Opt in with `NEUROIMJS_LOG_LEVEL` / `NEUROIMJS_DEBUG`
+  (global or environment variable) or `setLogLevel()` / `enableDebugLogging()`;
+  the logging controls are exported from both entry points. (#5)
 
 ### Fixed
 
 - `readVol` and the other NIfTI readers work when the library runs inside a
   `vm` context without a dynamic-import hook (vitest/vite-node on Node < 26,
   Jest). They failed with `ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING`.
+- Disposing a `SliceView` or `OrthogonalImageViewer` cancels its pending resize
+  frames, so a resize just before `dispose()` no longer runs against the
+  destroyed PIXI application. `OrthogonalImageViewer.dispose()` is idempotent
+  and `SliceView.isDisposed` is new. (#2)
+- `OrthogonalImageViewer` handles ArrowLeft/ArrowRight only when focus is on the
+  page itself or inside one of its slice panes, so sliders and text fields
+  elsewhere on the page keep their arrow keys. (#3)
 
 ### Security
 

@@ -201,6 +201,9 @@ export class OrthogonalImageViewer implements ViewerStateInfo {
   // A collection of MobX disposers for cleaning up reactive side effects.
   private disposers: IReactionDisposer[] = [];
 
+  // Set by dispose(); late resize callbacks check it before touching sub-views.
+  private disposed = false;
+
   /**
    * Private constructor to force usage of the async factory method `.create()`.
    * 
@@ -704,6 +707,7 @@ export class OrthogonalImageViewer implements ViewerStateInfo {
    * its internal PIXI canvas size and re-fit images.
    */
   private handleResize(): void {
+    if (this.disposed) return;
     this.applyResponsiveLayout();
 
     Object.values(this.sliceViewers).forEach((viewer) => {
@@ -713,25 +717,84 @@ export class OrthogonalImageViewer implements ViewerStateInfo {
 
   /**
    * Handler for keyboard events to navigate slices with arrow keys.
-   * Left arrow: previous slice, Right arrow: next slice
-   * Only affects the currently focused view.
+   * Left arrow: previous slice, Right arrow: next slice.
+   *
+   * The listener sits on the document, so it only acts when the key is meant
+   * for the viewer: focus is on the page itself (body) or inside one of this
+   * viewer's slice panes. Keys typed into form controls, editable content or
+   * any other widget on the page — including the panes' own slice sliders —
+   * are left alone and never cancelled.
    */
   private handleKeydown(e: KeyboardEvent): void {
-    if (!this.focusedView) return;
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    if (e.defaultPrevented || e.isComposing) return;
+    // Modified arrows are browser/OS shortcuts (history, word jumps, ...).
+    if (e.altKey || e.ctrlKey || e.metaKey) return;
 
-    const viewer = this.sliceViewers[this.focusedView];
+    const view = this.keyboardTargetView(e);
+    if (!view) return;
+    const viewer = this.sliceViewers[view];
     if (!viewer) return;
 
-    switch (e.key) {
-      case 'ArrowLeft':
-        e.preventDefault();
-        viewer.model.previousSlice();
-        break;
-      case 'ArrowRight':
-        e.preventDefault();
-        viewer.model.nextSlice();
-        break;
+    e.preventDefault();
+    if (e.key === 'ArrowLeft') {
+      viewer.model.previousSlice();
+    } else {
+      viewer.model.nextSlice();
     }
+  }
+
+  /**
+   * Decides which view, if any, an arrow key should step. Returns null when the
+   * key belongs to something else on the page.
+   */
+  private keyboardTargetView(e: KeyboardEvent): ViewName | null {
+    const origin = OrthogonalImageViewer.keyOrigin(e);
+    // Focus on the page itself: step the view under the pointer.
+    if (!origin || origin === document.body || origin === document.documentElement) {
+      return this.focusedView;
+    }
+    if (OrthogonalImageViewer.isInteractiveElement(origin)) return null;
+    if (!this.container.contains(origin)) return null;
+    // Focus inside a slice pane (e.g. the pane itself after a click or Tab):
+    // prefer the hovered view, else the pane holding focus.
+    const views = Object.keys(this.viewDivs) as ViewName[];
+    const pane = views.find(v => this.viewDivs[v].contains(origin));
+    if (!pane) return null;
+    return this.focusedView ?? pane;
+  }
+
+  /** The element a keyboard event originated from (through open shadow roots). */
+  private static keyOrigin(e: KeyboardEvent): Element | null {
+    const path = typeof e.composedPath === 'function' ? e.composedPath() : [];
+    let node: unknown = path.length ? path[0] : e.target;
+    if (node && (node as Node).nodeType === Node.DOCUMENT_NODE) {
+      node = (node as Document).activeElement;
+    }
+    if (!node || typeof (node as Node).nodeType !== 'number') return null;
+    if ((node as Node).nodeType !== Node.ELEMENT_NODE) {
+      return (node as Node).parentElement ?? null;
+    }
+    return node as Element;
+  }
+
+  /**
+   * Whether an element consumes arrow keys itself: form controls, links,
+   * buttons, editable content and ARIA widgets that use arrows.
+   */
+  private static isInteractiveElement(el: Element): boolean {
+    const tag = el.tagName.toUpperCase();
+    if (/^(INPUT|SELECT|TEXTAREA|BUTTON|A|SUMMARY|OPTION|VIDEO|AUDIO|IFRAME)$/.test(tag)) {
+      return true;
+    }
+    if ((el as HTMLElement).isContentEditable) return true;
+    const editable = el.getAttribute('contenteditable');
+    if (editable !== null && editable !== 'false') return true;
+    const role = el.getAttribute('role');
+    if (role && /^(slider|spinbutton|textbox|searchbox|combobox|listbox|option|menu|menubar|menuitem|menuitemcheckbox|menuitemradio|radio|radiogroup|tab|tablist|tree|treeitem|grid|gridcell|scrollbar|separator)$/.test(role)) {
+      return true;
+    }
+    return false;
   }
 
   /**
@@ -948,6 +1011,14 @@ export class OrthogonalImageViewer implements ViewerStateInfo {
    * and unsubscribes from MobX reactions.
    */
   public dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+
+    // Stop resize sources first so nothing schedules work on a dying view.
+    window.removeEventListener('resize', this.handleResizeBound);
+    document.removeEventListener('keydown', this.handleKeydownBound);
+    try { this.resizeObserver?.disconnect(); } catch {}
+
     // PIXI's text TexturePool is shared across renderers. Release every
     // sub-view's overlay Text resources before destroying the first renderer,
     // which clears that shared pool.
@@ -964,10 +1035,6 @@ export class OrthogonalImageViewer implements ViewerStateInfo {
     while (this.container.firstChild) {
       this.container.removeChild(this.container.firstChild);
     }
-
-    window.removeEventListener('resize', this.handleResizeBound);
-    document.removeEventListener('keydown', this.handleKeydownBound);
-    try { this.resizeObserver?.disconnect(); } catch {}
 
     // Dispose all reactive watchers
     this.disposers.forEach((disposer) => disposer());
