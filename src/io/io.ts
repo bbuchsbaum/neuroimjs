@@ -11,6 +11,7 @@ import { Matrix } from 'ml-matrix';
 import { createNeuroVol } from '../volume/NeuroIm';
 import { ValueError, TypeError as TypeErrorType, SliceTypedArrayType, TypedArray } from '../types';
 import { FileFormat, NIFTIFormat, findDescriptor, getFormat } from './formats';
+import { niftiScaling } from './niftiGeometry';
 
 type NiftiReaderModule = typeof import('nifti-reader-js');
 
@@ -560,14 +561,12 @@ function createVolFromBuffer(
     byteSwapInPlace(typedArray);
   }
 
-  // Apply scl_slope / scl_inter intensity scaling. Per the NIfTI-1 spec a
-  // scl_slope of 0 means "no scaling". When scaling is active the result is
-  // generally non-integer, so we promote to Float32 regardless of the stored
-  // datatype.
-  const rawSlope = header.scl_slope;
-  const rawInter = header.scl_inter;
-  const slope = !rawSlope || Number.isNaN(rawSlope) ? 1 : rawSlope;
-  const inter = !rawInter || Number.isNaN(rawInter) ? 0 : rawInter;
+  // Apply scl_slope / scl_inter intensity scaling. Per the NIfTI-1 spec (and
+  // nibabel), a scl_slope of 0 or a non-finite slope means "no scaling": the
+  // stored values are used as-is and scl_inter is ignored too. When scaling
+  // is active the result is generally non-integer, so we promote to Float32
+  // regardless of the stored datatype.
+  const { slope, inter } = niftiScaling(header.scl_slope, header.scl_inter);
   if (slope !== 1 || inter !== 0) {
     const scaled = new Float32Array(typedArray.length);
     for (let i = 0; i < typedArray.length; i++) {

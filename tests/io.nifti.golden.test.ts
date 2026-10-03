@@ -5,6 +5,7 @@ import { readVol, readHeader, writeVol, readVec, writeVec } from '../src/io/io';
 import { FloatNeuroVol } from '../src/volume/DenseNeuroVol';
 import { NeuroSpace } from '../src/geometry/NeuroSpace';
 import { BigNeuroVec } from '../src/vector/BigNeuroVec';
+import { readNiftiArrayBuffer } from '../src/io/browserNifti';
 
 /**
  * Build a minimal but valid NIfTI-1 single-file (.nii) buffer in memory with
@@ -102,6 +103,32 @@ describe('NIfTI read-path correctness', () => {
     const data = vol.getData();
     for (let i = 0; i < values.length; i++) {
       expect(data[i]).toBe(values[i]);
+    }
+  });
+
+  it.each([
+    ['0', 0],
+    ['NaN', Number.NaN],
+    ['Infinity', Number.POSITIVE_INFINITY],
+  ])('ignores scl_inter when scl_slope = %s (no scaling at all), in both decoders', async (_label, slope) => {
+    const values = [3, 4, 5, 6, 7, 8, 9, 10];
+    const buf = buildNiftiInt16({ dims: [2, 2, 2], values, sclSlope: slope, sclInter: 50 });
+    const nodeData = (await readVol(buf)).getData();
+    const browserData = readNiftiArrayBuffer(buf).getData();
+    for (let i = 0; i < values.length; i++) {
+      expect(nodeData[i]).toBe(values[i]);
+      expect(browserData[i]).toBe(values[i]);
+    }
+  });
+
+  it('applies scl_inter when scl_slope = 1, in both decoders', async () => {
+    const values = [3, 4, 5, 6, 7, 8, 9, 10];
+    const buf = buildNiftiInt16({ dims: [2, 2, 2], values, sclSlope: 1, sclInter: 50 });
+    const nodeData = (await readVol(buf)).getData();
+    const browserData = readNiftiArrayBuffer(buf).getData();
+    for (let i = 0; i < values.length; i++) {
+      expect(nodeData[i]).toBe(values[i] + 50);
+      expect(browserData[i]).toBe(values[i] + 50);
     }
   });
 

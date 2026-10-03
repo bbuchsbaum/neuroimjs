@@ -7,6 +7,14 @@ in the pull request that makes the change.
 
 ## Unreleased
 
+### Fixed
+
+- `readVol` and `readNiftiArrayBuffer` no longer add `scl_inter` when
+  `scl_slope` is 0 or non-finite. Such a slope means "no scaling" (NIfTI-1
+  spec, nibabel), so voxel values are now returned exactly as stored; before,
+  every voxel was offset by `scl_inter`. A valid slope still yields
+  `value * scl_slope + scl_inter`.
+
 ## 0.5.0 - 2026-10-03
 
 Upgrading from 0.4.0: Node.js 22 or later is required; `ImageLayer` defaults

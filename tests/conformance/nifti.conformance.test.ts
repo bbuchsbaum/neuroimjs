@@ -44,9 +44,6 @@ import {
 const UINT_READVOL =
   'readVol throws "Unsupported TypedArray type: uint16/uint32" - createVolFromBuffer maps datatype 512/768 ' +
   'but createNeuroVol has no uint16/uint32 branch (readNiftiArrayBuffer decodes these fine)';
-const SLOPE_ZERO =
-  'scl_slope=0 must disable scaling entirely (NIfTI-1 spec, nibabel); both decoders substitute slope=1 ' +
-  'but still add scl_inter, so every voxel is off by +scl_inter';
 const PRECEDENCE =
   'transform precedence: nibabel uses the sform whenever sform_code != 0; nifti-reader-js (both decoders) ' +
   'uses the qform when qform_code > sform_code';
@@ -93,10 +90,6 @@ const KNOWN: KnownDiscrepancies = {
   dtype_uint16_be: all(READVOL_ALL, UINT_READVOL),
   dtype_uint32_le: all(READVOL_ALL, UINT_READVOL),
   dtype_uint32_be: all(READVOL_ALL, UINT_READVOL),
-  scl_slope_zero_with_inter: {
-    'readVol: voxel values (every volume)': SLOPE_ZERO,
-    'browser: voxel values (every volume)': SLOPE_ZERO,
-  },
   xform_both_sform_code_higher: spacingPixdim,
   xform_both_equal_codes: spacingPixdim,
   xform_sform_pixdim_mismatch: spacingPixdim,
