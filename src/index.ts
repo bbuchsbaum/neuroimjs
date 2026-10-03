@@ -139,6 +139,7 @@ export {
 } from './roi/ROI_factories';
 export { SparseNeuroVol } from './sparse/SparseNeuroVol';
 export { NeuroAtlas } from './atlas/NeuroAtlas';
+export { toInt32Labels } from './atlas/labels';
 export type { AtlasMetadata, SchaeferAtlasOptions } from './atlas/NeuroAtlas';
 
 // Vector classes

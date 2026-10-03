@@ -49,12 +49,50 @@ export function fslMni152Grid(resolution: 1 | 2): {
   };
 }
 
+/**
+ * NIfTI datatype codes a synthetic label volume can be stored as:
+ * 2 uint8, 4 int16, 8 int32, 16 float32, 64 float64, 256 int8, 512 uint16.
+ */
+export type NiftiLabelDatatype = 2 | 4 | 8 | 16 | 64 | 256 | 512;
+
+const DATATYPE_BYTES: Record<NiftiLabelDatatype, number> = {
+  2: 1, 4: 2, 8: 4, 16: 4, 64: 8, 256: 1, 512: 2,
+};
+
+/** Optional storage details for {@link buildLabelVolume}. */
+export interface LabelVolumeOptions {
+  /** scl_slope written to the header (default 0, i.e. no scaling). */
+  sclSlope?: number;
+  /** scl_inter written to the header (default 0). */
+  sclInter?: number;
+  /** Map a label to the raw value stored for it (default: identity). */
+  stored?: (label: number) => number;
+}
+
+function writeVoxel(
+  view: DataView,
+  offset: number,
+  datatype: NiftiLabelDatatype,
+  value: number
+): void {
+  const le = true;
+  switch (datatype) {
+    case 2: view.setUint8(offset, value); break;
+    case 4: view.setInt16(offset, value, le); break;
+    case 8: view.setInt32(offset, value, le); break;
+    case 16: view.setFloat32(offset, value, le); break;
+    case 64: view.setFloat64(offset, value, le); break;
+    case 256: view.setInt8(offset, value); break;
+    case 512: view.setUint16(offset, value, le); break;
+  }
+}
+
 /** Geometry and storage of a synthetic label volume, mirroring a published file. */
 export interface LabelVolumeSpec {
   dims: [number, number, number];
   spacing: [number, number, number];
   /** NIfTI datatype: 16 = float32 (Schaefer), 64 = float64 (Glasser360). */
-  datatype: 16 | 64;
+  datatype: NiftiLabelDatatype;
   /** sform rows (sform_code 1, qform_code 1 with the same affine), or ... */
   srow?: number[][];
   /** ... a qform-only header (identity quaternion) with this offset. */
@@ -78,11 +116,16 @@ export function schaeferSpec(resolution: 1 | 2): LabelVolumeSpec {
 /**
  * Build a gzip-compressed single-file NIfTI-1 label volume. Voxels in the
  * central box get labels cycling through 1..nLabels so every label is
- * present; the rim is background (0).
+ * present; the rim is background (0). `options` changes how labels are
+ * stored (raw values, scl_slope/scl_inter) for datatype tests.
  */
-export function buildLabelVolume(spec: LabelVolumeSpec, nLabels: number): ArrayBuffer {
+export function buildLabelVolume(
+  spec: LabelVolumeSpec,
+  nLabels: number,
+  options: LabelVolumeOptions = {}
+): ArrayBuffer {
   const [nx, ny, nz] = spec.dims;
-  const bytes = spec.datatype === 64 ? 8 : 4;
+  const bytes = DATATYPE_BYTES[spec.datatype];
   const voxOffset = 352;
   const n = nx * ny * nz;
   const buf = new ArrayBuffer(voxOffset + n * bytes);
@@ -100,6 +143,8 @@ export function buildLabelVolume(spec: LabelVolumeSpec, nLabels: number): ArrayB
   view.setFloat32(76, 1, le); // qfac
   for (let a = 0; a < 3; a++) view.setFloat32(80 + a * 4, spec.spacing[a], le);
   view.setFloat32(108, voxOffset, le);
+  view.setFloat32(112, options.sclSlope ?? 0, le); // scl_slope
+  view.setFloat32(116, options.sclInter ?? 0, le); // scl_inter
   if (spec.srow) {
     view.setInt16(252, 1, le); // qform_code
     view.setInt16(254, 1, le); // sform_code
@@ -129,8 +174,7 @@ export function buildLabelVolume(spec: LabelVolumeSpec, nLabels: number): ArrayB
       for (let x = lo[0]; x < hi[0]; x++) {
         const offset = voxOffset + (x + nx * (y + ny * z)) * bytes;
         const label = 1 + (next++ % nLabels);
-        if (bytes === 8) view.setFloat64(offset, label, le);
-        else view.setFloat32(offset, label, le);
+        writeVoxel(view, offset, spec.datatype, options.stored ? options.stored(label) : label);
       }
     }
   }

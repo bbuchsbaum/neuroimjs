@@ -7,6 +7,26 @@ in the pull request that makes the change.
 
 ## Unreleased
 
+### Added
+
+- `toInt32Labels()` converts a label volume (or its voxel data) to an
+  `Int32Array` by value, for every typed-array datatype. It rejects
+  non-finite, non-integer and out-of-range values with an error naming the
+  voxel. (#13)
+
+### Fixed
+
+- `NeuroAtlas.loadSchaeferAtlas`, `loadGlasserAtlas` and `loadAtlas` accept
+  label volumes stored as int8, uint8, int16, uint16, int32, float32 or float64.
+  Schaefer reinterpreted the bytes of non-float volumes (wrong labels, or a
+  `RangeError` for an odd voxel count) and Glasser threw `Unsupported data type`
+  for int8, uint8 and int16. Labels made non-integer by `scl_slope`/`scl_inter`
+  now raise an error instead of being rounded silently. (#13)
+- `readVol` reads uint16 NIfTI volumes (datatype 512) as `UInt16NeuroVol`; it
+  threw `Unsupported TypedArray type: uint16`.
+- `loadSchaeferAtlas` no longer writes diagnostics to the console; they go to
+  the display logger at DEBUG.
+
 ## 0.5.0 - 2026-10-03
 
 Upgrading from 0.4.0: Node.js 22 or later is required; `ImageLayer` defaults
