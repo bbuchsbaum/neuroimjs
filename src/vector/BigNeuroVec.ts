@@ -4,6 +4,7 @@ import { NeuroVol } from '../volume/NeuroVol';
 import { FloatNeuroVol } from '../volume/DenseNeuroVol';
 import { ValueError, TypeError, TypedArray } from '../types';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { Buffer } from 'buffer';
 
@@ -12,7 +13,8 @@ import { Buffer } from 'buffer';
  * Uses Node.js fs and Buffer for file-based array storage.
  */
 class MemoryMappedArray {
-  private fd: number;
+  /** Undefined for purely in-memory storage (no backing file). */
+  private fd?: number;
   private buffer: Buffer;
   private _shape: number[];
   private _dtype: string;
@@ -20,7 +22,7 @@ class MemoryMappedArray {
   private totalSize: number;
   
   constructor(
-    filename: string,
+    filename: string | null,
     dtype: string = 'float32',
     mode: string = 'r+',
     shape?: number[],
@@ -49,7 +51,12 @@ class MemoryMappedArray {
     
     // Calculate total size
     this.totalSize = shape ? shape.reduce((a, b) => a * b, 1) * this.itemSize : 0;
-    
+
+    if (filename === null) {
+      this.buffer = Buffer.alloc(this.totalSize);
+      return;
+    }
+
     // Ensure directory exists
     const dir = path.dirname(filename);
     if (dir && !fs.existsSync(dir)) {
@@ -207,16 +214,38 @@ class MemoryMappedArray {
    * Flush changes to disk
    */
   flush(): void {
+    if (this.fd === undefined) return;
     fs.writeSync(this.fd, this.buffer, 0, this.totalSize, 0);
     fs.fsyncSync(this.fd);
   }
-  
+
   /**
    * Close the file
    */
   close(): void {
+    if (this.fd === undefined) return;
     this.flush();
     fs.closeSync(this.fd);
+    this.fd = undefined;
+  }
+
+  /**
+   * Copy `data` (in storage order) into the array. Uses a bulk byte copy when
+   * the typed array matches the dtype on a little-endian host.
+   */
+  load(data: TypedArray): void {
+    const sameType =
+      (this._dtype === 'float32' && data instanceof Float32Array) ||
+      (this._dtype === 'float64' && data instanceof Float64Array) ||
+      (this._dtype === 'int32' && data instanceof Int32Array) ||
+      (this._dtype === 'uint8' && data instanceof Uint8Array);
+    if (sameType && os.endianness() === 'LE' && data.byteLength === this.totalSize) {
+      this.buffer.set(new Uint8Array(data.buffer, data.byteOffset, data.byteLength));
+      return;
+    }
+    for (let i = 0; i < data.length; i++) {
+      this.set(i, data[i]);
+    }
   }
   
   /**
@@ -239,16 +268,23 @@ export class BigNeuroVec implements NeuroVec {
   private _data: MemoryMappedArray;
   private _tempFile?: string;
   private _ownsFile: boolean;
+  private _volumeSpace?: NeuroSpace;
   readonly filename: string;
   readonly mode: string;
   readonly space: NeuroSpace;
-  
+  /** 'memory' when there is no backing file. */
+  readonly storage: 'file' | 'memory';
+
   /**
    * Creates a BigNeuroVec instance.
-   * 
+   *
    * Can be initialized in two ways:
-   * 1. With data and space (creates new memory-mapped file)
+   * 1. With data and space (creates a backing file, or keeps the data in
+   *    memory when `storage: 'memory'`)
    * 2. With filename and shape (opens or creates file)
+   *
+   * `volumeSpace` is the 3D space of each volume, including its affine. When
+   * omitted, it is derived from the time-first `space` without orientation.
    */
   constructor(
     dataOrFilename: TypedArray | string,
@@ -257,8 +293,11 @@ export class BigNeuroVec implements NeuroVec {
       filename?: string;
       mode?: string;
       dtype?: string;
+      storage?: 'file' | 'memory';
+      volumeSpace?: NeuroSpace;
     }
   ) {
+    this.storage = 'file';
     // Determine initialization mode
     if (typeof dataOrFilename === 'string') {
       // Initialize from filename
@@ -308,7 +347,11 @@ export class BigNeuroVec implements NeuroVec {
       }
       
       // Handle filename
-      if (options?.filename) {
+      if (options?.storage === 'memory') {
+        this.storage = 'memory';
+        this.filename = '';
+        this._ownsFile = false;
+      } else if (options?.filename) {
         this.filename = options.filename;
         this._ownsFile = false;
       } else {
@@ -329,19 +372,32 @@ export class BigNeuroVec implements NeuroVec {
       
       // Create memory-mapped array and fill with data
       this._data = new MemoryMappedArray(
-        this.filename,
+        this.storage === 'memory' ? null : this.filename,
         dtype,
         'w+',
         space.dim
       );
-      
-      // Copy data
-      for (let i = 0; i < data.length; i++) {
-        this._data.set(i, data[i]);
-      }
-      
+      this._data.load(data);
       this._data.flush();
     }
+
+    if (options?.volumeSpace) {
+      const expected = this.shape.slice(1);
+      if (!options.volumeSpace.dim.every((d, i) => d === expected[i]) || options.volumeSpace.dim.length !== 3) {
+        throw new ValueError(
+          `volumeSpace dims [${options.volumeSpace.dim}] do not match volume shape [${expected}]`
+        );
+      }
+      this._volumeSpace = options.volumeSpace;
+    }
+  }
+
+  /** The 3D space of each volume (dims, spacing, origin and affine). */
+  get volumeSpace(): NeuroSpace {
+    return (
+      this._volumeSpace ??
+      new NeuroSpace(this.shape.slice(1), this.space.spacing.slice(1), this.space.origin.slice(1))
+    );
   }
   
   get data(): TypedArray {
@@ -380,12 +436,8 @@ export class BigNeuroVec implements NeuroVec {
     if (t < 0 || t >= this.shape[0]) {
       throw new ValueError(`Time index ${t} out of bounds`);
     }
-    
-    const volSpace = new NeuroSpace(
-      this.shape.slice(1),
-      this.space.spacing.slice(1),
-      this.space.origin.slice(1)
-    );
+
+    const volSpace = this.volumeSpace;
     
     const nx = this.shape[1];
     const ny = this.shape[2];
@@ -508,11 +560,31 @@ export class BigNeuroVec implements NeuroVec {
     
     // Create new shape
     const newShape = [idxArray.length, ...this.shape.slice(1)];
-    
+
+    if (this.storage === 'memory') {
+      const volSize = this.shape[1] * this.shape[2] * this.shape[3];
+      const volumes = idxArray.map(t => {
+        if (!Number.isInteger(t) || t < 0 || t >= this.shape[0]) {
+          throw new ValueError(`Time index ${t} out of bounds`);
+        }
+        return this._data.slice(t * volSize, (t + 1) * volSize);
+      });
+      const Ctor = volumes[0].constructor as new (n: number) => TypedArray;
+      const subset = new Ctor(idxArray.length * volSize);
+      volumes.forEach((v, newT) => subset.set(v, newT * volSize));
+      const subSpace = new NeuroSpace(
+        newShape,
+        [1, ...this.volumeSpace.spacing],
+        [0, ...this.volumeSpace.origin]
+      );
+      return new BigNeuroVec(subset, subSpace, { storage: 'memory', volumeSpace: this._volumeSpace });
+    }
+
     // Create new BigNeuroVec
     const result = new BigNeuroVec(
       `${this.filename}_subset_${Date.now()}.dat`,
-      newShape
+      newShape,
+      { volumeSpace: this._volumeSpace }
     );
     
     // Copy data
@@ -534,12 +606,8 @@ export class BigNeuroVec implements NeuroVec {
   
   vols(indices?: number[]): NeuroVol[] {
     const idxArray = indices || Array.from({ length: this.shape[0] }, (_, i) => i);
-    
-    const volSpace = new NeuroSpace(
-      this.shape.slice(1),
-      this.space.spacing.slice(1),
-      this.space.origin.slice(1)
-    );
+
+    const volSpace = this.volumeSpace;
     
     const volumes: NeuroVol[] = [];
     
@@ -636,7 +704,7 @@ export class BigNeuroVec implements NeuroVec {
   Dimension : ${this.shape.join(' X ')}
   Spacing   : ${this.space.spacing.join(' X ')}
   Origin    : ${this.space.origin.join(', ')}
-  Filename  : ${this.filename}
+  Filename  : ${this.storage === 'memory' ? '(in memory)' : this.filename}
   Mode      : ${this.mode}`;
   }
 }

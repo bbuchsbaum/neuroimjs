@@ -7,6 +7,24 @@ in the pull request that makes the change.
 
 ## Unreleased
 
+### Fixed
+
+- `readVec` kept only spacing and origin from the file, so `getVolume(t)` and
+  `vols()` dropped the rotation of an oblique affine. It also re-read and
+  re-decompressed the whole file once per volume, and above 100 volumes (or
+  with `useBigVec`) it wrote a `<file>.bigvec.tmp` next to the input that was
+  never deleted. Each call also wrote a `.dat` copy to `$TMPDIR`. `readVec` now
+  decodes the file once, keeps the data in memory, writes nothing to disk, and
+  carries the file's full 3D space on the result as `volumeSpace`.
+  `getVolume(t)` uses that space. The time-first shape (`dim = [T, X, Y, Z]`)
+  is unchanged. `useBigVec` no longer changes behaviour, and `mask` is still
+  ignored.
+
+### Added
+
+- `BigNeuroVec` accepts `storage: 'memory'` (no backing file) and
+  `volumeSpace` options, and exposes `storage` and `volumeSpace`.
+
 ## 0.5.0 - 2026-10-03
 
 Upgrading from 0.4.0: Node.js 22 or later is required; `ImageLayer` defaults
