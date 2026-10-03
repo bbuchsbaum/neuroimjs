@@ -7,6 +7,14 @@ in the pull request that makes the change.
 
 ## Unreleased
 
+### Added
+
+- `setTheme()`, `setBackground()`, `setCrosshairStyle()` and
+  `setOrientationLabelStyle()` on the slice viewers restyle the background,
+  crosshair and orientation labels in place, without rebuilding the viewer;
+  `ViewerTheme` is exported. `SimpleOrthogonalViewer.setBackground()` now
+  changes the rendered clear colour. (#4)
+
 ### Changed
 
 - Require Node.js 22 or later (`engines.node` was `>=20.19`). pixi.js 8, a
