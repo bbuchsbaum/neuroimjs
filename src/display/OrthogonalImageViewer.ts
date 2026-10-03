@@ -467,7 +467,9 @@ export class OrthogonalImageViewer implements ViewerStateInfo {
       const domElement = this.viewDivs[viewName];
 
       // Each view receives its own ImageLayer instance so renders do not clobber other views
-      const viewImageLayer = new ImageLayer(baseVolStack);
+      // Inherit the alignment strategy, which decides how layers on other
+      // grids are placed.
+      const viewImageLayer = new ImageLayer(baseVolStack, this.imageLayer.getAlignmentOptions());
       viewImageLayer.initialize();
       this.perViewImageLayers[viewName] = viewImageLayer;
 

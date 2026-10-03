@@ -9,7 +9,18 @@ import { OverlapAlignmentStrategy } from './OverlapAlignmentStrategy';
 import { ImageSlice } from '../ImageSlice';
 import * as PIXI from 'pixi.js';
 
-export type AlignmentStrategyType = 'auto' | 'center' | 'corner' | 'overlap';
+/**
+ * How layers that are not on the reference grid are placed.
+ *
+ * - 'world' draws each such layer at its true world position whenever its
+ *   grid is an axis-aligned rescaling/shift of the reference grid (see
+ *   `registerGrid`), slicing it on its own grid; any other layer falls back
+ *   to the 'auto' heuristic.
+ * - 'auto' (default) picks one of the heuristics below per layer.
+ * - 'center', 'corner' and 'overlap' fit the layer's slice bounds to the
+ *   reference slice.
+ */
+export type AlignmentStrategyType = 'auto' | 'world' | 'center' | 'corner' | 'overlap';
 
 export interface AlignmentManagerOptions extends AlignmentOptions {
   /** Strategy to use for alignment */
@@ -150,7 +161,7 @@ export class AlignmentManager {
 
     // Select strategy
     let selectedStrategy: IAlignmentStrategy;
-    if (strategy === 'auto') {
+    if (strategy === 'auto' || strategy === 'world') {
       selectedStrategy = this.selectBestStrategy(targetSlice, referenceSlice);
     } else {
       selectedStrategy = this.strategies.get(strategy) || this.defaultStrategy;
