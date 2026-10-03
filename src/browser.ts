@@ -179,4 +179,9 @@ export {
   enableConsoleLogging,
   parseLogLevel,
 } from './display/logging/Logger';
-export type { LogEntry, LoggerOptions, LogLevelName } from './display/logging/Logger';
+export type {
+  CategoryLogger,
+  LogEntry,
+  LoggerOptions,
+  LogLevelName,
+} from './display/logging/Logger';
