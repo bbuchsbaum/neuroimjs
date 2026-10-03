@@ -496,19 +496,30 @@ export class AxisSet3D extends AxisSet {
 
   
   /**
-   * The anatomical axis set closest to the voxel-to-world matrix `mat44`
-   * (NIfTI `nifti_mat44_to_orientation`, nibabel `aff2axcodes`).
+   * The anatomical axis set closest to the voxel-to-world matrix `mat44`.
    *
-   * The columns of the upper-left 3x3 block are orthonormalised (Gram-Schmidt,
-   * in i, j, k order) and the signed permutation closest to the result is
-   * chosen. `mat44` is never modified.
+   * Follows NIfTI's `nifti_mat44_to_orientation`. The columns of the
+   * upper-left 3x3 block are orthonormalised (Gram-Schmidt, in i, j, k order)
+   * and the signed permutation closest to the result is chosen. This agrees
+   * with nibabel's `aff2axcodes` for orthogonal and near-orthogonal affines.
+   * For strongly sheared affines the two methods can pick different axes.
+   *
+   * If the k column is zero, or lies in the i-j plane, k is taken as i x j.
+   * The result is then always a right-handed frame. nibabel would instead
+   * report no code for that axis. A zero i or j column, or a j column
+   * parallel to i, throws. `mat44` is never modified.
    */
   export function nearestAnatomy(mat44: Matrix): AxisSet3D {
     // Work on plain copies of the columns: ml-matrix arithmetic (mul/sub/div)
     // is in place, which previously corrupted the i axis for sheared affines.
     const column = (c: number): number[] => [mat44.get(0, c), mat44.get(1, c), mat44.get(2, c)];
     const icol = normalize(column(0));
-    const jcol = normalize(orthogonalize(icol, normalize(column(1))));
+    const jperp = orthogonalize(icol, normalize(column(1)));
+    // `!(x >= eps)` also rejects NaN from a zero i or j column.
+    if (!(norm(jperp) >= 1e-12)) {
+      throw new Error('Invalid matrix input, columns are degenerate');
+    }
+    const jcol = normalize(jperp);
     // A zero k column, or one lying in the i-j plane, falls back to i x j.
     const kraw = column(2);
     const kperp = norm(kraw) === 0 ? [0, 0, 0] : orthogonalize(jcol, orthogonalize(icol, normalize(kraw)));

@@ -21,9 +21,11 @@ export function niftiScaling(rawSlope: unknown, rawInter: unknown): { slope: num
 
 /**
  * Voxel sizes implied by a 4x4 voxel-to-world affine: the Euclidean norms of
- * its first three columns. This is what nibabel reports as the zooms of the
- * selected transform. Unlike `pixdim[1..3]` it always agrees with the affine,
- * including when the sform's scaling differs from pixdim.
+ * its first three columns. This equals nibabel's
+ * `nibabel.affines.voxel_sizes(img.affine)`. It is NOT nibabel's
+ * `header.get_zooms()`, which returns `pixdim`. Unlike `pixdim[1..3]`, these
+ * sizes always agree with the affine, including when the sform's scaling
+ * differs from pixdim.
  */
 export function affineVoxelSizes(affine: ArrayLike<ArrayLike<number>>): number[] {
   return [0, 1, 2].map(column =>

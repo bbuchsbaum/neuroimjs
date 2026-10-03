@@ -242,3 +242,38 @@ describe('nearestAnatomy with non-orthogonal (sheared) affines', () => {
     );
   });
 });
+
+describe('nearestAnatomy degenerate columns', () => {
+  it('takes k = i x j (right-handed) when the k column is zero', () => {
+    // i -> -x (L), j -> +y (A); i x j = -z, so k -> I.
+    const mat = new Matrix([
+      [-2, 0, 0, 0],
+      [0, 2, 0, 0],
+      [0, 0, 0, 0],
+      [0, 0, 0, 1],
+    ]);
+    expect(nearestAnatomy(mat)).toEqual(
+      new AxisSet3D(NamedAxis.RIGHT_LEFT, NamedAxis.POST_ANT, NamedAxis.SUP_INF)
+    );
+  });
+
+  it('takes k = i x j when the k column lies in the i-j plane', () => {
+    const mat = new Matrix([
+      [2, 0, 1, 0],
+      [0, 2, 1, 0],
+      [0, 0, 0, 0],
+      [0, 0, 0, 1],
+    ]);
+    expect(nearestAnatomy(mat)).toEqual(
+      new AxisSet3D(NamedAxis.LEFT_RIGHT, NamedAxis.POST_ANT, NamedAxis.INF_SUP)
+    );
+  });
+
+  it.each([
+    ['i is zero', [[0, 0, 0, 0], [0, 2, 0, 0], [0, 0, 2, 0], [0, 0, 0, 1]]],
+    ['j is zero', [[2, 0, 0, 0], [0, 0, 0, 0], [0, 0, 2, 0], [0, 0, 0, 1]]],
+    ['j is parallel to i', [[2, -4, 0, 0], [0, 0, 0, 0], [0, 0, 2, 0], [0, 0, 0, 1]]],
+  ])('throws when %s', (_label, values) => {
+    expect(() => nearestAnatomy(new Matrix(values))).toThrow('Invalid matrix input, columns are degenerate');
+  });
+});
