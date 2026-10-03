@@ -30,19 +30,27 @@ Publishing a GitHub release is the **only** publish trigger. Do not run
 
    The tag must be `v` followed by the exact `package.json` version. Versions
    with a prerelease suffix (`0.6.0-rc.1`) are published under the `next`
-   dist-tag; mark those GitHub releases as pre-releases (`--prerelease`).
+   dist-tag, and their GitHub release must be marked as a pre-release
+   (`--prerelease`); a stable version must not be. The workflow fails if the
+   two disagree.
+
+   A stable version must be newer than the current `latest` on npm. The
+   workflow refuses to move `latest` backwards, so a backport to an older
+   line (say 0.5.1 after 0.6.0) cannot go through it; see
+   [Backports](#backports).
 
 3. **The workflow does the rest:**
 
    | Job | What it does |
    |-----|--------------|
-   | Build and gate | Checks out the tag, fails unless tag = `v` + `package.json` version, `npm ci`, runs `npm run verify:release`, packs the tarball and stores it as the `npm-tarball` artifact. |
-   | Publish to npm | Runs in the `npm` environment; `npm publish <tarball> --provenance --access public` with an OIDC token (`id-token: write`). |
-   | Verify published package | Downloads `neuroimjs@<version>` from the registry and requires the same file list and per-file SHA-256 as the CI tarball, plus an SLSA provenance attestation (`scripts/verify-published.mjs`). |
+   | Build and gate | Checks out the release commit, fails unless tag = `v` + `package.json` version, the pre-release flag matches the version, and a stable version is newer than `latest`; then `npm ci`, `npm run verify:release`, packs the tarball and stores it as the `npm-tarball` artifact. |
+   | Publish to npm | Runs in the `npm` environment; installs a pinned npm 11 and runs `npm publish <tarball> --provenance --access public` with an OIDC token (`id-token: write`). |
+   | Verify published package | Downloads `neuroimjs@<version>` from the registry and requires it to be byte-identical to the CI tarball (`dist.integrity`), with the same files, modes and per-file SHA-256, and an SLSA provenance attestation whose subject digest, repository and workflow path match (`scripts/verify-published.mjs`). |
 
    The release gate runs once, as an explicit step. `prepublishOnly` would run
    it a second time, so pack and publish use `--ignore-scripts`; the tarball
-   that passed the gate is the one published.
+   that passed the gate is the one published. All actions are pinned to full
+   commit SHAs; update them deliberately.
 
 4. **Confirm** the package page shows the provenance badge:
    <https://www.npmjs.com/package/neuroimjs?activeTab=versions>.
@@ -116,11 +124,17 @@ npm ci && npm run build && npm run build:vite
 node scripts/verify-published.mjs 0.6.0 --require-provenance
 ```
 
-Options: `--local-tarball <file>` compares against an existing tarball instead
-of packing the working tree; `--pack-dir <dir>` packs another checkout (use it
-to check tags that predate the script); `--published-tarball <file>` skips the
-download. Exit status 0 means identical, 1 a mismatch or missing provenance,
-2 an error.
+Options (see `--help`): `--local-tarball <file>` compares against an existing
+tarball and then also requires byte-identical `dist.integrity`; `--pack-dir
+<dir>` packs another checkout (use it to check tags that predate the script);
+`--published-tarball <file>` compares two local files without contacting the
+registry; `--expected-repo` and `--expected-workflow` change what the
+provenance must name; `--retries`/`--retry-delay` retry registry lookups.
+Exit status 0 means all checks passed, 1 a check failed, 2 an error.
+
+The provenance check reads the SLSA statement inside the attestation; it does
+not verify the Sigstore signature. For that, install the package in a project
+and run `npm audit signatures`.
 
 Releases up to and including 0.5.0 were published by hand and have no
 provenance attestation.
@@ -128,7 +142,8 @@ provenance attestation.
 ## When something fails
 
 **The gate or version check fails** (nothing was published). Fix the problem
-in a pull request. Delete the release and the tag (`gh release delete v0.6.0
+in a pull request (a wrong pre-release checkbox needs no code change).
+Delete the release and the tag (`gh release delete v0.6.0
 --cleanup-tag`), then create the release again from the fixed commit. If the
 fix changes nothing but the workflow environment (for example a flaky
 network step), re-run the failed jobs from the Actions page instead.
@@ -154,3 +169,21 @@ immutable, so the same version cannot be published again.
   dist-tag, move the tag with `npm dist-tag add neuroimjs@<good> latest` (this
   needs a logged-in owner with 2FA). Unpublishing is a last resort; npm allows
   it only within 72 hours and blocks reuse of the version number.
+
+## Backports
+
+The workflow only publishes to `latest` (stable versions newer than the
+current `latest`) and `next` (prereleases). To release a fix on an older line,
+cut it from a branch, then publish it by hand under its own dist-tag from a
+clean checkout of the tag, logged in with 2FA:
+
+```bash
+npm ci && npm run verify:release
+npm publish --ignore-scripts --access public --tag v0.5-latest
+```
+
+This needs an owner logged in with `npm login`; with "Require two-factor
+authentication and disallow tokens" set, an interactive publish still works and
+prompts for a one-time password (or pass `--otp <code>`). A manual publish has
+no provenance attestation.
+
