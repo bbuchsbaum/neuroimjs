@@ -12,7 +12,7 @@ The fastest path to a classic three-plane viewer. Give it a container and a `Vol
 import { SimpleOrthogonalViewer } from 'neuroimjs'
 
 const viewer = await SimpleOrthogonalViewer.create(container, stack, {
-  layout: 'top-bottom',     // or 'left-tall'
+  layout: 'top-bottom',     // or 'left-tall' | 'ortho'
   showCrosshair: true,
   showSlider: false,
   gapPx: 12,
@@ -52,13 +52,15 @@ off()
 
 ### Overlays
 
-Add more layers (e.g. a stat map over an anatomical) by appending to the stack:
+Add more layers (e.g. a stat map over an anatomical) by appending to the stack, and change them by id:
 
 ```ts
 viewer.addLayer(new VolLayer('stat', statVol, hotColormap, [3, 8]))
+viewer.updateLayer('stat', { threshold: [-3, 3], alpha: 0.8 })
+viewer.removeLayer('stat')
 ```
 
-See **[Colormaps & Layers](/guide/colormaps)** for thresholding and opacity.
+See **[Colormaps & Layers](/guide/colormaps)** for thresholding and opacity, and **[Multi-Layer Alignment](/guide/alignment)** for overlays on a different voxel grid from the first layer.
 
 ## When to use which
 
@@ -70,7 +72,9 @@ See **[Colormaps & Layers](/guide/colormaps)** for thresholding and opacity.
 
 ## Sizing & lifecycle
 
-Viewers read their container's dimensions on creation, so give the container an explicit size (CSS or the `width`/`height` options on single views). Recreate the viewer if the container resizes substantially.
+Viewers size themselves to their container, so give the container an explicit size (CSS, or the `width`/`height` options on single views). They watch the container with a `ResizeObserver` and re-fit when it changes size. Call `dispose()` when you remove a viewer; it releases its WebGL resources and listeners.
+
+Layouts: `'top-bottom'` (the default) puts the axial view across the top and the sagittal and coronal views below; `'left-tall'` puts the axial view in a tall left column; `'ortho'` is an aligned 2×2 grid (coronal and sagittal above, axial and a legend cell below) that stacks into one column on narrow containers.
 
 ## Logging
 

@@ -5,6 +5,11 @@ import { readFileSync } from 'node:fs'
 // Deployed at https://bbuchsbaum.github.io/neuroimjs/
 const base = '/neuroimjs/'
 
+// Show the released version from package.json so the nav never goes stale.
+const { version } = JSON.parse(
+  readFileSync(fileURLToPath(new URL('../../package.json', import.meta.url)), 'utf-8'),
+) as { version: string }
+
 // TypeDoc (via typedoc-vitepress-theme) writes the API sidebar here on `docs:api`.
 // Load it defensively so `vitepress dev` works even before the first generation.
 function apiSidebar(): DefaultTheme.SidebarItem[] {
@@ -28,7 +33,7 @@ export default defineConfig({
     'Neuroimaging for JavaScript — volumetric data, NIfTI I/O, spatial transforms, and live WebGL brain viewers, in the browser and Node.',
   cleanUrls: true,
   lastUpdated: true,
-  ignoreDeadLinks: true,
+  ignoreDeadLinks: false,
 
   head: [
     ['link', { rel: 'icon', type: 'image/svg+xml', href: `${base}favicon.svg` }],
@@ -53,7 +58,7 @@ export default defineConfig({
       { text: 'Examples', link: '/examples/', activeMatch: '/examples/' },
       { text: 'API', link: '/api/', activeMatch: '/api/' },
       {
-        text: 'v0.1.0',
+        text: `v${version}`,
         items: [
           { text: 'Release Notes', link: 'https://github.com/bbuchsbaum/neuroimjs/releases' },
           { text: 'npm', link: 'https://www.npmjs.com/package/neuroimjs' },
@@ -97,6 +102,8 @@ export default defineConfig({
             { text: 'Viewers', link: '/guide/viewers' },
             { text: 'Composable Views', link: '/guide/composable-views' },
             { text: 'Colormaps & Layers', link: '/guide/colormaps' },
+            { text: 'Multi-Layer Alignment', link: '/guide/alignment' },
+            { text: 'Group Overlay Review', link: '/guide/overlay-review' },
           ],
         },
       ],
@@ -147,17 +154,6 @@ export default defineConfig({
     },
   },
 
-  // Legacy design notes / agent docs live under docs/ but are not part of the site.
-  srcExclude: [
-    '**/internal/**',
-    '**/AGENTS.md',
-    'COMPOSABLE_VIEWS.md',
-    'COMPOSABLE_VIEWS_SUMMARY.md',
-    'MIGRATION_TO_COMPOSABLE_VIEWS.md',
-    'NPM_SCRIPTS.md',
-    'SimpleOrthogonalViewer.md',
-    'display-components-refactoring-plan.md',
-    'alignment/**',
-    'test-analysis/**',
-  ],
+  // Contributor notes, design ideas and agent docs live under docs/ but are not part of the site.
+  srcExclude: ['**/internal/**', '**/AGENTS.md', 'NPM_SCRIPTS.md', 'design/**'],
 })
