@@ -65,6 +65,7 @@ export type {
 export type { ISliceModel, ISliceView, ISliceController, ICoordinateTransformer } from './display/interfaces/index';
 
 // Volume factory and concrete volume classes for browser consumers
+export type { NeuroVol } from './volume/NeuroVol';
 export { createNeuroVol } from './volume/NeuroIm';
 export {
   DenseNeuroVol,

@@ -51,23 +51,12 @@ features:
 
 ## See it run
 
-Everything below is a real `neuroimjs` viewer rendering a real MNI152 brain — no screenshots, no video. Drag to move the crosshair, scrub to change slices.
+Everything below is a real `neuroimjs` viewer rendering the MNI152 template with a statistical overlay. Nothing here is a screenshot or a video. Click or drag to move the crosshair, scroll to change slices (<kbd>Ctrl</kbd>/<kbd>⌘</kbd>-scroll zooms), and use the panel on the right to change the overlay's colormap, range, threshold and opacity.
 
-<BrainViewer mode="ortho" :height="520" caption="SimpleOrthogonalViewer — axial · coronal · sagittal, synchronized." />
+<ViewerWorkbench />
 
-```ts
-import { SimpleOrthogonalViewer } from 'neuroimjs'
-import { loadNiftiVolume } from './load' // the small helper shown in Getting Started
-
-const { vol, range } = await loadNiftiVolume('/data/mni152_t1.nii.gz')
-const stack = makeStack(vol, range)
-
-await SimpleOrthogonalViewer.create(document.getElementById('viewer'), stack, {
-  layout: 'top-bottom',
-  showCrosshair: true,
-})
-```
+The layout is one `SimpleOrthogonalViewer`, and the side panel is the library's `<layer-control-panel>` web component bound to the same `VolStack`. **[See the full source →](/examples/viewer-workbench)**
 
 ::: tip Pre-1.0 — and actively hardening
-neuroimjs is at `0.1.0`. The viewer stack, core data structures, NIfTI I/O, geometry, processing, and analysis primitives are covered by a fully green test suite. Remaining pre-1.0 work is structural consolidation — merging a few duplicate implementations behind the existing APIs. The **[Stability matrix](/guide/stability)** lists the verified, up-to-date status of every feature.
+neuroimjs is at `0.5.0`. The viewer stack, core data structures, NIfTI I/O, geometry, processing, and analysis primitives are covered by a green test suite. Some paths still have confirmed bugs or limitations (4D writing, very long 4D reads, hypervector reductions, a few processing edge cases); the **[Stability matrix](/guide/stability)** lists the verified status of every feature, so you know what is safe to build on.
 :::

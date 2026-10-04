@@ -65,11 +65,14 @@ export class IntensityReadout implements SliceLayer {
 
     this.container = new PIXI.Container();
     this.background = new PIXI.Graphics();
-    this.textDisplay = new PIXI.Text('', {
-      fontSize: this.options.fontSize,
-      fill: this.options.color,
-      fontFamily: 'monospace',
-    } as any);
+    this.textDisplay = new PIXI.Text({
+      text: '',
+      style: {
+        fontSize: this.options.fontSize,
+        fill: this.options.color,
+        fontFamily: 'monospace',
+      } as any,
+    });
 
     this.container.addChild(this.background);
     this.container.addChild(this.textDisplay);

@@ -266,7 +266,7 @@ export class OrientationLabelLayer implements SliceLayer {
   }
 
   private makeLabel(text: string): PIXI.Text {
-    const label = new PIXI.Text(text, this.labelStyle());
+    const label = new PIXI.Text({ text, style: this.labelStyle() });
     label.alpha = this.options.alpha;
     label.anchor.set(0.5, 0.5);
     return label;
