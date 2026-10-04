@@ -226,7 +226,9 @@ describe(`nibabel conformance manifest (nibabel ${manifest.generator.nibabel}, n
   });
 
   it('was produced by the committed generator script', () => {
-    const script = readFileSync(join(__dirname, '..', '..', manifest.generator.script));
+    // Hash LF-normalised text: a Windows checkout with core.autocrlf would otherwise
+    // differ from the bytes the generator hashed (see .gitattributes).
+    const script = readFileSync(join(__dirname, '..', '..', manifest.generator.script), 'utf8').replace(/\r\n/g, '\n');
     expect(createHash('sha256').update(script).digest('hex')).toBe(manifest.generator.sha256);
   });
 
