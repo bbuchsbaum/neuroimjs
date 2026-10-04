@@ -24,6 +24,12 @@ in the pull request that makes the change.
   `GLASSER_DEFAULT_COLOR_SEED`, so colours are now the same on every load;
   `loadGlasserAtlas(useCache)` still works.
 
+- Downstream consumer contract tests (`npm run test:consumers`, part of
+  `verify:release` and CI): the call surfaces of neuromosaic, FROIAtlas,
+  neuroimjs-vscode and xnat2bids, run against the packed tarball.
+- `BigNeuroVec` accepts `storage: 'memory'` (no backing file), `volumeSpace`
+  and `shareData` options, and exposes `storage` and `volumeSpace`.
+
 ### Changed
 
 - `partition(x, k, method, mask, seed)` throws `RangeError` for a NaN or
@@ -36,6 +42,17 @@ in the pull request that makes the change.
   `getROI({ label })` accepts either form, but a bare name shared by both
   hemispheres (`V1`) now throws an ambiguity error instead of returning the
   left-hemisphere region.
+- `bigNeuroVecSeq` returns an in-memory `BigNeuroVec` that keeps the first
+  volume's space (including its affine) as `volumeSpace`; it previously wrote
+  an untracked `.dat` file to `$TMPDIR` and dropped the affine.
+- `BigNeuroVec.subVector` on an in-memory vector stays in memory and keeps
+  `volumeSpace`; an empty selection throws a `ValueError`.
+- Flushing a file-backed `BigNeuroVec` after `close()` throws instead of
+  failing with `EBADF`; a second `close()` is a no-op.
+- Releases are published from CI by the `Release` workflow, triggered by a
+  GitHub release, using npm Trusted Publishing (OIDC) with a provenance
+  attestation; `scripts/verify-published.mjs` checks that the registry
+  tarball matches the CI build file for file. See `RELEASING.md`.
 
 ### Fixed
 
@@ -52,6 +69,28 @@ in the pull request that makes the change.
   threw `Unsupported TypedArray type: uint16`.
 - `loadSchaeferAtlas` no longer writes diagnostics to the console; they go to
   the display logger at DEBUG.
+- The browser bundles are built with a relative base, so the ES bundle refers
+  to the scatter-field worker chunk relative to itself
+  (`new URL('assets/...', import.meta.url)`) instead of the origin root
+  (`/assets/...`). Apps that re-bundle `dist/neuroimjs.es.js` or
+  `neuroimjs/browser` with Vite failed to build against 0.5.0 because the
+  worker entry could not be resolved.
+- `buildScatterFieldAsync()` now builds the field on the main thread when the
+  worker fails to load or run, returns an unreadable message, or exceeds
+  `workerTimeoutMs`; previously these rejected and the synchronous fallback was
+  used only when the `Worker` constructor threw. This covers UMD hosts that do
+  not serve the bundle's `assets/` directory: the UMD bundle resolves the
+  worker URL against the page, not the bundle, so the worker 404s there.
+- `readVec` kept only spacing and origin from the file, so `getVolume(t)` and
+  `vols()` dropped the rotation of an oblique affine. It also re-read and
+  re-decompressed the whole file once per volume, and above 100 volumes (or
+  with `useBigVec`) it wrote a `<file>.bigvec.tmp` next to the input that was
+  never deleted; otherwise it wrote a `.dat` copy to `$TMPDIR`. `readVec` now
+  decodes the file once, keeps the data in memory, writes nothing to disk, and
+  carries the file's full 3D space on the result as `volumeSpace`.
+  `getVolume(t)` uses that space. The time-first shape (`dim = [T, X, Y, Z]`)
+  is unchanged. `useBigVec` no longer changes behaviour, and `mask` is still
+  ignored.
 
 ## 0.5.0 - 2026-10-03
 
