@@ -1,4 +1,5 @@
 import { Matrix, inverse, determinant } from 'ml-matrix';
+import { NeuroimError } from '../errors';
 import { deepEqual } from '../utils/deepEqual';
 import {
   AxisSet,
@@ -36,15 +37,15 @@ export class NeuroSpace {
     transform?: Matrix | readonly (readonly number[])[]
   ) {
     if (dim.length === 0) {
-      throw new Error('NeuroSpace requires at least one dimension');
+      throw new NeuroimError('INVALID_ARGUMENT', 'NeuroSpace requires at least one dimension');
     }
     if (dim.some(d => !Number.isSafeInteger(d) || d <= 0)) {
-      throw new Error('All dimension values must be positive safe integers');
+      throw new NeuroimError('INVALID_ARGUMENT', 'All dimension values must be positive safe integers');
     }
 
     const size = dim.reduce((product, value) => product * value, 1);
     if (!Number.isSafeInteger(size)) {
-      throw new Error('NeuroSpace size exceeds JavaScript safe integer range');
+      throw new NeuroimError('INVALID_ARGUMENT', 'NeuroSpace size exceeds JavaScript safe integer range');
     }
 
     // NeuroSpace is immutable from the caller's perspective. Keep defensive
@@ -55,16 +56,16 @@ export class NeuroSpace {
 
     // Check if spacing and origin lengths match
     if (spacing && origin && spacing.length !== origin.length) {
-      throw new Error('Spacing and origin lengths must match');
+      throw new NeuroimError('INVALID_ARGUMENT', 'Spacing and origin lengths must match');
     }
 
     const validMetadataLength = (length: number): boolean =>
       length === D || (dim.length > 3 && length === dim.length);
     if (spacing && !validMetadataLength(spacing.length)) {
-      throw new Error(`Spacing must contain ${D} spatial values${dim.length > 3 ? ` or ${dim.length} dimension values` : ''}`);
+      throw new NeuroimError('INVALID_ARGUMENT', `Spacing must contain ${D} spatial values${dim.length > 3 ? ` or ${dim.length} dimension values` : ''}`);
     }
     if (origin && !validMetadataLength(origin.length)) {
-      throw new Error(`Origin must contain ${D} spatial values${dim.length > 3 ? ` or ${dim.length} dimension values` : ''}`);
+      throw new NeuroimError('INVALID_ARGUMENT', `Origin must contain ${D} spatial values${dim.length > 3 ? ` or ${dim.length} dimension values` : ''}`);
     }
 
     // Initialize spacingValues to an array of ones
@@ -72,7 +73,7 @@ export class NeuroSpace {
     if (spacing != null) {
       // Check for non-positive spacing - still require positive spacing even if dimensions can be zero
       if (spacing.some(s => !Number.isFinite(s) || s <= 0)) {
-        throw new Error('All spacing values must be finite and positive');
+        throw new NeuroimError('INVALID_ARGUMENT', 'All spacing values must be finite and positive');
       }
     }
 
@@ -80,7 +81,7 @@ export class NeuroSpace {
     this.originValues = origin ? [...origin] : Array(D).fill(0);
     if (origin != null) {
       if (origin.some(value => !Number.isFinite(value))) {
-        throw new Error('All origin values must be finite');
+        throw new NeuroimError('INVALID_ARGUMENT', 'All origin values must be finite');
       }
     }
 
@@ -94,7 +95,8 @@ export class NeuroSpace {
         transformValues.some(row => row.length !== expectedSize) ||
         transformValues.some(row => row.some(value => !Number.isFinite(value)))
       ) {
-        throw new Error(
+        throw new NeuroimError(
+          'INVALID_ARGUMENT',
           `Transformation matrix must be a finite ${expectedSize}x${expectedSize} matrix`
         );
       }
@@ -127,7 +129,7 @@ export class NeuroSpace {
 
       if (axes) {
         if (axes.axes().length !== D) {
-          throw new Error(`Axis count ${axes.axes().length} does not match spatial rank ${D}`);
+          throw new NeuroimError('INVALID_ARGUMENT', `Axis count ${axes.axes().length} does not match spatial rank ${D}`);
         }
         this._axes = axes;
       } else {
@@ -137,7 +139,7 @@ export class NeuroSpace {
       }
     } else if (axes) {
       if (axes.axes().length !== D) {
-        throw new Error(`Axis count ${axes.axes().length} does not match spatial rank ${D}`);
+        throw new NeuroimError('INVALID_ARGUMENT', `Axis count ${axes.axes().length} does not match spatial rank ${D}`);
       }
       // Build the transformation matrix from axes, spacing, and origin
       this._axes = axes;
@@ -191,9 +193,11 @@ export class NeuroSpace {
     try {
       this._inverseTrans = inverse(this._trans);
     } catch (error) {
-      console.error('Error computing inverse transformation:', error);
-      console.error('Transformation matrix:', this._trans.to2DArray());
-      throw new Error('Failed to create NeuroSpace: transformation matrix is not invertible');
+      throw new NeuroimError(
+        'INVALID_ARGUMENT',
+        'Failed to create NeuroSpace: transformation matrix is not invertible',
+        { cause: error, details: { transform: this._trans.to2DArray() } }
+      );
     }
   }
 
@@ -202,7 +206,7 @@ export class NeuroSpace {
   extractSliceNeuroSpace(zlevel: number, axisToDrop?: number): NeuroSpace {
     const ndim = this.ndim();
     if (ndim <= 1) {
-      throw new Error('Cannot extract slice from a 1D space');
+      throw new NeuroimError('INVALID_ARGUMENT', 'Cannot extract slice from a 1D space');
     }
   
     // If axisToDrop is not specified, default to the last axis (backward compatibility)
@@ -212,12 +216,12 @@ export class NeuroSpace {
     
     // Validate axisToDrop
     if (axisToDrop < 0 || axisToDrop >= ndim) {
-      throw new Error(`axisToDrop ${axisToDrop} is out of bounds for space with ${ndim} dimensions`);
+      throw new NeuroimError('OUT_OF_RANGE', `axisToDrop ${axisToDrop} is out of bounds for space with ${ndim} dimensions`);
     }
   
     // Validate zlevel
     if (zlevel < 0 || zlevel >= this.dimValues[axisToDrop]) {
-      throw new Error(`zlevel ${zlevel} is out of bounds for axis ${axisToDrop}`);
+      throw new NeuroimError('OUT_OF_RANGE', `zlevel ${zlevel} is out of bounds for axis ${axisToDrop}`);
     }
   
     // Update dimension arrays by removing the dropped axis
@@ -236,7 +240,7 @@ export class NeuroSpace {
     } else if (newAxesArray.length === 1) {
       newAxes = new AxisSet1D(newAxesArray[0]);
     } else {
-      throw new Error('Unsupported number of axes after dropping dimension');
+      throw new NeuroimError('INVALID_ARGUMENT', 'Unsupported number of axes after dropping dimension');
     }
   
     // Construct the transformation matrix based on remaining dimensions
@@ -452,13 +456,13 @@ export class NeuroSpace {
    * Determines which dimension corresponds to the given axis.
    * @param axis - The axis to match.
    * @returns The index of the matching dimension.
-   * @throws Error if no matching axis is found.
+   * @throws NeuroimError (`INVALID_ARGUMENT`) if no matching axis is found.
    */
   whichDim(axis: NamedAxis): number {
     const axes = this._axes.axes();
     const index = axes.findIndex(a => a.axis === axis.axis || a.axis === oppositeAxis(axis).axis);
     if (index === -1) {
-      throw new Error(`Cannot find matching axis of: ${axis.axis}`);
+      throw new NeuroimError('INVALID_ARGUMENT', `Cannot find matching axis of: ${axis.axis}`);
     }
     return index;
   }
@@ -510,7 +514,7 @@ export class NeuroSpace {
    */
   withDimensions(dim: readonly number[]): NeuroSpace {
     if (Math.min(dim.length, 3) !== Math.min(this.ndim(), 3)) {
-      throw new Error('New dimensions must have the same spatial rank');
+      throw new NeuroimError('GEOMETRY_MISMATCH', 'New dimensions must have the same spatial rank');
     }
     const spatialRank = Math.min(dim.length, 3);
     const metadataLength = dim.length > 3 && this.spacingValues.length > 3
@@ -528,7 +532,7 @@ export class NeuroSpace {
   /** Compare complete spatial geometry using a scale-aware affine tolerance. */
   isSpatiallyCompatibleWith(other: NeuroSpace, tolerance = 1e-6): boolean {
     if (!Number.isFinite(tolerance) || tolerance < 0) {
-      throw new Error('Geometry tolerance must be finite and non-negative');
+      throw new NeuroimError('INVALID_ARGUMENT', 'Geometry tolerance must be finite and non-negative');
     }
 
     const rank = Math.min(this.ndim(), 3);
@@ -666,14 +670,15 @@ export class NeuroSpace {
   private applyAffine(matrix: Matrix, coords: readonly number[], requireFullRank = false): number[] {
     const rank = Math.min(this.ndim(), 3);
     if (coords.length > rank || (requireFullRank && coords.length !== rank)) {
-      throw new Error(
+      throw new NeuroimError(
+        'INVALID_ARGUMENT',
         requireFullRank
           ? `Expected ${rank} coordinates, received ${coords.length}`
           : 'Too many coordinates provided for affine transform.'
       );
     }
     if (coords.some(value => !Number.isFinite(value))) {
-      throw new Error('Coordinates must be finite');
+      throw new NeuroimError('INVALID_ARGUMENT', 'Coordinates must be finite');
     }
 
     const result = new Array<number>(rank);
@@ -701,7 +706,7 @@ export class NeuroSpace {
   
     const ndim = this.ndim();
     if (ndim !== 2 && ndim !== 3) {
-      throw new Error(`Reorientation is only supported for 2D and 3D spaces. Got ${ndim}D space.`);
+      throw new NeuroimError('INVALID_ARGUMENT', `Reorientation is only supported for 2D and 3D spaces. Got ${ndim}D space.`);
     }
   
     let anat: AxisSet;
@@ -711,7 +716,9 @@ export class NeuroSpace {
         : findAnatomy3D(orient.axes()[0].name, orient.axes()[1].name, orient.axes()[2].name);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      throw new Error(`Failed to find matching anatomy: ${errorMessage}`);
+      throw new NeuroimError('INVALID_ARGUMENT', `Failed to find matching anatomy: ${errorMessage}`, {
+        cause: error,
+      });
     }
   
     // Compute permutation mapping
@@ -783,7 +790,7 @@ computeAxisPermutation(oldAxes: NamedAxis[], newAxes: NamedAxis[]): { perm: numb
         }
       }
       if (!found) {
-        throw new Error(`Cannot find matching axis for ${newAxis.name}`);
+        throw new NeuroimError('GEOMETRY_MISMATCH', `Cannot find matching axis for ${newAxis.name}`);
       }
     }
     return { perm, flip };
@@ -894,7 +901,7 @@ computeAxisPermutation(oldAxes: NamedAxis[], newAxes: NamedAxis[]): { perm: numb
       }
 
       if (!found) {
-        throw new Error(`Axis ${targetAxis.name} does not have a matching source axis.`);
+        throw new NeuroimError('GEOMETRY_MISMATCH', `Axis ${targetAxis.name} does not have a matching source axis.`);
       }
     }
 
@@ -914,14 +921,14 @@ computeAxisPermutation(oldAxes: NamedAxis[], newAxes: NamedAxis[]): { perm: numb
    * @param axis - The axis along which to generate the sequence.
    * @param step - The step size between values in the sequence.
    * @returns An array of numbers representing the sequence along the axis.
-   * @throws Error if the provided axis doesn't match any axis in the space.
+   * @throws NeuroimError (`INVALID_ARGUMENT`) if the provided axis doesn't match any axis in the space.
    */
   seqAlong(axis: NamedAxis, step: number): number[] {
     //console.log('step', step);
     const matchedAxisIndex = this.findMatchingAxis(axis);
     //console.log('matchedAxisIndex', matchedAxisIndex);
     if (matchedAxisIndex === null) {
-      throw new Error('The provided axis does not match any axis in the space.');
+      throw new NeuroimError('INVALID_ARGUMENT', 'The provided axis does not match any axis in the space.');
     }
 
     const [start, end] = this.bounds().map((bound) => bound[matchedAxisIndex]);
@@ -941,12 +948,12 @@ computeAxisPermutation(oldAxes: NamedAxis[], newAxes: NamedAxis[]): { perm: numb
    * Returns an array of slice indices along a given axis.
    * @param axis - The axis along which to generate slice indices.
    * @returns An array of numbers representing the slice indices from 0 to ndom-1.
-   * @throws Error if the provided axis doesn't match any axis in the space.
+   * @throws NeuroimError (`INVALID_ARGUMENT`) if the provided axis doesn't match any axis in the space.
    */
   sliceIndices(axis: NamedAxis): number[] {
     const matchedAxisIndex = this.findMatchingAxis(axis);
     if (matchedAxisIndex === null) {
-      throw new Error('The provided axis does not match any axis in the space.');
+      throw new NeuroimError('INVALID_ARGUMENT', 'The provided axis does not match any axis in the space.');
     }
 
     const d = this.dim[matchedAxisIndex];
@@ -1081,11 +1088,11 @@ computeAxisPermutation(oldAxes: NamedAxis[], newAxes: NamedAxis[]): { perm: numb
    * Generates a transformation matrix to convert voxel coordinates from this space to another compatible space.
    * @param targetAxes - The target NeuroSpace to convert coordinates to.
    * @returns A transformation matrix that converts voxel coordinates from this space to the target space.
-   * @throws Error if the spaces are not compatible.
+   * @throws NeuroimError (`GEOMETRY_MISMATCH`) if the spaces are not compatible.
    */
   getPermutationMatrixTo(targetAxes: AxisSet): Matrix {
     if (!this.isCompatibleWithAxes(targetAxes)) {
-      throw new Error('The axes are not compatible for transformation.');
+      throw new NeuroimError('GEOMETRY_MISMATCH', 'The axes are not compatible for transformation.');
     }
 
     const sourceAxes = this._axes.axes();
@@ -1119,7 +1126,7 @@ computeAxisPermutation(oldAxes: NamedAxis[], newAxes: NamedAxis[]): { perm: numb
       }
 
       if (!found) {
-        throw new Error(`Axis ${targetAxis.name} does not have a matching source axis.`);
+        throw new NeuroimError('GEOMETRY_MISMATCH', `Axis ${targetAxis.name} does not have a matching source axis.`);
       }
     }
 

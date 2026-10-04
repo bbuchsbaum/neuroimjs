@@ -1,3 +1,4 @@
+import { NeuroimError } from '../errors';
 import { Matrix, inverse, solve, determinant } from 'ml-matrix';
 
 export class NamedAxis {
@@ -68,7 +69,8 @@ export abstract class AxisSet {
         return i;
       }
     }
-    throw new Error(
+    throw new NeuroimError(
+      'INVALID_ARGUMENT',
       `Axis ${axis.name} not found in ${this.axes()
         .map((ax) => ax.name)
         .join(', ')}`
@@ -94,7 +96,7 @@ export abstract class AxisSet {
       case NamedAxis.SUP_INF.name:
         return NamedAxis.INF_SUP;
       default:
-        throw new Error(`No opposite axis found for ${axis.name}`);
+        throw new NeuroimError('INVALID_ARGUMENT', `No opposite axis found for ${axis.name}`);
     }
   }
 }
@@ -337,10 +339,10 @@ export class AxisSet3D extends AxisSet {
               const axis3 = matchAxis(str[2]);
               return matchAnatomy3D(axis1, axis2, axis3);
             } catch (e) {
-              throw new Error(`Unknown axis string: ${str}. Use XYZ, YZX, XZY, or anatomical codes like LPI`);
+              throw new NeuroimError('INVALID_ARGUMENT', `Unknown axis string: ${str}. Use XYZ, YZX, XZY, or anatomical codes like LPI`);
             }
           }
-          throw new Error(`Unknown axis string: ${str}. Use XYZ, YZX, XZY, or anatomical codes like LPI`);
+          throw new NeuroimError('INVALID_ARGUMENT', `Unknown axis string: ${str}. Use XYZ, YZX, XZY, or anatomical codes like LPI`);
       }
     }
   }
@@ -439,7 +441,7 @@ export class AxisSet3D extends AxisSet {
       case 'SUP_INF':
         return NamedAxis.SUP_INF;
       default:
-        throw new Error(`Unknown axis: ${firstAxis}`);
+        throw new NeuroimError('INVALID_ARGUMENT', `Unknown axis: ${firstAxis}`);
     }
   }
   
@@ -459,7 +461,7 @@ export class AxisSet3D extends AxisSet {
         return orient;
       }
     }
-    throw new Error(`No matching anatomical orientation for axes: ${axis1.name}, ${axis2.name}`);
+    throw new NeuroimError('INVALID_ARGUMENT', `No matching anatomical orientation for axes: ${axis1.name}, ${axis2.name}`);
   }
   
   export function matchAnatomy3D(axis1: NamedAxis, axis2: NamedAxis, axis3: NamedAxis): AxisSet3D {
@@ -471,7 +473,7 @@ export class AxisSet3D extends AxisSet {
         return orient;
       }
     }
-    throw new Error(`No matching anatomical orientation for axes: ${axis1.name}, ${axis2.name}, ${axis3.name}`);
+    throw new NeuroimError('INVALID_ARGUMENT', `No matching anatomical orientation for axes: ${axis1.name}, ${axis2.name}, ${axis3.name}`);
   }
 
   export function oppositeAxis(axis: NamedAxis): NamedAxis {
@@ -489,7 +491,7 @@ export class AxisSet3D extends AxisSet {
       case NamedAxis.SUP_INF:
         return NamedAxis.INF_SUP;
       default:
-        throw new Error(`Unknown axis: ${axis}`);
+        throw new NeuroimError('INVALID_ARGUMENT', `Unknown axis: ${axis}`);
     }
   }
 
@@ -517,7 +519,7 @@ export class AxisSet3D extends AxisSet {
     const jperp = orthogonalize(icol, normalize(column(1)));
     // `!(x >= eps)` also rejects NaN from a zero i or j column.
     if (!(norm(jperp) >= 1e-12)) {
-      throw new Error('Invalid matrix input, columns are degenerate');
+      throw new NeuroimError('INVALID_ARGUMENT', 'Invalid matrix input, columns are degenerate');
     }
     const jcol = normalize(jperp);
     // A zero k column, or one lying in the i-j plane, falls back to i x j.
@@ -525,12 +527,12 @@ export class AxisSet3D extends AxisSet {
     const kperp = norm(kraw) === 0 ? [0, 0, 0] : orthogonalize(jcol, orthogonalize(icol, normalize(kraw)));
     const kcol = norm(kperp) < 1e-12 ? crossProduct(icol, jcol) : normalize(kperp);
     if (![...icol, ...jcol, ...kcol].every(Number.isFinite)) {
-      throw new Error('Invalid matrix input, columns are degenerate');
+      throw new NeuroimError('INVALID_ARGUMENT', 'Invalid matrix input, columns are degenerate');
     }
 
     const Q = new Matrix([icol, jcol, kcol]).transpose();
     const detQ = determinant(Q);
-    if (detQ === 0.0) throw new Error('Invalid matrix input, determinant is 0');
+    if (detQ === 0.0) throw new NeuroimError('INVALID_ARGUMENT', 'Invalid matrix input, determinant is 0');
   
     let vbest = -Infinity;
     let ibest = 0, jbest = 1, kbest = 2;
@@ -578,7 +580,7 @@ export class AxisSet3D extends AxisSet {
         case -2: return NamedAxis.ANT_POST;
         case 3: return NamedAxis.INF_SUP;
         case -3: return NamedAxis.SUP_INF;
-        default: throw new Error(`Invalid axis number: ${num}`);
+        default: throw new NeuroimError('INVALID_ARGUMENT', `Invalid axis number: ${num}`);
       }
     }
   

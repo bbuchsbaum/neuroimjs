@@ -9,7 +9,7 @@ import { NeuroSpace } from '../geometry/NeuroSpace';
 import { nearestAnatomy } from '../geometry/Axis';
 import { Matrix } from 'ml-matrix';
 import { createNeuroVol } from '../volume/NeuroIm';
-import { ValueError, TypeError as TypeErrorType, SliceTypedArrayType, TypedArray } from '../types';
+import { ValueError, SliceTypedArrayType, TypedArray } from '../types';
 import { FileFormat, NIFTIFormat, findDescriptor, getFormat } from './formats';
 import { affineVoxelSizes, niftiScaling } from './niftiGeometry';
 
@@ -136,7 +136,10 @@ async function decodeNifti(
     // Check file format
     const format = await findDescriptor(input);
     if (!format) {
-      throw new ValueError(`Cannot determine file format for: ${input}`);
+      throw new ValueError(`Cannot determine file format for: ${input}`, {
+        code: 'UNSUPPORTED_FORMAT',
+        details: { path: input },
+      });
     }
     
     // Read file asynchronously
@@ -178,24 +181,27 @@ async function decodeNifti(
   }
 
   if (!nifti.isNIFTI(buffer)) {
-    throw new ValueError('The file is not a valid NIfTI file.');
+    throw new ValueError('The file is not a valid NIfTI file.', { code: 'CORRUPT_FILE' });
   }
   
   // Read header
   const header = nifti.readHeader(buffer);
   if (!header) {
-    throw new ValueError('NIfTI header is null or undefined');
+    throw new ValueError('NIfTI header is null or undefined', { code: 'CORRUPT_FILE' });
   }
   onProgress?.(0.6);
   
   // Validate dimensions
   if (!header.dims || header.dims.length < 4) {
-    throw new ValueError('Invalid header dimensions');
+    throw new ValueError('Invalid header dimensions', { code: 'CORRUPT_FILE' });
   }
   
   const numDims = header.dims[0];
   if (numDims < 3 || numDims > 4) {
-    throw new ValueError(`Expected 3D or 4D image, found ${numDims}D image`);
+    throw new ValueError(`Expected 3D or 4D image, found ${numDims}D image`, {
+      code: 'UNSUPPORTED_FORMAT',
+      details: { rank: numDims },
+    });
   }
   
   const imageBuffer = nifti.readImage(header, buffer);
@@ -216,7 +222,10 @@ function volumeFromImage(header: any, imageBuffer: ArrayBuffer, index: number): 
 
   const numVols = volumeCount(header);
   if (index < 0 || index >= numVols) {
-    throw new ValueError(`Index ${index} out of range for 4D data with ${numVols} volumes`);
+    throw new ValueError(`Index ${index} out of range for 4D data with ${numVols} volumes`, {
+      code: 'OUT_OF_RANGE',
+      details: { index, volumeCount: numVols },
+    });
   }
   const volBytes = dim[0] * dim[1] * dim[2] * (header.numBitsPerVoxel / 8);
   const startByte = index * volBytes;
@@ -241,7 +250,10 @@ export async function writeVol(
     // Get format descriptor
     const formatDesc = getFormat(format);
     if (!(formatDesc instanceof NIFTIFormat)) {
-      throw new ValueError(`Format ${format} not yet supported for writing`);
+      throw new ValueError(`Format ${format} not yet supported for writing`, {
+        code: 'UNSUPPORTED_FORMAT',
+        details: { format },
+      });
     }
     
     // Create NIfTI buffer
@@ -280,7 +292,10 @@ export async function readHeader(fileName: string): Promise<HeaderInfo> {
   // Determine format
   const format = await findDescriptor(fileName);
   if (!format) {
-    throw new ValueError(`Cannot determine file format for: ${fileName}`);
+    throw new ValueError(`Cannot determine file format for: ${fileName}`, {
+      code: 'UNSUPPORTED_FORMAT',
+      details: { path: fileName },
+    });
   }
   
   // Read file
@@ -295,12 +310,12 @@ export async function readHeader(fileName: string): Promise<HeaderInfo> {
   }
   
   if (!nifti.isNIFTI(buffer)) {
-    throw new ValueError('Not a valid NIfTI file');
+    throw new ValueError('Not a valid NIfTI file', { code: 'CORRUPT_FILE' });
   }
   
   const header = nifti.readHeader(buffer);
   if (!header) {
-    throw new ValueError('Failed to read NIfTI header');
+    throw new ValueError('Failed to read NIfTI header', { code: 'CORRUPT_FILE' });
   }
   
   // Extract header info
@@ -378,11 +393,14 @@ export async function readVec(
   const numVols = volumeCount(header);
   const volIndices = indices ?? Array.from({ length: numVols }, (_, i) => i);
   if (volIndices.length === 0) {
-    throw new ValueError('indices must select at least one volume');
+    throw new ValueError('indices must select at least one volume', { code: 'INVALID_ARGUMENT' });
   }
   for (const idx of volIndices) {
     if (!Number.isInteger(idx) || idx < 0 || idx >= numVols) {
-      throw new ValueError(`Index ${idx} out of range for 4D data with ${numVols} volumes`);
+      throw new ValueError(`Index ${idx} out of range for 4D data with ${numVols} volumes`, {
+        code: 'OUT_OF_RANGE',
+        details: { index: idx, volumeCount: numVols },
+      });
     }
   }
 
@@ -421,7 +439,10 @@ export async function writeVec(
   // For now, only support NIfTI format
   const formatDesc = getFormat(format);
   if (!(formatDesc instanceof NIFTIFormat)) {
-    throw new ValueError(`Format ${format} not yet supported for writing 4D data`);
+    throw new ValueError(`Format ${format} not yet supported for writing 4D data`, {
+      code: 'UNSUPPORTED_FORMAT',
+      details: { format },
+    });
   }
   
   // Get data
@@ -520,7 +541,10 @@ function createVolFromBuffer(
       TypedArrayConstructor = Float64Array;
       break;
     default:
-      throw new ValueError(`Unsupported data type: ${header.datatypeCode}`);
+      throw new ValueError(`Unsupported data type: ${header.datatypeCode}`, {
+        code: 'UNSUPPORTED_DATATYPE',
+        details: { datatypeCode: header.datatypeCode },
+      });
   }
   
   let typedArray: TypedArray = new TypedArrayConstructor(
