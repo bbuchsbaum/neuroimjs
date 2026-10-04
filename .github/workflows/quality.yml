@@ -83,6 +83,30 @@ jobs:
             e2e/**/*-snapshots/
           retention-days: 14
 
+  # Downstream contract tests: each known consumer's call surface (neuromosaic,
+  # FROIAtlas, neuroimjs-vscode, xnat2bids) against the packed tarball.
+  consumers:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build
+      - run: npm run build:vite
+      - run: npm run test:consumers
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: consumer-contract-results
+          path: test-results/consumers/
+          retention-days: 14
+
   # Optional: the atlas loaders against the real Glasser/Schaefer downloads.
   # The default suite serves synthetic files with the same geometry and label
   # formats (tests/helpers/syntheticAtlas.ts). Runs weekly and on manual

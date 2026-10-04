@@ -69,9 +69,10 @@
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:update": "playwright test --update-snapshots",
     "test:package": "node scripts/verify-package.mjs",
+    "test:consumers": "node scripts/verify-consumers.mjs",
     "check:bundle-size": "node scripts/check-bundle-size.mjs",
     "audit:prod": "npm audit --omit=dev --audit-level=high",
-    "verify:release": "npm run test:types && npm run lint:ci && npm test -- --run --silent && npm run build && npm run build:vite && npm run check:bundle-size && npm run test:package && npm run docs:api && npm run audit:prod"
+    "verify:release": "npm run test:types && npm run lint:ci && npm test -- --run --silent && npm run build && npm run build:vite && npm run check:bundle-size && npm run test:package && npm run test:consumers && npm run docs:api && npm run audit:prod"
   },
   "keywords": [
     "neuroimaging",

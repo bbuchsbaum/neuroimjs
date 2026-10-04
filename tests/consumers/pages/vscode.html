@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>neuroimjs-vscode contract</title>
+  <style>
+    body { margin: 0; padding: 12px; display: grid; grid-template-columns: 300px 1fr; gap: 12px; }
+    .views { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+    .view-canvas { width: 280px; height: 280px; position: relative; }
+  </style>
+</head>
+<body>
+  <aside><layer-control-panel id="layer-panel" theme="dark"></layer-control-panel></aside>
+  <section class="views">
+    <div id="axial-container" class="view-canvas"></div>
+    <div id="sagittal-container" class="view-canvas"></div>
+    <div id="coronal-container" class="view-canvas"></div>
+  </section>
+  <script type="module" src="./vscode.ts"></script>
+</body>
+</html>
