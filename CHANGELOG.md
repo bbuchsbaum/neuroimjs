@@ -7,6 +7,13 @@ in the pull request that makes the change.
 
 ## Unreleased
 
+### Changed
+
+- Releases are published from CI by the `Release` workflow, triggered by a
+  GitHub release, using npm Trusted Publishing (OIDC) with a provenance
+  attestation; `scripts/verify-published.mjs` checks that the registry
+  tarball matches the CI build file for file. See `RELEASING.md`.
+
 ## 0.5.0 - 2026-10-03
 
 Upgrading from 0.4.0: Node.js 22 or later is required; `ImageLayer` defaults
