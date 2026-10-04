@@ -115,8 +115,14 @@ try {
 
 `isNeuroimError` also recognises errors from another copy of the library, such
 as the CommonJS and ESM builds loaded side by side, where `instanceof` fails.
-`NeuroimError` and `isNeuroimError` are exported from both `neuroimjs` and
-`neuroimjs/browser`.
+`NeuroimError`, `NeuroimTypeError` and `isNeuroimError` are exported from both
+`neuroimjs` and `neuroimjs/browser`. The deprecated `ValueError`, `IOError` and
+`NotImplementedError` are exported from `neuroimjs` only.
+
+An error that crosses a worker boundary (`postMessage`, `structuredClone`)
+arrives as a plain `Error`: the clone drops `code`, `details` and the brand
+that `isNeuroimError` checks, so send `{ code, message }` explicitly if the
+other side needs to branch on it.
 
 | Code | Meaning | Typical sources |
 |---|---|---|
@@ -126,7 +132,7 @@ as the CommonJS and ESM builds loaded side by side, where `instanceof` fails.
 | `UNSUPPORTED_FORMAT` | The format, or a valid feature of it, is not supported | unknown file extension; writing a non-NIfTI format; a NIfTI that is neither 3D nor 4D |
 | `UNSUPPORTED_DATATYPE` | The voxel data type is not supported | NIfTI datatypes such as FLOAT128 or RGB24 |
 | `CORRUPT_FILE` | The bytes do not decode as the expected format | bad magic number, unreadable header, invalid dimensions, truncated image data |
-| `NOT_IMPLEMENTED` | The API exists but has no implementation for this input | `NotImplementedError` |
+| `NOT_IMPLEMENTED` | The API exists but has no implementation for this input | `reorient` on a space that is not 2D or 3D; `NotImplementedError` |
 | `IO_ERROR` | Reading from or writing to storage failed | `IOError` |
 
 Errors raised by Node itself, such as `ENOENT` for a missing file, and by

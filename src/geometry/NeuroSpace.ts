@@ -240,7 +240,7 @@ export class NeuroSpace {
     } else if (newAxesArray.length === 1) {
       newAxes = new AxisSet1D(newAxesArray[0]);
     } else {
-      throw new NeuroimError('INVALID_ARGUMENT', 'Unsupported number of axes after dropping dimension');
+      throw new NeuroimError('NOT_IMPLEMENTED', 'Unsupported number of axes after dropping dimension');
     }
   
     // Construct the transformation matrix based on remaining dimensions
@@ -706,7 +706,10 @@ export class NeuroSpace {
   
     const ndim = this.ndim();
     if (ndim !== 2 && ndim !== 3) {
-      throw new NeuroimError('INVALID_ARGUMENT', `Reorientation is only supported for 2D and 3D spaces. Got ${ndim}D space.`);
+      throw new NeuroimError(
+        'NOT_IMPLEMENTED',
+        `Reorientation is only supported for 2D and 3D spaces. Got ${ndim}D space.`
+      );
     }
   
     let anat: AxisSet;

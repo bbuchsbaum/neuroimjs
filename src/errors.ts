@@ -77,7 +77,6 @@ export class NeuroimError extends Error {
     super(message);
     // Keep `instanceof` working even if this file is ever down-levelled to ES5.
     Object.setPrototypeOf(this, new.target.prototype);
-    this.name = 'NeuroimError';
     this.code = code;
     if (options.details !== undefined) this.details = options.details;
     if ('cause' in options) {
@@ -103,6 +102,7 @@ export function isNeuroimError(error: unknown, code?: NeuroimErrorCode): error i
     return code === undefined || error.code === code;
   }
   if (typeof error !== 'object' || error === null) return false;
+  if (typeof (error as { message?: unknown }).message !== 'string') return false;
   const candidate = (error as { code?: unknown }).code;
   if (typeof candidate !== 'string' || !(NEUROIM_ERROR_CODES as readonly string[]).includes(candidate)) {
     return false;
@@ -130,7 +130,6 @@ export interface ValueErrorOptions extends NeuroimErrorOptions {
 export class ValueError extends NeuroimError {
   constructor(message: string, options: ValueErrorOptions = {}) {
     super(options.code ?? 'INVALID_ARGUMENT', message, options);
-    this.name = 'ValueError';
   }
 }
 
@@ -143,7 +142,6 @@ export class ValueError extends NeuroimError {
 export class NeuroimTypeError extends NeuroimError {
   constructor(message: string, options: NeuroimErrorOptions = {}) {
     super('INVALID_ARGUMENT', message, options);
-    this.name = 'NeuroimTypeError';
   }
 }
 
@@ -151,7 +149,6 @@ export class NeuroimTypeError extends NeuroimError {
 export class NotImplementedError extends NeuroimError {
   constructor(message: string = 'Method not implemented', options: NeuroimErrorOptions = {}) {
     super('NOT_IMPLEMENTED', message, options);
-    this.name = 'NotImplementedError';
   }
 }
 
@@ -159,6 +156,27 @@ export class NotImplementedError extends NeuroimError {
 export class IOError extends NeuroimError {
   constructor(message: string, options: NeuroimErrorOptions = {}) {
     super('IO_ERROR', message, options);
-    this.name = 'IOError';
   }
+}
+
+/**
+ * `name` lives on each prototype (non-enumerable, like the built-in errors)
+ * rather than as an own property. V8 formats the stack header when the error
+ * is constructed, before a constructor body could assign `this.name`, so a
+ * prototype value is what makes the header read `ValueError: ...`. Class names
+ * are spelled out because minifiers mangle `constructor.name`.
+ */
+for (const [ctor, name] of [
+  [NeuroimError, 'NeuroimError'],
+  [ValueError, 'ValueError'],
+  [NeuroimTypeError, 'NeuroimTypeError'],
+  [NotImplementedError, 'NotImplementedError'],
+  [IOError, 'IOError'],
+] as const) {
+  Object.defineProperty(ctor.prototype, 'name', {
+    value: name,
+    writable: true,
+    configurable: true,
+    enumerable: false,
+  });
 }

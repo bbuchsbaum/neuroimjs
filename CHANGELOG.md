@@ -40,9 +40,10 @@ from `pixdim`. Callers that need the raw `pixdim[1..3]` should use
   object and an ES2022 `cause`. `isNeuroimError(error, code?)` narrows an
   unknown error, including one from a second copy of the library (for example
   the CJS and ESM builds loaded together). `NEUROIM_ERROR_CODES` lists the
-  codes. Every throw in `src/io` and `src/geometry` now has a specific code,
-  and messages are unchanged. `NeuroimError` and `isNeuroimError` are also
-  exported from `neuroimjs/browser`. `ValueError`, `NotImplementedError` and
+  codes. The TypeScript modules in `src/io` and `src/geometry` throw only
+  coded errors, with messages unchanged; other modules are not yet migrated.
+  `NeuroimError`, `NeuroimTypeError` and `isNeuroimError` are also exported
+  from `neuroimjs/browser`. `ValueError`, `NotImplementedError` and
   `IOError` are now subclasses of `NeuroimError` and keep their `name`s. See
   the Errors section of the I/O guide.
 

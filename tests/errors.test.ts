@@ -95,6 +95,23 @@ describe('NeuroimError', () => {
     expect(new NotImplementedError().message).toBe('Method not implemented');
   });
 
+  it('defines name on the prototype so it is non-enumerable and heads the stack', () => {
+    const cases: Array<[Error, string]> = [
+      [new NeuroimError('IO_ERROR', 'msg'), 'NeuroimError'],
+      [new ValueError('msg'), 'ValueError'],
+      [new NeuroimTypeError('msg'), 'NeuroimTypeError'],
+      [new NotImplementedError('msg'), 'NotImplementedError'],
+      [new IOError('msg'), 'IOError'],
+    ];
+    for (const [error, name] of cases) {
+      expect(Object.keys(error)).not.toContain('name');
+      expect(Object.prototype.hasOwnProperty.call(error, 'name')).toBe(false);
+      expect(error.name).toBe(name);
+      expect(error.stack?.split('\n')[0]).toBe(`${name}: msg`);
+      expect(String(error)).toBe(`${name}: msg`);
+    }
+  });
+
   it('isNeuroimError rejects foreign errors and wrong codes', () => {
     expect(isNeuroimError(new Error('x'))).toBe(false);
     expect(isNeuroimError(new globalThis.TypeError('x'))).toBe(false);
@@ -102,6 +119,14 @@ describe('NeuroimError', () => {
     expect(isNeuroimError(null)).toBe(false);
     expect(isNeuroimError('INVALID_ARGUMENT')).toBe(false);
     expect(isNeuroimError(new ValueError('x'), 'CORRUPT_FILE')).toBe(false);
+    // A branded foreign object needs a string message and a known code.
+    const brandedProto = Object.defineProperty({}, Symbol.for('neuroimjs.NeuroimError'), { value: true });
+    const branded = (fields: object) => Object.assign(Object.create(brandedProto), fields);
+    expect(isNeuroimError(branded({ code: 'IO_ERROR', message: 'ok' }))).toBe(true);
+    expect(isNeuroimError(branded({ code: 'IO_ERROR', message: 42 }))).toBe(false);
+    expect(isNeuroimError(branded({ code: 'IO_ERROR' }))).toBe(false);
+    expect(isNeuroimError(branded({ code: 'NOPE', message: 'ok' }))).toBe(false);
+    expect(isNeuroimError(branded({ code: 7, message: 'ok' }))).toBe(false);
   });
 
   it('isNeuroimError recognises errors from a duplicate copy of the library', () => {
@@ -254,6 +279,11 @@ describe('geometry error codes', () => {
     const space = new NeuroSpace([4, 4, 4]);
     expectCode(caught(() => space.extractSliceNeuroSpace(9, 2)), 'OUT_OF_RANGE');
     expectCode(caught(() => space.extractSliceNeuroSpace(0, 7)), 'OUT_OF_RANGE');
+  });
+
+  it('reorienting a 4D space is NOT_IMPLEMENTED', () => {
+    const lpi = new AxisSet3D(NamedAxis.LEFT_RIGHT, NamedAxis.POST_ANT, NamedAxis.INF_SUP);
+    expectCode(caught(() => new NeuroSpace([2, 2, 2, 3]).reorient(lpi)), 'NOT_IMPLEMENTED');
   });
 
   it('too many coordinates is INVALID_ARGUMENT', () => {

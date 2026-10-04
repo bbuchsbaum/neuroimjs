@@ -39,6 +39,8 @@ try {
     const legacy = new nij.ValueError('x');
     if (!(legacy instanceof nij.NeuroimError) || legacy.code !== 'INVALID_ARGUMENT' || legacy.name !== 'ValueError') fail('ValueError back-compat broken');
     if (!(new nij.NeuroimTypeError('t') instanceof nij.NeuroimError)) fail('NeuroimTypeError not a NeuroimError');
+    if (Object.keys(legacy).includes('name')) fail('name is an own enumerable property');
+    if (String(legacy.stack).split('\\n')[0] !== 'ValueError: x') fail('wrong stack header: ' + String(legacy.stack).split('\\n')[0]);
   `;
   run('node', [
     '-e',
