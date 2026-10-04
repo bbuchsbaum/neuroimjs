@@ -76,6 +76,7 @@
     "test:debug": "vitest run --reporter=verbose --no-coverage",
     "test:conformance": "vitest run tests/conformance",
     "conformance:generate": "node scripts/conformance/generate.mjs",
+    "conformance:writers": "node scripts/conformance/check-writers.mjs",
     "lint": "eslint src tests",
     "lint:ci": "eslint src tests --max-warnings 608",
     "format": "prettier --write src tests",

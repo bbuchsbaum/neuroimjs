@@ -208,7 +208,7 @@ sub.space.dim // [2, 3, 4, 5]
 // Build one from 3D volumes and write it out as a 4D NIfTI:
 const frames = [await readVol('bold.nii', { index: 0 }), await readVol('bold.nii', { index: 1 })]
 const pair = bigNeuroVecSeq(frames)
-await writeVec(pair, 'pair.nii.gz', { compress: true })
+await writeVec(pair, 'pair.nii.gz') // gzipped: compression follows the extension
 
 // readVec and bigNeuroVecSeq keep everything in memory; cleanup() is harmless
 // and only deletes a backing file when the vec was constructed with one.
@@ -223,23 +223,23 @@ Things to know before relying on `BigNeuroVec` for large data:
 
 ### Writing 4D data
 
-`writeVec` assumes the time-first layout. If you pass an `[X, Y, Z, T]` vec, it is written with the wrong dimensions in the header. It also writes only an axis-aligned sform built from the vec's spacing and origin, so rotations and flips in the original affine are lost. Restack an `[X, Y, Z, T]` vec into a `BigNeuroVec` first:
+`writeVec` writes either layout. It reads the layout from the class: a `BigNeuroVec` is time-first and takes its geometry from `volumeSpace`, while a `DenseNeuroVec` (`Float32NeuroVec`, `Int16NeuroVec`, …) or `SparseNeuroVec` is time-last and takes it from its 4D `space`. The file is always NIfTI `[X, Y, Z, T]`, with the full affine stored as both qform and sform. Other `NeuroVec` implementations are rejected with `INVALID_ARGUMENT`.
 
 ```ts
-import { NeuroSpace, Float32NeuroVec, bigNeuroVecSeq, writeVec, readHeader } from 'neuroimjs'
+import { NeuroSpace, Float32NeuroVec, writeVec, readHeader, readVol } from 'neuroimjs'
 
-const bold = new Float32NeuroVec(new NeuroSpace([3, 4, 5, 6], [2, 2, 2], [-3, -4, -5]))
+// [X, Y, Z, T] with a 2 mm grid and a 2.5 s TR in the fourth spacing entry.
+const bold = new Float32NeuroVec(new NeuroSpace([3, 4, 5, 6], [2, 2, 2, 2.5], [-3, -4, -5, 0]))
 bold.getData().fill(1)
 
-// writeVec expects the time-first layout; restack an x,y,z,t vec first.
-const T = bold.dim[3]
-const timeFirst = bigNeuroVecSeq(Array.from({ length: T }, (_, t) => bold.getVolume(t)))
-await writeVec(timeFirst, 'bold_out.nii')
-timeFirst.cleanup()
+await writeVec(bold, 'bold_out.nii.gz')
 
-const hdr = await readHeader('bold_out.nii')
+const hdr = await readHeader('bold_out.nii.gz')
 hdr.dim // [4, 3, 4, 5, 6, 1, 1, 1]
+const frame = await readVol('bold_out.nii.gz', { index: 5 }) // same affine as bold.getVolume(5)
 ```
+
+`pixdim[4]` is the vec's time spacing when its space has one (`spacing[3]` here; `spacing[0]` for a `BigNeuroVec`), otherwise 1. `readVec` does not read it back.
 
 ## Hypervectors (5D and beyond)
 

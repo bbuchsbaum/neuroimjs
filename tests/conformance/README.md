@@ -89,6 +89,21 @@ manifest entry records this in `reference_note`. neuroimjs applies the same
 rule. By contrast, nibabel loads `scl_slope_nan`, where a NaN slope disables
 scaling (and `scl_inter`) entirely.
 
+## Checking the writers with nibabel (opt-in)
+
+```bash
+npm run conformance:writers
+```
+
+`nifti.writers.nibabel.test.ts` writes 3D and 4D files with `writeVol` and
+`writeVec` (oblique left-handed affine, float32 and int16, time-first
+`BigNeuroVec` and time-last `Float32NeuroVec`/`Int16NeuroVec`), then loads
+them with nibabel through `scripts/conformance/inspect_written_nifti.py`. Shape,
+datatype, qform, sform, zooms, units and every voxel value must agree. It uses
+the Python, nibabel and numpy versions recorded in `manifest.json` and finds
+uv as the generator does. Without `NIJ_NIBABEL=1`, which the npm script sets,
+the spec is skipped, so `npm test` needs no Python.
+
 ## Regenerating the fixtures
 
 ```bash

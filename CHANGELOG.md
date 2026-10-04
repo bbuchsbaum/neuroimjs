@@ -14,6 +14,9 @@ from `pixdim`. Callers that need the raw `pixdim[1..3]` should use
 
 ### Added
 
+- `npm run conformance:writers` (opt-in, needs uv) loads files written by
+  `writeVol` and `writeVec` with nibabel and checks shape, datatype, qform,
+  sform, zooms and voxel values.
 - `toInt32Labels()` converts a label volume (or its voxel data) to an
   `Int32Array` by value, for every typed-array datatype. It rejects
   non-finite, non-integer and out-of-range values with an error naming the
@@ -121,6 +124,24 @@ from `pixdim`. Callers that need the raw `pixdim[1..3]` should use
   a `compress` or `format` option that contradicts a NIfTI extension throws a
   `NeuroimError` with code `INVALID_ARGUMENT` before anything is written. For
   other extensions the options decide as before.
+- `writeVec` writes time-last vecs and oblique geometry correctly.
+  - **Affected:** it assumed the time-first `[T, X, Y, Z]` layout of
+    `BigNeuroVec`, so a time-last `Float32NeuroVec` (or any `DenseNeuroVec`)
+    was written with header dims `[Y, Z, T, X]` over unchanged bytes. It wrote
+    only an axis-aligned sform built from spacing and origin, dropping
+    rotations and flips, and no qform. Without `dataType` the header always
+    said FLOAT32 whatever the bytes were, so an `Int16NeuroVec` could not be
+    read back. A `SparseNeuroVec` could not be written at all.
+  - **Now:** the layout comes from the class: `BigNeuroVec` is time-first
+    with geometry from `volumeSpace`; `DenseNeuroVec` subclasses and
+    `SparseNeuroVec` are time-last with geometry from their 4D `space`. Any
+    other `NeuroVec` throws `INVALID_ARGUMENT`. The full affine is written as
+    qform and sform, as `writeVol` does, the datatype follows the data, and
+    `pixdim[4]` is the time spacing if the space has one, else 1.
+- `writeVol` sets `pixdim[1..3]` to the voxel sizes implied by the affine
+  (its column norms), which the qform needs to reproduce the affine.
+  Previously it wrote `space.spacing`, which can disagree with the affine.
+  The datatype code now always matches the bytes written.
 - `readVol` and `readNiftiArrayBuffer` no longer add `scl_inter` when
   `scl_slope` is 0 or non-finite. Such a slope means "no scaling" (NIfTI-1
   spec, nibabel), so voxel values are now returned exactly as stored.

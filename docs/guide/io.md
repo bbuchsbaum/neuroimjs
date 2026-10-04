@@ -103,9 +103,9 @@ Compression follows the file name. `writeVol`, `writeVec` and `write_vol` gzip a
 - `format` accepts only NIfTI names (`'NIFTI'`, `'NIFTI_GZ'`); anything else throws `UNSUPPORTED_FORMAT`. `'NIFTI'`, the default, leaves compression to the extension; `'NIFTI_GZ'` requests gzip.
 - `compress` requests (`true`) or refuses (`false`) gzip, subject to the extension rule above.
 
-`writeVol` stores both the qform and the sform from the volume's affine. `writeVec` writes only an axis-aligned sform built from the vec's spacing and origin, so rotations and flips in the original affine are lost.
+`writeVol` and `writeVec` store the full affine, rotations and flips included, as both the qform and the sform (both with code 1), and set `pixdim[1..3]` to the voxel sizes implied by the affine. Spatial units are written as mm. The datatype follows the voxel data unless `dataType` is given.
 
-`writeVec(vec, path, options)` writes a 4D file and takes the same options. It expects the **time-first** layout that `readVec` and `bigNeuroVecSeq` produce. See [Writing 4D data](/guide/time-series#writing-4d-data) for converting an `[X, Y, Z, T]` vec first.
+`writeVec(vec, path, options)` writes a 4D file and takes the same options. It reads the layout from the class, never from the dimensions: a `BigNeuroVec` (what `readVec` and `bigNeuroVecSeq` return) is time-first and takes its geometry from `volumeSpace`; a `DenseNeuroVec` (`Float32NeuroVec`, `Int16NeuroVec`, …) or `SparseNeuroVec` is time-last and takes it from its 4D `space`. Both are written as NIfTI `[X, Y, Z, T]`, so `readVol(path, { index: t })` returns frame `t` either way. Any other `NeuroVec` implementation is rejected with `INVALID_ARGUMENT`. `pixdim[4]` is the vec's time spacing when its space has one (`spacing[3]` time-last, `spacing[0]` time-first), otherwise 1, and the time unit is left unspecified. `readVec` does not read the TR back. See [Writing 4D data](/guide/time-series#writing-4d-data).
 
 ## Node: inspect a header
 

@@ -5,6 +5,7 @@ import { DenseNeuroVec } from '../vec/NeuroVec';
 import { FloatNeuroVol, Int16NeuroVol, UInt8NeuroVol, Float64NeuroVol } from '../volume/DenseNeuroVol';
 import { LogicalNeuroVol } from '../volume/LogicalNeuroVol';
 import { BigNeuroVec } from '../vector/BigNeuroVec';
+import { SparseNeuroVec } from '../vec/SparseNeuroVec';
 import { NeuroSpace } from '../geometry/NeuroSpace';
 import { nearestAnatomy } from '../geometry/Axis';
 import { Matrix } from 'ml-matrix';
@@ -471,7 +472,22 @@ export async function readVec(
 }
 
 /**
- * Write a NeuroVec to file.
+ * Write a NeuroVec to a 4D NIfTI-1 file.
+ *
+ * The layout is taken from the class, not guessed from the dimensions:
+ * `BigNeuroVec` (what `readVec` returns) is time-first, `dim = [T, X, Y, Z]`,
+ * with its geometry on `volumeSpace`; `DenseNeuroVec` and its subclasses
+ * (`Float32NeuroVec`, `Int16NeuroVec`, ...) and `SparseNeuroVec` are
+ * time-last, `dim = [X, Y, Z, T]`, with the affine on their 4D `space`. All
+ * are written as NIfTI `[X, Y, Z, T]`. Any other `NeuroVec` implementation
+ * throws `INVALID_ARGUMENT`.
+ *
+ * The header carries the full spatial affine as both qform and sform (codes
+ * 1), as {@link writeVol} does. `pixdim[4]` is the vec's time spacing when its
+ * space has one (`spacing[3]` time-last, `spacing[0]` time-first), else 1;
+ * spatial units are mm and the time unit is left unspecified. The datatype
+ * follows the data (`SparseNeuroVec` writes FLOAT32) unless `dataType` is
+ * given. Compression follows the extension, as for {@link writeVol}.
  */
 export async function writeVec(
   vec: NeuroVec,
@@ -482,46 +498,69 @@ export async function writeVec(
 
   const formatDesc = niftiWriteFormat(format, ' 4D data');
   const gzip = resolveGzip(fileName, formatDesc, options);
-  
-  // Get data
-  const data = vec.getData();
-  const shape = vec.dim;
-  
-  // Create 4D NIfTI header
-  const header = create4DNiftiHeader(shape, vec.spacing, vec.origin, dataType);
+
+  const { dims, affine, data, timeStep } = niftiVecLayout(vec);
   onProgress?.(0.3);
-  
-  // Create buffer
-  const headerBuffer = Buffer.alloc(352); // NIfTI-1 header + padding
-  writeNiftiHeader(headerBuffer, header);
-  
-  // Convert data to appropriate type
-  const typedData = convertDataType(data, dataType);
-  onProgress?.(0.6);
-  
-  // Combine header and data
-  const dataBytes = Buffer.from(typedData.buffer, typedData.byteOffset, typedData.byteLength);
-  const totalBuffer = Buffer.concat([
-    headerBuffer,
-    dataBytes
-  ]);
+
+  const buffer = encodeNifti1(dims, affine, data, dataType, timeStep);
   onProgress?.(0.8);
-  
-  // Compress if needed
-  let outputBuffer = totalBuffer;
+
+  let outputBuffer = new Uint8Array(buffer);
   if (gzip) {
-    const compressed = pako.gzip(new Uint8Array(totalBuffer));
-    outputBuffer = Buffer.from(compressed.buffer.slice(
-      compressed.byteOffset,
-      compressed.byteOffset + compressed.byteLength
-    ));
+    outputBuffer = pako.gzip(outputBuffer);
     onProgress?.(0.9);
   }
-  
-  // Write to file
+
   const fs = await import('fs/promises');
   await fs.writeFile(fileName, outputBuffer);
   onProgress?.(1.0);
+}
+
+/**
+ * Map a NeuroVec to NIfTI order: `[X, Y, Z, T]` dims, the spatial affine, the
+ * voxel data (x fastest, one volume after another) and the time step. Both
+ * layouts already store voxels in NIfTI order; only the `dim` labels differ.
+ */
+function niftiVecLayout(vec: NeuroVec): {
+  dims: number[];
+  affine: number[][];
+  data: TypedArray;
+  timeStep: number;
+} {
+  if (vec instanceof BigNeuroVec) {
+    const [nt, nx, ny, nz] = vec.dim;
+    const spacing = vec.space.spacing;
+    return {
+      dims: [nx, ny, nz, nt],
+      affine: vec.volumeSpace.trans.to2DArray(),
+      data: vec.getData(),
+      timeStep: spacing.length === 4 ? spacing[0] : 1,
+    };
+  }
+  if (vec instanceof DenseNeuroVec || vec instanceof SparseNeuroVec) {
+    const [nx, ny, nz, nt] = vec.dim;
+    const spacing = vec.space.spacing;
+    let data: TypedArray;
+    if (vec instanceof DenseNeuroVec) {
+      data = vec.getData();
+    } else {
+      const volumeLength = nx * ny * nz;
+      const dense = new Float32Array(volumeLength * nt);
+      for (let t = 0; t < nt; t++) dense.set(vec.getVolume(t).getData(), t * volumeLength);
+      data = dense;
+    }
+    return {
+      dims: [nx, ny, nz, nt],
+      affine: vec.space.trans.to2DArray(),
+      data,
+      timeStep: spacing.length === 4 ? spacing[3] : 1,
+    };
+  }
+  throw new ValueError(
+    'writeVec cannot tell the layout of this NeuroVec: expected a BigNeuroVec (time-first), ' +
+      'a DenseNeuroVec subclass or a SparseNeuroVec (time-last)',
+    { code: 'INVALID_ARGUMENT', details: { className: (vec as object)?.constructor?.name } }
+  );
 }
 
 // Helper functions
@@ -638,8 +677,37 @@ function byteSwapInPlace(arr: TypedArray): void {
 
 async function createNiftiBuffer(vol: NeuroVol, dataType?: string): Promise<ArrayBuffer> {
   const space = vol.space;
-  const dim = space.dim;
-  const spacing = space.spacing;
+  return encodeNifti1(space.dim, space.trans.to2DArray(), vol.getData(), dataType);
+}
+
+/**
+ * Encode a 3D or 4D image as a single-file NIfTI-1 (`n+1`) buffer.
+ *
+ * `dims` is `[X, Y, Z]` or `[X, Y, Z, T]` and `data` is in NIfTI order
+ * (x fastest). `affine` is the 4x4 voxel-to-world matrix; it is stored as both
+ * qform and sform, and `pixdim[1..3]` are its column norms so the qform
+ * reproduces it. `timeStep` becomes `pixdim[4]` for 4D images. The datatype
+ * follows `data` unless `dataType` is given; either way the header and the
+ * bytes agree.
+ */
+function encodeNifti1(
+  dims: readonly number[],
+  affine: number[][],
+  data: TypedArray,
+  dataType?: string,
+  timeStep = 1
+): ArrayBuffer {
+  if (dims.length !== 3 && dims.length !== 4) {
+    throw new ValueError(`Cannot write a ${dims.length}D image as NIfTI; expected 3D or 4D`, {
+      code: 'INVALID_ARGUMENT',
+      details: { dim: [...dims] },
+    });
+  }
+  const q = matToQuatern(affine);
+  const { datatypeCode, bitpix } = getDataTypeInfo(dataType ?? data.constructor.name);
+  // Convert to the exact type named in the header (also covers inputs such as
+  // Uint8ClampedArray that have no NIfTI code and default to FLOAT32).
+  const typedData = convertDataType(data, getDatatypeName(datatypeCode));
   
   // Create header buffer. Buffer.alloc() may return a view into a shared pool,
   // so the DataView must respect byteOffset/byteLength rather than assuming the
@@ -676,11 +744,11 @@ async function createNiftiBuffer(vol: NeuroVol, dataType?: string): Promise<Arra
   headerView.setUint8(39, 0);
   
   // Set dimensions
-  headerView.setInt16(40, 3, true); // dims[0] = 3 dimensions
-  headerView.setInt16(42, dim[0], true); // dims[1]
-  headerView.setInt16(44, dim[1], true); // dims[2]
-  headerView.setInt16(46, dim[2], true); // dims[3]
-  headerView.setInt16(48, 1, true); // dims[4]
+  headerView.setInt16(40, dims.length, true); // dims[0] = rank
+  headerView.setInt16(42, dims[0], true); // dims[1]
+  headerView.setInt16(44, dims[1], true); // dims[2]
+  headerView.setInt16(46, dims[2], true); // dims[3]
+  headerView.setInt16(48, dims.length === 4 ? dims[3] : 1, true); // dims[4]
   headerView.setInt16(50, 1, true); // dims[5]
   headerView.setInt16(52, 1, true); // dims[6]
   headerView.setInt16(54, 1, true); // dims[7]
@@ -694,19 +762,20 @@ async function createNiftiBuffer(vol: NeuroVol, dataType?: string): Promise<Arra
   headerView.setInt16(68, 0, true);
   
   // Set datatype and bitpix
-  const { datatypeCode, bitpix } = getDataTypeInfo(vol, dataType);
   headerView.setInt16(70, datatypeCode, true);
   headerView.setInt16(72, bitpix, true);
   
   // Set slice_start
   headerView.setInt16(74, 0, true);
   
-  // Set pixdim (spacing)
-  headerView.setFloat32(76, 0.0, true); // pixdim[0]
-  headerView.setFloat32(80, spacing[0], true); // pixdim[1]
-  headerView.setFloat32(84, spacing[1], true); // pixdim[2]
-  headerView.setFloat32(88, spacing[2], true); // pixdim[3]
-  headerView.setFloat32(92, 1.0, true); // pixdim[4]
+  // Set pixdim: qfac (handedness), the voxel sizes implied by the affine,
+  // then the time step.
+  const pixdim4 = dims.length === 4 && Number.isFinite(timeStep) && timeStep > 0 ? timeStep : 1;
+  headerView.setFloat32(76, q.qfac, true); // pixdim[0]
+  headerView.setFloat32(80, q.pixdim[0], true); // pixdim[1]
+  headerView.setFloat32(84, q.pixdim[1], true); // pixdim[2]
+  headerView.setFloat32(88, q.pixdim[2], true); // pixdim[3]
+  headerView.setFloat32(92, pixdim4, true); // pixdim[4]
   headerView.setFloat32(96, 1.0, true); // pixdim[5]
   headerView.setFloat32(100, 1.0, true); // pixdim[6]
   headerView.setFloat32(104, 1.0, true); // pixdim[7]
@@ -760,11 +829,6 @@ async function createNiftiBuffer(vol: NeuroVol, dataType?: string): Promise<Arra
   // qform and sform transforms. Many tools (e.g. FSL/SPM) prefer qform; writing
   // only sform — as the previous implementation did — loses the orientation for
   // those readers.
-  const affine = space.trans.to2DArray();
-  const q = matToQuatern(affine);
-
-  // pixdim[0] carries qfac (handedness), offset 76
-  headerView.setFloat32(76, q.qfac, true);
 
   // Set qform_code = 1 (NIFTI_XFORM_SCANNER_ANAT)
   headerView.setInt16(252, 1, true);
@@ -806,20 +870,16 @@ async function createNiftiBuffer(vol: NeuroVol, dataType?: string): Promise<Arra
   // Set magic string
   headerBuffer.write('n+1\0', 344, 4, 'ascii');
   
-  // Get data
-  const data = vol.getData();
-  const dataBuffer = convertDataType(data, dataType);
-  
   // Combine header and data
-  const dataBytes = Buffer.from(dataBuffer.buffer, dataBuffer.byteOffset, dataBuffer.byteLength);
+  const dataBytes = Buffer.from(typedData.buffer, typedData.byteOffset, typedData.byteLength);
   const combined = Buffer.concat([headerBuffer, dataBytes]);
   
   // Return proper ArrayBuffer
   return combined.buffer.slice(combined.byteOffset, combined.byteOffset + combined.byteLength);
 }
 
-function getDataTypeInfo(vol: NeuroVol, requestedType?: string): { datatypeCode: number; bitpix: number } {
-  const dataType = requestedType || vol.getDataConstructor().name;
+/** NIfTI datatype code and bitpix for a type name or TypedArray class name. */
+function getDataTypeInfo(dataType: string): { datatypeCode: number; bitpix: number } {
   
   switch (dataType.toUpperCase()) {
     case 'INT8ARRAY':
@@ -914,26 +974,6 @@ function roundClampToInt<T extends TypedArray>(
   return out;
 }
 
-function create4DNiftiHeader(shape: number[], spacing: number[], origin: number[], dataType?: string): any {
-  // Create a header object compatible with NIfTI
-  // shape should be [t, x, y, z] but NIfTI wants [x, y, z, t]
-  const niftiShape = [shape[1], shape[2], shape[3], shape[0]];
-  const niftiSpacing = [spacing[1], spacing[2], spacing[3], spacing[0]];
-  
-  return {
-    dims: [4, ...niftiShape, 1, 1, 1].slice(0, 8), // Ensure exactly 8 elements
-    pixDims: [0, ...niftiSpacing, 1, 1, 1, 1].slice(0, 8), // Ensure exactly 8 elements
-    affine: [
-      [niftiSpacing[0], 0, 0, origin[1] || 0],
-      [0, niftiSpacing[1], 0, origin[2] || 0],
-      [0, 0, niftiSpacing[2], origin[3] || 0],
-      [0, 0, 0, 1]
-    ],
-    datatypeCode: getDataTypeInfo({ getDataConstructor: () => Float32Array } as any, dataType).datatypeCode,
-    numBitsPerVoxel: getDataTypeInfo({ getDataConstructor: () => Float32Array } as any, dataType).bitpix
-  };
-}
-
 /**
  * Convert a 4x4 affine (srow form) into NIfTI quaternion parameters
  * (quatern_b/c/d, qoffset, pixdim scales, and qfac handedness), following the
@@ -1006,52 +1046,4 @@ function matToQuatern(affine: number[][]): {
   }
 
   return { quatern: [b, c, d], qoffset, pixdim: [xd, yd, zd], qfac };
-}
-
-function writeNiftiHeader(buffer: Buffer, header: any): void {
-  const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
-  
-  // sizeof_hdr
-  view.setInt32(0, 348, true);
-  
-  // dim_info
-  view.setUint8(39, 0);
-  
-  // dims
-  for (let i = 0; i < 8; i++) {
-    view.setInt16(40 + i * 2, header.dims[i] || 1, true);
-  }
-  
-  // datatype and bitpix
-  view.setInt16(70, header.datatypeCode, true);
-  view.setInt16(72, header.numBitsPerVoxel, true);
-  
-  // pixdims
-  for (let i = 0; i < 8; i++) {
-    view.setFloat32(76 + i * 4, header.pixDims[i] || 1.0, true);
-  }
-  
-  // vox_offset
-  view.setFloat32(108, 352.0, true);
-  
-  // scl_slope and scl_inter
-  view.setFloat32(112, 1.0, true);
-  view.setFloat32(116, 0.0, true);
-  
-  // units
-  view.setUint8(123, 2); // mm
-  
-  // sform_code
-  view.setInt16(254, 1, true);
-  
-  // sform matrix
-  const affine = header.affine;
-  for (let i = 0; i < 4; i++) {
-    view.setFloat32(280 + i * 4, affine[0][i], true);
-    view.setFloat32(296 + i * 4, affine[1][i], true);
-    view.setFloat32(312 + i * 4, affine[2][i], true);
-  }
-  
-  // magic
-  buffer.write('n+1\0', 344, 4, 'ascii');
 }
