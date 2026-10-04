@@ -1,6 +1,6 @@
 # Getting Started
 
-This guide takes you from `npm install` to a real brain rendering in the browser, then shows the Node.js path for data processing.
+This guide goes from `npm install` to a brain rendered in the browser, then shows the Node.js path for data processing.
 
 ## Install
 
@@ -8,66 +8,60 @@ This guide takes you from `npm install` to a real brain rendering in the browser
 npm install neuroimjs
 ```
 
-The viewer components rely on a few **peer dependencies**. Install the ones you use:
+That is all you need. The rendering and parsing libraries (`pixi.js`, `mobx`, `chroma-js`, `lit`, `nifti-reader-js`, `pako`, …) are regular **dependencies** of the package, so npm installs them with it. You don't need any peer dependencies or extra install steps.
 
-```bash
-# Required for the WebGL viewers:
-npm install pixi.js mobx
+There are two entry points:
 
-# Optional, depending on features:
-npm install chroma-js          # richer colormaps
-npm install lit @lit/reactive-element   # the <LayerControlPanel> web component
-npm install nifti-reader-js    # convenient client-side NIfTI parsing
-```
+| Import | Use it for |
+|---|---|
+| `neuroimjs/browser` | Browser bundles: viewers, layers and in-page NIfTI decoding (`readNiftiArrayBuffer`). No `fs`. |
+| `neuroimjs` | Node.js: file I/O (`readVol`, `writeVol`, …), processing and analysis. |
 
-::: info Why peer dependencies?
-Heavy rendering libraries (PIXI.js, MobX) are declared as **optional peer dependencies** so that consumers who only need the data structures or Node I/O don't pull in a WebGL stack. You install exactly what your use case needs.
+::: warning Pick one entry per app
+`neuroimjs/browser` is a separate prebuilt bundle with its own copies of every class. Don't import from both entries in one app: a `ColorMap` or volume created from one entry fails the `instanceof` checks in the other (for example in `resolveColorMap`). Browser code should import everything from `neuroimjs/browser`. The main `neuroimjs` entry statically imports Node's `fs` and `path`, so it doesn't bundle for the browser without shims.
+
+The browser entry covers viewers, layers, colormaps, the dense and sparse volume classes, `readNiftiArrayBuffer`, searchlights and the [group statistics](/guide/group-stats) helpers. Filtering, resampling, volume arithmetic, connected components, `StatFunctions`, the 4D `split*`/`concat` helpers and the ROI factories are exported only from `neuroimjs`.
 :::
 
 ## Hello, brain (browser)
 
-Here's the result first — this is a live `neuroimjs` viewer, not an image:
+Here's the result first. This is a live `neuroimjs` viewer, not an image:
 
 <BrainViewer mode="axial" :height="420" :show-slider="true" caption="A single axial SingleSliceViewer with a slice slider." />
 
-And the code that produces it. First, a small loader that turns a NIfTI URL into a volume with a sensible display window:
+The code that produces it starts with a small loader. It turns a NIfTI URL into a volume and picks a display window:
 
 ```ts
 // load.ts
-import * as nifti from 'nifti-reader-js'
-import { FloatNeuroVol, NeuroSpace } from 'neuroimjs'
+import { readNiftiArrayBuffer } from 'neuroimjs/browser'
 
+/** Fetch a .nii or .nii.gz and return the volume plus a robust display window. */
 export async function loadNiftiVolume(url: string) {
-  let buffer = await (await fetch(url)).arrayBuffer()
-  if (nifti.isCompressed(buffer)) buffer = nifti.decompress(buffer)
-  if (!nifti.isNIFTI(buffer)) throw new Error('Not a NIfTI file')
+  const response = await fetch(url)
+  if (!response.ok) throw new Error(`HTTP ${response.status} for ${url}`)
+  // Handles gzip, endianness, scl_slope/scl_inter and the affine.
+  const vol = readNiftiArrayBuffer(await response.arrayBuffer())
+  return { vol, range: robustRange(vol.getData()) }
+}
 
-  const header = nifti.readHeader(buffer)
-  const img = nifti.readImage(header, buffer)
-
-  const dim = Array.from(header.dims.slice(1, 4))
-  const spacing = Array.from(header.pixDims.slice(1, 4))
-  const affine = header.affine
-  const origin = [affine[0][3], affine[1][3], affine[2][3]]
-  const space = new NeuroSpace(dim, spacing, origin, undefined, affine)
-
-  // Apply NIfTI intensity scaling (slope/intercept) — important for many volumes.
-  const slope = header.scl_slope || 1
-  const inter = header.scl_inter || 0
-  const raw = new Float32Array(img) // simplified: see the example for full dtype handling
-  const data = new Float32Array(raw.length)
-  for (let i = 0; i < raw.length; i++) data[i] = raw[i] * slope + inter
-
-  return { vol: new FloatNeuroVol(space, data), space, range: [data[0], data[0]] as [number, number] }
+/** 2nd–99.5th percentile of a subsample, so a few extreme voxels don't wash out the image. */
+export function robustRange(data: ArrayLike<number>): [number, number] {
+  const step = Math.max(1, Math.floor(data.length / 250_000))
+  const sample: number[] = []
+  for (let i = 0; i < data.length; i += step) sample.push(data[i])
+  sample.sort((a, b) => a - b)
+  const at = (p: number) => sample[Math.floor(p * (sample.length - 1))]
+  const [lo, hi] = [at(0.02), at(0.995)]
+  return hi > lo ? [lo, hi] : [sample[0], sample[sample.length - 1]]
 }
 ```
+
+For the MNI152 template used on this page, `readNiftiArrayBuffer` returns an `Int16NeuroVol` of 197 × 233 × 189 voxels. Its full range is `[0, 10899]` and `robustRange` gives `[112, 9663]`.
 
 Then build a layer stack and mount a viewer:
 
 ```ts
-import {
-  VolLayer, VolStack, ColorMapFactory, SingleSliceViewer,
-} from 'neuroimjs'
+import { VolLayer, VolStack, ColorMapFactory, SingleSliceViewer } from 'neuroimjs/browser'
 import { loadNiftiVolume } from './load'
 
 const { vol, range } = await loadNiftiVolume('/data/mni152_t1.nii.gz')
@@ -85,33 +79,39 @@ const viewer = await SingleSliceViewer.createAxial(
 viewer.onCoordChange((coord) => console.log('world coord (mm):', coord))
 ```
 
-::: tip Full loader
-The snippet above simplifies datatype handling and range computation for brevity. The **[Single Slice View example](/examples/single-view)** and the repo's `examples/` directory contain a complete loader that handles all NIfTI datatypes and computes a robust intensity window.
+::: warning `UINT16` images
+`readNiftiArrayBuffer` keeps the stored datatype. For `UINT16` data that is a `UInt16NeuroVol`, and slicing one currently throws, so the viewer cannot display it. Convert the volume first: `new FloatNeuroVol(vol.space, Float32Array.from(vol.getData()))`. See [Volumes & Slices](/guide/volumes#dense-volumes).
 :::
 
-Want all three planes at once? Swap `SingleSliceViewer.createAxial` for [`SimpleOrthogonalViewer.create`](/guide/viewers).
+Want all three planes at once? Swap `SingleSliceViewer.createAxial` for [`SimpleOrthogonalViewer.create`](/guide/viewers). The **[Single Slice View example](/examples/single-view)** has a complete page.
 
 ## Hello, volume (Node.js)
 
-In Node you can read straight from disk:
+In Node, read straight from disk:
 
 ```ts
 import { readVol } from 'neuroimjs'
 
-const vol = await readVol('subject01_T1w.nii.gz')
+const vol = await readVol('tpl-MNI152NLin2009aAsym_res-1_T1w.nii.gz')
 
-console.log('dimensions:', vol.space.dim)      // e.g. [193, 229, 193]
-console.log('spacing (mm):', vol.space.spacing) // e.g. [1, 1, 1]
+vol.constructor.name // 'Int16NeuroVol' — the stored datatype is preserved
+vol.space.dim // [197, 233, 189]
+vol.space.spacing // [1, 1, 1]
+vol.getRange() // [0, 10899]
 
-// Read a voxel by grid index:
-const value = vol.getAt(96, 114, 96)
+// Voxel by grid index, and the world (mm) position of that voxel:
+vol.getAt(98, 134, 72) // 2809 — the voxel whose centre is world (0, 0, 0)
+vol.space.gridToCoord([98, 134, 72]) // [0, 0, 0]
+vol.space.coordToGrid([0, 0, 0]) // [98, 134, 72]
 ```
 
-`readVol` applies NIfTI intensity scaling (`scl_slope` / `scl_inter`) and handles big-endian data for you, so the values you read are already in physical units.
+`readVol` applies NIfTI intensity scaling (`scl_slope` / `scl_inter`) and byte-swaps big-endian data, so the values you read are the scaled intensities. When scaling is active, the result is a `FloatNeuroVol`. The file above ships with the repository as `tests/data/volumes/tpl-MNI152NLin2009aAsym_res-1_T1w.nii.gz`.
 
 ## Where to go next
 
-- **[Data Structures](/guide/concepts)** — `NeuroSpace`, `NeuroVol`, `NeuroVec`, and friends.
-- **[Coordinate Systems](/guide/coordinate-systems)** — grid vs world vs image space.
-- **[Viewers](/guide/viewers)** & **[Composable Views](/guide/composable-views)** — build custom layouts.
-- **[Stability & Roadmap](/guide/stability)** — what's production-ready today.
+- **[Data Structures](/guide/concepts)**: `NeuroSpace`, `NeuroVol`, `NeuroVec`, and how they fit together.
+- **[Volumes & Slices](/guide/volumes)** and **[Time Series](/guide/time-series)**: the containers in depth.
+- **[Reading & Writing](/guide/io)**: every reader and writer, plus their caveats.
+- **[Coordinate Systems](/guide/coordinate-systems)**: grid, world and image space.
+- **[Viewers](/guide/viewers)** & **[Composable Views](/guide/composable-views)**: custom layouts.
+- **[Stability & Roadmap](/guide/stability)**: what's production-ready today.
