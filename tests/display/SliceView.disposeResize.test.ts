@@ -133,6 +133,20 @@ describe('SliceView resize after dispose', () => {
     expect(view.isDisposed).toBe(true);
   });
 
+  test('dispose does not release PIXI global resources shared with other views', async () => {
+    // Application.destroy(true) sets releaseGlobalResources, which clears the
+    // page-wide TexturePool; another live view then throws when it returns a
+    // text texture to the emptied pool.
+    const view = await makeView();
+    const destroy = vi.spyOn(appOf(view), 'destroy');
+    view.dispose();
+
+    expect(destroy).toHaveBeenCalledTimes(1);
+    const [rendererOptions] = destroy.mock.calls[0];
+    expect(rendererOptions).not.toBe(true);
+    expect(rendererOptions).not.toEqual(expect.objectContaining({ releaseGlobalResources: true }));
+  });
+
   test('dispose between the two frames cancels the inner frame', async () => {
     const view = await makeView();
     emulatePixiDestroy(view);

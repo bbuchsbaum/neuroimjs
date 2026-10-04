@@ -36,6 +36,9 @@ const state = ref<'loading' | 'ready' | 'error'>('loading')
 const message = ref('Loading brain volume…')
 const labelsOn = ref(props.labels)
 let handle: ViewerHandle | undefined
+// Set on unmount; checked after every await so a viewer created after the
+// user navigated away is disposed instead of leaked.
+let unmounted = false
 
 function toggleLabels() {
   labelsOn.value = !labelsOn.value
@@ -47,16 +50,23 @@ onMounted(async () => {
     const base = import.meta.env.BASE_URL
     const src = props.src ?? `${base}data/mni152_t1.nii.gz`
     const lib = await import('../theme/lib')
+    if (unmounted) return
 
     message.value = 'Decoding NIfTI…'
     const loaded = await lib.loadNiftiVolume(src)
+    if (unmounted || !el.value) return
 
     message.value = 'Rendering…'
-    handle = await lib.mountViewer(el.value!, props.mode, loaded, {
+    const created = await lib.mountViewer(el.value, props.mode, loaded, {
       crosshair: props.crosshair,
       showSlider: props.showSlider,
       orientationLabels: labelsOn.value,
     })
+    if (unmounted) {
+      created.destroy()
+      return
+    }
+    handle = created
     state.value = 'ready'
   } catch (err: any) {
     // eslint-disable-next-line no-console
@@ -67,11 +77,9 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
-  try {
-    handle?.destroy()
-  } catch {
-    /* viewer may not expose destroy(); ignore */
-  }
+  unmounted = true
+  handle?.destroy()
+  handle = undefined
 })
 </script>
 

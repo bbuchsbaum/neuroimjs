@@ -807,7 +807,10 @@ export class SliceView implements ISliceView {
     // The PIXI Application owns mainContainer and overlayContainer through its
     // stage. Destroying mainContainer here and then asking Application.destroy
     // to destroy stage children releases text textures twice in PIXI 8.
-    this.app.destroy(true, { children: true });
+    // Pass an options object, not `true`: `true` also sets
+    // releaseGlobalResources, which clears PIXI's page-wide TexturePool and
+    // makes every other live viewer throw when it later returns a text texture.
+    this.app.destroy({ removeView: true }, { children: true });
 
     if (this.canvas && this.domElement.contains(this.canvas)) {
       this.domElement.removeChild(this.canvas);
