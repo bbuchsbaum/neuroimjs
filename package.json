@@ -32,6 +32,22 @@
       "default": "./dist/neuroimjs.es.js"
     }
   },
+  "typesVersions": {
+    "*": {
+      "io": [
+        "dist/types/entries/io.d.ts"
+      ],
+      "slices": [
+        "dist/types/entries/slices.d.ts"
+      ],
+      "geometry": [
+        "dist/types/entries/geometry.d.ts"
+      ],
+      "browser": [
+        "dist/types/browser.d.ts"
+      ]
+    }
+  },
   "files": [
     "dist",
     "!dist/**/*.map",

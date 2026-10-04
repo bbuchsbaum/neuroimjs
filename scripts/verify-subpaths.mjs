@@ -8,7 +8,8 @@
  *
  *   1. Static: walk the compiled import graph (dist/esm `import`/`export from`
  *      and dist/cjs `require`) from each subpath entry and fail if it reaches
- *      src/display, src/controls, or a forbidden package.
+ *      src/display or src/controls, or imports any package outside an
+ *      allowlist (Node built-ins, ml-matrix, pako, nifti-reader-js, buffer).
  *   2. Runtime, against the PACKED tarball: import each subpath in plain Node
  *      (ESM, via a module.registerHooks() resolve hook; CJS, via a
  *      Module._resolveFilename wrapper), exercise it (read a NIfTI file,
@@ -21,13 +22,24 @@
  */
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { builtinModules } from 'node:module';
 import { dirname, join, relative, resolve } from 'node:path';
 import { createPackedConsumer, repositoryRoot } from './lib/packed-consumer.mjs';
 
 const SUBPATHS = ['io', 'slices', 'geometry'];
 
-/** Packages that pull in the WebGL/reactive/UI stack. */
-const FORBIDDEN_PACKAGE = /^(pixi\.js|@pixi\/.*|mobx|mobx-.*|lit|lit-html|lit-element|@lit\/.*|nouislider)(\/.*)?$/;
+/**
+ * Bare specifiers a subpath's compiled graph may import: Node built-ins plus
+ * the core (non-viewer) dependencies. Anything else fails the static check,
+ * so a new dependency in the subpath graph must be added here deliberately.
+ */
+const ALLOWED_PACKAGES = new Set(['ml-matrix', 'pako', 'nifti-reader-js', 'buffer']);
+function isAllowedSpecifier(specifier) {
+  if (specifier.startsWith('node:')) return true;
+  if (builtinModules.includes(specifier.split('/')[0]) || builtinModules.includes(specifier)) return true;
+  const name = specifier.startsWith('@') ? specifier.split('/').slice(0, 2).join('/') : specifier.split('/')[0];
+  return ALLOWED_PACKAGES.has(name);
+}
 /** The same packages, as resolved file paths or URLs. */
 const FORBIDDEN_RESOLVED = /[\\/]node_modules[\\/](pixi\.js|@pixi[\\/][^\\/]+|mobx|lit|lit-html|lit-element|@lit[\\/][^\\/]+|nouislider)[\\/]/;
 /** Library-internal display modules, in any build. */
@@ -66,12 +78,16 @@ function walkGraph(buildRoot, entry, pattern) {
       violations.push(chain(file));
       continue;
     }
-    const source = readFileSync(file, 'utf8');
+    // Drop block and whole-line comments so documented specifiers (e.g.
+    // \`require('neuroimjs/io')\` in a JSDoc block) are not treated as imports.
+    const source = readFileSync(file, 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/^\s*\/\/.*$/gm, '');
     for (const match of source.matchAll(pattern)) {
       const specifier = match[1] ?? match[2];
       if (specifier.startsWith('.')) {
         queue.push([resolveRelative(file, specifier), file]);
-      } else if (FORBIDDEN_PACKAGE.test(specifier)) {
+      } else if (!isAllowedSpecifier(specifier)) {
         violations.push(`${chain(file)} -> ${specifier}`);
       }
     }
@@ -252,8 +268,8 @@ function runtimeCheck() {
     }
     console.log(`runtime checks ran against ${tarballName}`);
 
-    // Type-level contract: each subpath resolves to its own declarations under
-    // NodeNext, from both an ES module and a CommonJS (.cts) consumer.
+    // Type-level contract: each subpath resolves to its own declarations
+    // under every supported moduleResolution setting (see typeMatrix).
     writeFileSync(join(consumerRoot, 'subpath-types.ts'), `
 import { readVol, read_vol, writeVol, readHeader, type NeuroVol, type ReadVolOptions } from 'neuroimjs/io';
 import { extractOrthogonalSlices, NeuroSlice, getCenterSliceIndex } from 'neuroimjs/slices';
@@ -278,23 +294,38 @@ import geometry = require('neuroimjs/geometry');
 const space: geometry.NeuroSpace = new geometry.NeuroSpace([2, 2, 2]);
 void [io.readVol, slices.extractOrthogonalSlices, space];
 `);
-    writeFileSync(join(consumerRoot, 'tsconfig.subpaths.json'), JSON.stringify({
-      compilerOptions: {
-        target: 'ES2022',
-        lib: ['ES2022', 'DOM'],
-        module: 'NodeNext',
-        moduleResolution: 'NodeNext',
-        strict: true,
-        noEmit: true,
-        skipLibCheck: true,
-      },
-      files: ['subpath-types.ts', 'subpath-types.cts'],
-    }, null, 2));
-    try {
-      run('node', [join(repositoryRoot, 'node_modules', 'typescript', 'bin', 'tsc'), '--project', 'tsconfig.subpaths.json'], consumerRoot);
-      console.log('types: subpath declarations type-check under NodeNext (ESM and CJS)');
-    } catch (error) {
-      failures.push(`subpath type contract failed:\n${String(error.stdout ?? '')}${String(error.stderr ?? '')}`);
+    writeFileSync(join(consumerRoot, 'subpath-types-browser.ts'), `
+import { NeuroSpace } from 'neuroimjs/browser';
+// typesVersions has no catch-all, so the root still resolves through "types".
+import { NeuroSpace as RootSpace } from 'neuroimjs';
+void [new NeuroSpace([2, 2, 2]), new RootSpace([2, 2, 2])];
+`);
+    // NodeNext (ESM .ts + CJS .cts, TS >= 5.8 for require of ESM types),
+    // Bundler, and legacy node10 (CommonJS) through typesVersions.
+    const typeMatrix = [
+      ['NodeNext', { module: 'NodeNext', moduleResolution: 'NodeNext' }, ['subpath-types.ts', 'subpath-types.cts']],
+      ['Bundler', { module: 'ESNext', moduleResolution: 'Bundler' }, ['subpath-types.ts', 'subpath-types-browser.ts']],
+      ['node10', { module: 'CommonJS', moduleResolution: 'node10' }, ['subpath-types.ts', 'subpath-types-browser.ts']],
+    ];
+    for (const [label, resolution, files] of typeMatrix) {
+      const config = `tsconfig.subpaths-${label.toLowerCase()}.json`;
+      writeFileSync(join(consumerRoot, config), JSON.stringify({
+        compilerOptions: {
+          target: 'ES2022',
+          lib: ['ES2022', 'DOM'],
+          ...resolution,
+          strict: true,
+          noEmit: true,
+          skipLibCheck: true,
+        },
+        files,
+      }, null, 2));
+      try {
+        run('node', [join(repositoryRoot, 'node_modules', 'typescript', 'bin', 'tsc'), '--project', config], consumerRoot);
+        console.log(`types: subpath declarations type-check under moduleResolution ${label}`);
+      } catch (error) {
+        failures.push(`subpath type contract (${label}) failed:\n${String(error.stdout ?? '')}${String(error.stderr ?? '')}`);
+      }
     }
   } catch (error) {
     if (error?.stderr) process.stderr.write(String(error.stderr));
