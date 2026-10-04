@@ -35,10 +35,13 @@ export class PositionLabel implements SliceLayer {
     this.neuroSpace = neuroSpace;
 
     // Create a PIXI.Text object for coordinate display
-    this.text = new PIXI.Text('Position: (0, 0, 0)', {
-      fontFamily: 'Arial',
-      fontSize: 10,
-      fill: 0xffffff
+    this.text = new PIXI.Text({
+      text: 'Position: (0, 0, 0)',
+      style: {
+        fontFamily: 'Arial',
+        fontSize: 10,
+        fill: 0xffffff
+      }
     });
 
     // Add background + text to the main container

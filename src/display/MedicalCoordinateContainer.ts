@@ -101,26 +101,17 @@ export class MedicalCoordinateContainer extends PIXI.Container {
     
     if (showLabels) {
       // X label
-      const xLabel = new PIXI.Text('X', {
-        fontSize: 14,
-        fill: 0xff0000,
-      });
+      const xLabel = new PIXI.Text({ text: 'X', style: { fontSize: 14, fill: 0xff0000 } });
       xLabel.position.set(length + 10, -5);
       this.addChild(xLabel);
       
       // Y label
-      const yLabel = new PIXI.Text('Y', {
-        fontSize: 14,
-        fill: 0x00ff00,
-      });
+      const yLabel = new PIXI.Text({ text: 'Y', style: { fontSize: 14, fill: 0x00ff00 } });
       yLabel.position.set(-20, length);
       this.addChild(yLabel);
       
       // Origin label
-      const originLabel = new PIXI.Text('(0,0)', {
-        fontSize: 12,
-        fill: 0x666666,
-      });
+      const originLabel = new PIXI.Text({ text: '(0,0)', style: { fontSize: 12, fill: 0x666666 } });
       originLabel.position.set(-30, -20);
       this.addChild(originLabel);
     }
