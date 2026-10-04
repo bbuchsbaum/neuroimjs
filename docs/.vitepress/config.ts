@@ -160,7 +160,17 @@ export default defineConfig({
       ],
     },
     optimizeDeps: {
-      include: ['pixi.js', 'mobx', 'chroma-js', 'nifti-reader-js'],
+      // Pre-bundle every Lit entry the controls use together; otherwise Vite
+      // discovers them separately and Lit's core is loaded twice in dev.
+      include: [
+        'pixi.js',
+        'mobx',
+        'chroma-js',
+        'nifti-reader-js',
+        'lit',
+        'lit/decorators.js',
+        'lit/directives/live.js',
+      ],
     },
     ssr: {
       // These are only ever pulled in via client-side dynamic import, but keep them
