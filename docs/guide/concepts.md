@@ -56,23 +56,35 @@ Typed volume constructors take **`(space, data)`** — space first, then the typ
 `NeuroVec` extends the idea to 4D: a stack of 3D volumes over time, the natural shape for fMRI. Typed variants (`Float32NeuroVec`, etc.) and enhanced variants with preprocessing live alongside it.
 
 ```ts
-import { readVec } from 'neuroimjs' // Node
+import { NeuroSpace, Float32NeuroVec } from 'neuroimjs'
 
-const vec = await readVec('bold.nii.gz')
-vec.space.dim          // [x, y, z]
-vec.length             // number of time points
-const ts = vec.getSeries(32, 32, 20)  // time-series at a voxel
+// 10 time points of a 64 × 64 × 40 volume: spatial dims first, time last
+const space = new NeuroSpace([64, 64, 40, 10], [3, 3, 4, 2])
+const vec = new Float32NeuroVec(space, new Float32Array(64 * 64 * 40 * 10))
+
+vec.dim                          // [64, 64, 40, 10]
+vec.getSeries(32, 32, 20)        // the 10 values at voxel (32, 32, 20)
+vec.getVolume(0)                 // the first 3D volume, a FloatNeuroVol
 ```
 
-For very large files, `FileBackedNeuroVec` / `MappedNeuroVec` avoid loading everything into memory at once.
+::: warning `readVec` uses a different, time-first shape
+`readVec` returns a `BigNeuroVec` whose `dim` (and `space.dim`) is **`[T, X, Y, Z]`**, so `vec.space` does not describe the image grid. Its 3D geometry, including the affine, is on `vec.volumeSpace`, and `getSeries(i, j, k)` and `getVolume(t)` work as above. Details are in [Reading & Writing](/guide/io#_4d-time-series-readvec).
+:::
+
+`vec.length` is the total number of values (voxels × time points), not the number of time points; read the time-point count from `dim`.
+
+Two other 4D containers take their data from you rather than from a file:
+
+- **`FileBackedNeuroVec`** calls a function you supply, `(t) => Float32Array`, to fetch volume `t` on demand and keeps recently used volumes in an LRU cache (10 by default). It never opens files itself; the callback decides where data come from.
+- **`MappedNeuroVec`** reads values through a `DataView` over an `ArrayBuffer` you supply (float32, float64, int16 or uint8, either byte order), without copying it. It is not a memory-mapped file.
 
 ::: tip
-Temporal preprocessing (`detrend`, `temporalFilter`) lives on the *enhanced* vec classes (`EnhancedDenseNeuroVec`, `FileBackedNeuroVec`, …) and performs real per-voxel filtering.
+Temporal preprocessing (`detrend`, `temporalFilter`) lives on the *enhanced* vec classes (`EnhancedDenseNeuroVec`, `EnhancedFloat32NeuroVec`) and on `FileBackedNeuroVec`, and performs real per-voxel filtering.
 :::
 
 ## NeuroHyperVec — 5D and beyond
 
-`NeuroHyperVec` generalizes to arbitrary extra dimensions (subjects × conditions × …) for multi-dimensional designs. The container, indexing, sub-volume extraction, and concatenation are stable; a few advanced operations (e.g. GLM) are experimental ([stability](/guide/stability)).
+`DenseNeuroHyperVec` (created with `createNeuroHyperVec`) adds named dimensions beyond time (subjects × conditions × …) for multi-dimensional designs. Indexing, `getSubVolume`, `reduce`, `concat`, `split`, `permute` and `view` are implemented; `glm`, `extractFeatures` and `save` throw "not yet implemented". The whole module is <span class="stability-badge experimental">experimental</span> ([stability](/guide/stability)).
 
 ## Display building blocks
 

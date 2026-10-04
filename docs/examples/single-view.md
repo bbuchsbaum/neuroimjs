@@ -8,11 +8,11 @@ A standalone `SingleSliceViewer` — embeddable in any layout, with a full event
 
 ```ts
 import {
-  VolLayer, VolStack, ColorMapFactory, SingleSliceViewer,
-} from 'neuroimjs'
-import { loadNiftiVolume } from './load'  // the loader from the Orthogonal example
+  readNiftiArrayBuffer, VolLayer, VolStack, ColorMapFactory, SingleSliceViewer,
+} from 'neuroimjs/browser'
 
-const { vol, range } = await loadNiftiVolume('/data/mni152_t1.nii.gz')
+const vol = readNiftiArrayBuffer(await (await fetch('/data/mni152_t1.nii.gz')).arrayBuffer())
+const range = vol.getRange()
 const stack = new VolStack(new VolLayer('t1', vol, ColorMapFactory.createGrayscale({ range }), range))
 
 const axial = await SingleSliceViewer.createAxial(
@@ -48,7 +48,7 @@ Compose your own orthogonal layout and link the views:
 </div>
 
 ```ts
-import { SingleSliceViewer, ViewSynchronizer } from 'neuroimjs'
+import { SingleSliceViewer, ViewSynchronizer } from 'neuroimjs/browser'
 
 const axial    = await SingleSliceViewer.createAxial(axialEl, stack)
 const sagittal = await SingleSliceViewer.createSagittal(sagEl, stack)
