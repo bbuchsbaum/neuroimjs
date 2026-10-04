@@ -171,7 +171,9 @@ export class SimpleOrthogonalViewer {
    * Set position using LPI anatomical world coordinates (mm) regardless of the
    * underlying volume orientation. Converts LPI→volume space and updates slices.
    *
-   * LPI means: X=Left(+)/Right(-), Y=Posterior(+)/Anterior(-), Z=Inferior(+)/Superior(-).
+   * LPI follows neuroimjs axis naming (each axis named by where it starts):
+   * +x points toward Right, +y toward Anterior, +z toward Superior — the same
+   * orientation NiBabel and NIfTI call RAS+.
    */
   setLPICoord(lpiCoord: [number, number, number]): void {
     const space = this.imageLayer.neuroSpace;
@@ -491,6 +493,9 @@ export class SimpleOrthogonalViewer {
    * Export a PNG/JPEG of a specific view's canvas.
    */
   toDataURL(view: 'axial'|'coronal'|'sagittal', type: string = 'image/png', quality?: number): string {
+    // The WebGL drawing buffer is not preserved between frames, so render
+    // synchronously right before reading it back; otherwise the export is blank.
+    this.viewer.getSliceViewer(view).view.redraw?.();
     const canvas = this.getCanvas(view);
     try {
       // @ts-ignore quality optional only for image/jpeg/webp
