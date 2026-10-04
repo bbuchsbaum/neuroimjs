@@ -1,37 +1,76 @@
 # Statistics & Searchlight
 
-neuroimjs includes analysis primitives for Node pipelines and in-page exploration. Everything on this page is exported from `neuroimjs`. The browser entry, `neuroimjs/browser`, exports only the searchlights (`searchlightIterator` and its variants) and the ROI classes (`ROICoords`, `ROIVol`, `ROIVec`); `ConnectedComponents`, `clusterTable`, `StatFunctions`, `partition`, `sphericalROI` and the other helpers below are not in it.
+neuroimjs includes analysis primitives for lightweight Node pipelines. Everything on this page is imported from the main `neuroimjs` entry. From this page, `neuroimjs/browser` exports only the searchlight functions (and, for [ROIs](/guide/roi), the classes `ROICoords`, `ROIVol` and `ROIVec`, but not the factories such as `sphericalROI`); connected components, `StatFunctions`, partitioning and the 4D helpers are not in it. They are plain TypeScript, so a browser bundle that imports the main entry can run them, but don't mix the two entries in one app ([Getting Started](/guide/getting-started#install)). For region extraction see [ROIs](/guide/roi); for voxelwise group maps (mean, t, Welch, paired, consistency) see [Group Statistics](/guide/group-stats).
 
 ## Searchlight
 
-A searchlight sweeps a small neighborhood (a sphere) across the brain, handing you the voxels in each neighborhood as an ROI to analyze. The radius is a **positional argument in mm**, and each item is an `ROIVolWindow` whose `.coords` lists the voxel coordinates in the sphere.
+A searchlight sweeps a sphere across the brain and hands you each neighbourhood as an `ROIVolWindow`. The radius is a **positional argument in mm**, spacing-aware per axis.
+
+Each window carries **geometry, not data**: `.coords` (voxel `[i, j, k]` triples), `.indices()` (linear indices), `.centerIndex` / `.parentIndex` (the centre voxel within the window / within the volume). Its `.data` is filled with `1`s — read your values from the data volume yourself.
+
+`searchlightIterator` returns `LazyList<ROIVolWindow> | ROIVolWindow[] | Promise<ROIVolWindow[]>` depending on options, so narrow the result before iterating:
 
 ```ts
-import { searchlightIterator, type ROIVolWindow } from 'neuroimjs'
+import { searchlightIterator } from 'neuroimjs'
 
-// Eager mode returns ROIVolWindow[]; nonzero limits centers to in-mask voxels.
-const searchlights = searchlightIterator(mask, 6 /* mm */, { eager: true, nonzero: true }) as ROIVolWindow[]
+// eager + single-threaded → ROIVolWindow[]; nonzero → centres restricted to the mask
+const result = searchlightIterator(mask, 4 /* mm */, { eager: true, nonzero: true })
+if (!Array.isArray(result)) throw new Error('expected an eager, single-threaded result')
 
-for (const sphere of searchlights) {
-  // sphere.coords — voxel coordinates [i, j, k] inside the sphere
-  const values = sphere.coords.map(([i, j, k]) => dataVol.getAt(i, j, k))
-  const score = analyze(values)
+const data = dataVol.getData()
+const scores = new Float32Array(dataVol.space.size)
+for (const sphere of result) {
+  const idx = sphere.indices().filter((i) => mask.getData()[i])   // keep in-mask voxels
+  const local = idx.map((i) => data[i])
+  scores[sphere.parentIndex] = local.reduce((a, b) => a + b, 0) / local.length
 }
 ```
 
-The searchlight is built on the mask, so `sphere.data` holds a constant fill value (1) per voxel, not your data: read the data volume at `sphere.coords` as above. `nonzero` restricts the sphere *centres* to the mask; a sphere near the mask edge can include voxels outside it.
+::: warning Spheres are not clipped to the mask
+`nonzero: true` only restricts which voxels serve as **centres**. Sphere membership is purely geometric, so spheres near the mask edge include out-of-mask voxels — filter `indices()` against the mask as above. Without `nonzero`, every voxel in the volume becomes a centre.
+:::
 
-The return type is a union because the mode decides it: without `eager` you get a lazy list (`LazyList`, iterable, materialized on demand), with `eager: true` an array, and with `eager: true` plus `cores > 1` a promise of an array computed in Web Workers.
+Return type by option:
 
-Variants for different sampling strategies:
+| Options | Returns |
+|---|---|
+| default (`eager: false`) | `LazyList<ROIVolWindow>` — computed on access; iterable, `.get(i)`, `.length` |
+| `eager: true` | `ROIVolWindow[]` |
+| `eager: true, cores > 1` | `Promise<ROIVolWindow[]>` (Web Workers; falls back to sequential where `Worker` is unavailable) |
+
+A lazy list caches each window once it has been computed, so a full pass ends up holding every sphere in memory.
+
+```ts
+import { LazyList } from 'neuroimjs'
+
+const lazy = searchlightIterator(mask, 4, { nonzero: true })
+if (lazy instanceof LazyList) {
+  const first = lazy.get(0)
+  for (const sphere of lazy) { /* … */ }
+}
+```
+
+### Variants
 
 ```ts
 import {
-  searchlightCoords,     // yields coordinate sets
-  randomSearchlight,     // randomized centers
-  clusteredSearchlight,  // cluster-constrained
-  bootstrapSearchlight,  // bootstrap resampling
+  searchlightCoords,
+  randomSearchlight,
+  clusteredSearchlight,
+  bootstrapSearchlight,
 } from 'neuroimjs'
+
+// async → LazyList<Float32Array>; each entry is flat [i0, j0, k0, i1, j1, k1, …]
+const coordSets = await searchlightCoords(mask, 4, { nonzero: true })
+
+// Non-overlapping centres: pick a random centre, drop its sphere, repeat → ROIVolWindow[]
+const tiles = randomSearchlight(mask, 4)
+
+// One sphere per label (>0), centred on the label's centre of mass → ROIVolWindow[]
+const perRegion = clusteredSearchlight(labelVol, 4)
+
+// `iter` centres drawn with replacement from the mask (default radius 8, iter 100)
+const boots = bootstrapSearchlight(mask, 4, 50)
 ```
 
 `randomSearchlight` and `bootstrapSearchlight` draw a fresh seed on every call. Pass a seed (or your own generator) to make the centers reproducible:
@@ -42,82 +81,110 @@ const boot = bootstrapSearchlight(mask, 8, 200, { seed: 42 })
 // or share one generator across calls: { rng: createRng(42) }
 ```
 
-::: tip Radius units
-The radius is interpreted in **millimeters** and is spacing-aware per axis, so it behaves correctly on anisotropic volumes — not just isotropic 1 mm data.
-:::
 
 ## Connected components
 
-Label contiguous clusters in a thresholded map, then tabulate them:
+Label contiguous suprathreshold clusters, then tabulate them:
 
 ```ts
 import { ConnectedComponents, clusterTable, localMaxima } from 'neuroimjs'
 
-// Static entry point: (valueVolume, maskVolume, threshold, connectivity)
-const result = ConnectedComponents.performConnectedComponents(statVol, mask, 3.1, 26)
+// (valueVolume, maskVolume, threshold, connectivity: 6 | 18 | 26)
+const cc = ConnectedComponents.performConnectedComponents(statVol, mask, 3.1, 26)
+cc.clusters      // Cluster[], largest first: { size, sumX, sumY, sumZ, maxValue, provisionalLabel, finalLabel }
+cc.indexVolume   // Int16NeuroVol — each voxel labelled with its cluster id (1 = largest)
+cc.sizeVolume    // Int16NeuroVol — each voxel labelled with its cluster's size
 
-result.clusters      // one entry per cluster: label, size, peak value
-result.indexVolume   // each voxel labeled with its cluster id
-result.sizeVolume    // each voxel labeled with its cluster's size
-
-// Tabulate: id, size, centre of mass (voxel and world), peak value and location, mean
-const table = clusterTable(result, statVol)
-
-// Peaks within each cluster, at least minDistance voxels apart
-const peaks = localMaxima(statVol, result.indexVolume, 2)
+const table = clusterTable(cc, statVol)
+const peaks = localMaxima(statVol, cc.indexVolume, 4 /* min voxel distance between peaks */)
 ```
 
-The BFS labeling is <span class="stability-badge stable">stable</span>.
+For a single 3×3×3 blob with peak 5 at voxel `[5, 5, 5]` (2 mm grid, origin −20 mm), `clusterTable` returns:
 
-## Statistics
+```json
+[{ "id": 1, "size": 27, "centerOfMass": [5, 5, 5], "centerOfMassWorld": [-10, -10, -10],
+   "maxValue": 5, "maxLocation": [5, 5, 5], "meanValue": 4.037037037037037 }]
+```
 
-`StatFunctions` provides numerically careful reductions (two-pass variance, Bessel correction) over a `Float32Array` of values:
+and `localMaxima` returns `[{ clusterId: 1, location: [5, 5, 5], value: 5 }]`.
+
+Things to know:
+
+- `Cluster` is not exported as a type. `sumX`/`sumY`/`sumZ` already hold the **centre of mass** in voxel coordinates (divided by `size`), despite their names. `finalLabel` is the cluster's id in `indexVolume` (1 = largest).
+- **One-sided.** A voxel is included when `value >= threshold`. For negative clusters, run it on `negateVol(statVol)`.
+- **`NaN` voxels inside the mask seed clusters.** The seed test is `value < threshold`, which is false for `NaN`, so an in-mask `NaN` voxel starts a cluster and pulls in any suprathreshold neighbours, and that cluster's `maxValue` is `NaN`. Drop non-finite voxels from the mask first.
+- **Mask values must be exactly `1`.** Use a `LogicalNeuroVol`; a mask stored with any other non-zero value (e.g. 255) yields no clusters.
+- `Connectivity` is exported as a **type only** — pass the literal `6`, `18` or `26`.
+- `localMaxima` reports voxels strictly greater than all same-cluster 26-neighbours; `minDistance` (voxels) thins peaks greedily from the highest.
+- Labels and sizes are stored as `Int16`, so a cluster larger than 32,767 voxels overflows `sizeVolume`.
+
+## Reductions
+
+`StatFunctions` holds six reductions over a `Float32Array`: `mean`, `sum`, `min`, `max`, `std`, `median`.
 
 ```ts
 import { StatFunctions } from 'neuroimjs'
 
-StatFunctions.mean(values)    // NaN-skipping
-StatFunctions.std(values)
-StatFunctions.median(values)
-StatFunctions.min(values)
-StatFunctions.max(values)
-StatFunctions.sum(values)
+const values = new Float32Array([1, 2, NaN, 4, 10])
+
+StatFunctions.mean(values)    // 4.25  (NaN skipped)
+StatFunctions.std(values)     // 4.031128874149275  (NaN skipped, n − 1)
+StatFunctions.min(values)     // 1
+StatFunctions.max(values)     // 10
+StatFunctions.sum(values)     // NaN — sum does not skip NaN
+StatFunctions.median(values)  // don't rely on it: NaN breaks the sort, so the result is arbitrary
 ```
 
-## Partitioning & reductions
+They are plain functions, so they plug directly into `splitReduce` below or your own searchlight loop.
 
-Parcellate a volume and group voxels by label — handy for atlas-based analyses:
+## Partitioning & atlas reductions
 
 ```ts
-import { partition, splitClusters, centroids } from 'neuroimjs'
+import { partition, splitClusters, centroids, mapValues } from 'neuroimjs'
 
-// k-means parcellation of a volume into k clusters → ClusteredNeuroVol
-const atlas = partition(statVol, 20)
+// Seeded k-means (k-means++ init) on voxel values → ClusteredNeuroVol, labels 1..k
+const atlas = partition(statVol, 2)
 
-// Group a volume's voxels by an atlas's labels → ROIVol[] (one per region)
+// One ROIVol per label; .data holds dataVol's values at that label's voxels
 const regions = splitClusters(dataVol, atlas)
 
-// Center-of-mass per labeled region → Map<label, [x, y, z]>
+// Centre of mass per label → Map<label, [i, j, k]> (voxel units; pass 'median' for the median)
 const coms = centroids(atlas)
+
+// Recode values via a lookup table (unlisted values pass through)
+const recoded = mapValues(atlas.asDense(), new Map([[1, 100], [2, 200]]))
 ```
 
-## ROIs
+`partition(x, k, method = 'kmeans', mask?, seed = 1)` clusters non-zero voxels (or those in `mask`) on their scalar values only — it is a value-based segmentation, not a spatially contiguous parcellation. Given a 4D `NeuroVec`, `splitClusters` returns each voxel's time-series **mean**.
 
-Create regions of interest geometrically or from masks, then read or summarize the data they cover:
+## 4D helpers
 
 ```ts
-import { sphericalROI, cuboidROI, roiFromMask } from 'neuroimjs'
+import { concat, series, scaleSeries, splitFill, splitScale, splitReduce, splitBlocks } from 'neuroimjs'
 
-// (volume, centroid in voxel coords, radius in mm)
-const roi = sphericalROI(volume, [40, 50, 30], 8)
+// Stack 3D volumes into a Float32NeuroVec [x, y, z, t]
+const vec = concat(vols)
 
-roi.coords   // number[][] — voxel coordinates inside the ROI
-roi.data     // a fill value per voxel (default 1), not the volume's values
-const values = roi.coords.map(([i, j, k]) => volume.getAt(i, j, k))
+// Time-series at voxel coordinates → Float32Array[]
+const ts = series(vec, [[0, 0, 0], [1, 0, 0]])
+
+// Per-voxel normalisation: 'zscore' (default) | 'mean-center' | 'psc'
+const z = scaleSeries(vec, 'zscore')
+
+// Factor over volumes, e.g. run labels
+const runs = new Int32Array([1, 1, 1, 2, 2, 2])
+const byRun   = splitFill(vec, runs)                          // Map<level, NeuroVec>
+const scaled  = splitScale(vec, runs)                         // centre + scale within each run
+const reduced = splitReduce(vec, runs, StatFunctions.mean)    // one 3D volume — see note
+
+// Split voxels (by linear index) into blocks → SparseNeuroVol[], one per block id, in first-seen order
+const blocks = splitBlocks(dataVol, new Int32Array([0, 1, 2, 3]), new Int32Array([1, 1, 2, 2]))
 ```
 
-`sphericalROI(vol, centroid, radius, fill = 1, nonzero = false)` uses `vol` only for its grid, plus, with `nonzero: true`, to drop voxels where `vol` is 0.
+::: warning `splitReduce` averages across levels
+`splitReduce(x, fac, FUN)` applies `FUN` within each level and then **averages the per-level results** into a single 3D volume. For a voxel whose values are `0, 100, 200 | 300, 400, 500`, `StatFunctions.mean` yields `250` and `StatFunctions.max` yields `350` (the mean of 200 and 500) — not one volume per level. Use `splitFill` and reduce each level yourself if you need per-level maps. The output space is rebuilt from the vec's dims, spacing and origin only, so its axes and affine are dropped (as with `concat` below).
+:::
 
-::: info
-`sphericalROI` uses the same mm-based, spacing-aware radius as the searchlight.
+::: warning `concat` keeps dims, spacing and origin only
+`concat` rebuilds the 4D space from the first volume's dims, spacing and origin and drops its affine. For a radiological (x-flipped) input, voxel `[1, 0, 0]` maps to x = 88 mm in the source but x = 92 mm in `concat(...).getVolume(0)`. When geometry matters, use `createReviewVecFromVolumes` ([Group Statistics](/guide/group-stats)), which preserves the full space and validates that all inputs share it.
 :::

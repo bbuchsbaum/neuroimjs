@@ -51,25 +51,12 @@ features:
 
 ## See it run
 
-Everything below is a real `neuroimjs` viewer rendering a real MNI152 brain — no screenshots, no video. Drag to move the crosshair, scrub to change slices.
+Everything below is a real `neuroimjs` viewer rendering the MNI152 template with a statistical overlay. Nothing here is a screenshot or a video. Click or drag to move the crosshair, scroll to change slices (<kbd>Ctrl</kbd>/<kbd>⌘</kbd>-scroll zooms), and use the panel on the right to change the overlay's colormap, range, threshold and opacity.
 
-<BrainViewer mode="ortho" :height="520" caption="SimpleOrthogonalViewer — axial · coronal · sagittal, synchronized." />
+<ViewerWorkbench />
 
-```ts
-import {
-  readNiftiArrayBuffer, VolLayer, VolStack, ColorMapFactory, SimpleOrthogonalViewer,
-} from 'neuroimjs/browser'
+The layout is one `SimpleOrthogonalViewer`, and the side panel is the library's `<layer-control-panel>` web component bound to the same `VolStack`. **[See the full source →](/examples/viewer-workbench)**
 
-const vol = readNiftiArrayBuffer(await (await fetch('/data/mni152_t1.nii.gz')).arrayBuffer())
-const range = vol.getRange()
-const stack = new VolStack(new VolLayer('t1', vol, ColorMapFactory.createGrayscale({ range }), range))
-
-await SimpleOrthogonalViewer.create(document.getElementById('viewer')!, stack, {
-  layout: 'top-bottom',
-  showCrosshair: true,
-})
-```
-
-::: tip Pre-1.0
-neuroimjs is in the 0.5 series. The viewers, core data structures, geometry, NIfTI reading, processing and analysis primitives are tested and safe to build on; minor releases can still change the API, and the [changelog](https://github.com/bbuchsbaum/neuroimjs/blob/main/CHANGELOG.md) records every change. The **[Stability matrix](/guide/stability)** gives the status of each module, including the parts that are experimental or missing.
+::: tip Pre-1.0 — and actively hardening
+neuroimjs is at `0.5.0`. The viewer stack, core data structures, NIfTI reading, geometry, processing, and analysis primitives are covered by a green test suite, and NIfTI reading is checked against nibabel-generated fixtures. Some paths still have confirmed bugs or limitations (4D writing, unscaled `UINT16`/`UINT32` NIfTI data, hypervector reductions, a few processing edge cases); the **[Stability matrix](/guide/stability)** lists the verified status of every feature, so you know what is safe to build on.
 :::

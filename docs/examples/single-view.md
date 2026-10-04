@@ -11,51 +11,54 @@ import {
   readNiftiArrayBuffer, VolLayer, VolStack, ColorMapFactory, SingleSliceViewer,
 } from 'neuroimjs/browser'
 
-const vol = readNiftiArrayBuffer(await (await fetch('/data/mni152_t1.nii.gz')).arrayBuffer())
-const range = vol.getRange()
-const stack = new VolStack(new VolLayer('t1', vol, ColorMapFactory.createGrayscale({ range }), range))
+const resp = await fetch('/data/mni152_t1.nii.gz')
+const t1 = readNiftiArrayBuffer(await resp.arrayBuffer())
+const range = t1.getRange() // or a percentile window; see Getting Started
+const stack = new VolStack(new VolLayer('t1', t1, ColorMapFactory.createGrayscale({ range }), range))
 
-const axial = await SingleSliceViewer.createAxial(
-  document.getElementById('axial')!,
-  stack,
-  { showCrosshair: true, showSlider: true, width: 512, height: 512 },
-)
+const axial = await SingleSliceViewer.createAxial(document.getElementById('axial')!, stack, {
+  showCrosshair: true,
+  showSlider: true,
+})
 
-// Events
-axial.onCoordChange((coord) => updateReadout('world', coord))
-axial.onSliceChange((index) => updateReadout('slice', index))
+// Events (each returns an unsubscribe function)
+const log = (label: string, value: unknown) => console.log(label, value)
+axial.onCoordChange((coord) => log('world mm', coord))
+axial.onSliceChange((index) => log('slice', index))
 axial.onPointerMove(({ imageCoord, worldCoord }) => {
-  updateReadout('mouse', imageCoord ?? 'outside')
-  updateReadout('mouseWorld', worldCoord ?? 'outside')
+  log('mouse (image)', imageCoord ?? 'outside')
+  log('mouse (world)', worldCoord ?? 'outside')
 })
 
 // Imperative control
 axial.setCrosshairVisible(true)
 axial.setCoord([0, -18, 20])
-axial.getCurrentCoord()
-axial.getCurrentSliceIndex()
-axial.getOrientation()
+log('now at', axial.getCurrentCoord())
+log('slice index', axial.getCurrentSliceIndex())
+log('orientation', axial.getOrientation())
 ```
+
+Pointer payloads are computed on the next animation frame, so a handler sees the position from the previous pointer event; see [Composable Views](/guide/composable-views) for details.
 
 ## Three synchronized views
 
-Compose your own orthogonal layout and link the views:
+Compose your own orthogonal layout and link the views. Click in any plane below and the other two follow:
 
-<div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
-  <BrainViewer mode="axial" :height="240" caption="Axial" />
-  <BrainViewer mode="coronal" :height="240" caption="Coronal" />
-  <BrainViewer mode="sagittal" :height="240" caption="Sagittal" />
-</div>
+<BrainViewer mode="trio" :height="260" caption="Three SingleSliceViewers linked by ViewSynchronizer.createOrthogonal." />
 
 ```ts
 import { SingleSliceViewer, ViewSynchronizer } from 'neuroimjs/browser'
 
-const axial    = await SingleSliceViewer.createAxial(axialEl, stack)
-const sagittal = await SingleSliceViewer.createSagittal(sagEl, stack)
-const coronal  = await SingleSliceViewer.createCoronal(corEl, stack)
+const axial    = await SingleSliceViewer.createAxial(document.getElementById('axial')!, stack)
+const coronal  = await SingleSliceViewer.createCoronal(document.getElementById('coronal')!, stack)
+const sagittal = await SingleSliceViewer.createSagittal(document.getElementById('sagittal')!, stack)
 
-// Crosshair moves in one → all update.
+// Moving the crosshair in one view updates the others.
 const sync = ViewSynchronizer.createOrthogonal(axial, sagittal, coronal)
+
+// Tear down in reverse order when the host unmounts.
+sync.dispose()
+for (const v of [axial, coronal, sagittal]) v.dispose()
 ```
 
 ```html

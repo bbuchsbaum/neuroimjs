@@ -8,54 +8,50 @@ A complete, copy-pasteable orthogonal viewer — the same component running belo
 
 ```ts
 import {
-  readNiftiArrayBuffer,
-  VolLayer, VolStack, ColorMapFactory,
-  SimpleOrthogonalViewer,
+  readNiftiArrayBuffer, VolLayer, VolStack, ColorMapFactory, SimpleOrthogonalViewer,
 } from 'neuroimjs/browser'
 
-// 1 — Load a NIfTI volume. readNiftiArrayBuffer handles gzip, datatype,
-//     byte order, intensity scaling and the affine.
-async function loadNiftiVolume(url: string) {
-  const vol = readNiftiArrayBuffer(await (await fetch(url)).arrayBuffer())
+// 1 — Load a NIfTI volume (.nii or .nii.gz; scaling is applied).
+const resp = await fetch('/data/mni152_t1.nii.gz')
+const t1 = readNiftiArrayBuffer(await resp.arrayBuffer())
 
-  // Robust display window (2nd–99.5th percentile of a subsample).
-  const data = vol.getData()
-  const s = Array.from(data).filter((_, i) => i % 97 === 0).sort((a, b) => a - b)
-  const range: [number, number] = [s[Math.floor(s.length * 0.02)], s[Math.floor(s.length * 0.995)]]
-
-  return { vol, range }
-}
+// Robust display window: 2nd–99.5th percentile of a subsample.
+const data = t1.getData()
+const sample = Array.from(data.filter((_, i) => i % 97 === 0)).sort((a, b) => a - b)
+const range: [number, number] = [
+  sample[Math.floor(sample.length * 0.02)],
+  sample[Math.floor(sample.length * 0.995)],
+]
 
 // 2 — Build a stack and mount the viewer.
-const { vol, range } = await loadNiftiVolume('/data/mni152_t1.nii.gz')
-const layer = new VolLayer('t1', vol, ColorMapFactory.createGrayscale({ range }), range)
-const stack = new VolStack(layer)
-
-const viewer = await SimpleOrthogonalViewer.create(
-  document.getElementById('viewer')!,
-  stack,
-  { layout: 'top-bottom', showCrosshair: true },
-)
+const stack = new VolStack(new VolLayer('t1', t1, ColorMapFactory.createGrayscale({ range }), range))
+const viewer = await SimpleOrthogonalViewer.create(document.getElementById('viewer')!, stack, {
+  layout: 'top-bottom',
+  showCrosshair: true,
+})
 
 // 3 — React to interaction.
 viewer.onCoordChange((c) => console.log('world (mm):', c))
 viewer.onSliceChange(({ view, index }) => console.log(view, index))
 
-// Drive it programmatically:
-viewer.setLPICoord([0, 18, 20])
+// Drive it programmatically (world mm; RAS for a NIfTI with a valid affine):
+viewer.setWorldCoord([0, -18, 20])
+
+// When the host unmounts:
+// viewer.dispose()
 ```
 
 ## HTML scaffold
 
 ```html
 <div id="viewer" style="width: 720px; height: 520px;"></div>
-<script type="module" src="./viewer.js"></script>
+<script type="module" src="./viewer.ts"></script>
 ```
 
 ## Notes
 
-- **Container size matters** — the viewer reads it on creation. Give `#viewer` explicit dimensions.
-- **Layouts** — `'top-bottom'` (default), `'left-tall'`, or `'ortho'` (a 2×2 grid with a legend cell).
-- **Overlays** — `viewer.addLayer(new VolLayer('stat', statVol, hot, [3, 8]))`. See [Colormaps & Layers](/guide/colormaps).
+- **Give the container a size.** The viewer fits itself to its container and follows later resizes, but a zero-height container renders nothing.
+- **Layouts** — `'top-bottom'` (default), `'left-tall'`, or `'ortho'` (2×2 grid with a legend cell); see [Viewers](/guide/viewers).
+- **Overlays** — `viewer.addLayer(new VolLayer('stat', statVol, ColorMapFactory.createHot(), [3, 8]))`. For thresholds, colormaps and the interactive panel, see [Colormaps & Layers](/guide/colormaps) and the **[Full Viewer with Controls](/examples/viewer-workbench)**.
 
 → Prefer custom layouts? See **[Single Slice View](/examples/single-view)** and the [Composable Views](/guide/composable-views) guide.

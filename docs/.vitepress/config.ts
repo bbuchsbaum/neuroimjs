@@ -4,7 +4,6 @@ import { readFileSync } from 'node:fs'
 
 // Deployed at https://bbuchsbaum.github.io/neuroimjs/
 const base = '/neuroimjs/'
-
 // Show the released version from package.json so the nav never goes stale.
 const { version } = JSON.parse(
   readFileSync(fileURLToPath(new URL('../../package.json', import.meta.url)), 'utf-8'),
@@ -83,6 +82,8 @@ export default defineConfig({
           collapsed: false,
           items: [
             { text: 'Data Structures', link: '/guide/concepts' },
+            { text: 'Volumes & Slices', link: '/guide/volumes' },
+            { text: 'Time Series & Hypervectors', link: '/guide/time-series' },
             { text: 'Coordinate Systems', link: '/guide/coordinate-systems' },
             { text: 'Reading & Writing (I/O)', link: '/guide/io' },
           ],
@@ -93,6 +94,8 @@ export default defineConfig({
           items: [
             { text: 'Spatial & Resampling', link: '/guide/processing' },
             { text: 'Statistics & Searchlight', link: '/guide/analysis' },
+            { text: 'Regions of Interest', link: '/guide/roi' },
+            { text: 'Group Statistics & Review', link: '/guide/group-stats' },
           ],
         },
         {
@@ -100,10 +103,11 @@ export default defineConfig({
           collapsed: false,
           items: [
             { text: 'Viewers', link: '/guide/viewers' },
-            { text: 'Composable Views', link: '/guide/composable-views' },
             { text: 'Colormaps & Layers', link: '/guide/colormaps' },
+            { text: 'Composable Views', link: '/guide/composable-views' },
             { text: 'Multi-Layer Alignment', link: '/guide/alignment' },
-            { text: 'Group Overlay Review', link: '/guide/overlay-review' },
+            { text: 'UI Controls', link: '/guide/controls' },
+            { text: 'Custom Layers', link: '/guide/custom-layers' },
           ],
         },
       ],
@@ -112,6 +116,7 @@ export default defineConfig({
           text: 'Live Examples',
           items: [
             { text: 'Overview', link: '/examples/' },
+            { text: 'Full Viewer with Controls', link: '/examples/viewer-workbench' },
             { text: 'Orthogonal Viewer', link: '/examples/orthogonal-viewer' },
             { text: 'Single Slice View', link: '/examples/single-view' },
           ],
@@ -137,15 +142,36 @@ export default defineConfig({
     outline: { level: [2, 3] },
   },
 
+  vue: {
+    template: {
+      // Lit web components shipped by the library (e.g. <layer-control-panel>).
+      compilerOptions: { isCustomElement: (tag) => tag.includes('-panel') },
+    },
+  },
+
   vite: {
     resolve: {
-      alias: {
-        // The live demos import the library straight from source (browser-safe entry).
-        neuroimjs: fileURLToPath(new URL('../../src/browser.ts', import.meta.url)),
-      },
+      alias: [
+        // The live demos import the library straight from source. Both specifiers
+        // resolve to the browser-safe entry, so demos never pull in Node modules.
+        {
+          find: /^neuroimjs(\/browser)?$/,
+          replacement: fileURLToPath(new URL('../../src/browser.ts', import.meta.url)),
+        },
+      ],
     },
     optimizeDeps: {
-      include: ['pixi.js', 'mobx', 'chroma-js', 'nifti-reader-js'],
+      // Pre-bundle every Lit entry the controls use together; otherwise Vite
+      // discovers them separately and Lit's core is loaded twice in dev.
+      include: [
+        'pixi.js',
+        'mobx',
+        'chroma-js',
+        'nifti-reader-js',
+        'lit',
+        'lit/decorators.js',
+        'lit/directives/live.js',
+      ],
     },
     ssr: {
       // These are only ever pulled in via client-side dynamic import, but keep them

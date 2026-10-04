@@ -1,90 +1,75 @@
 # Data Structures
 
-Everything in neuroimjs is built on two ideas: a **space** that describes where voxels live in the world, and a **volume** that stores values on that space. Get these two and the rest of the library falls into place.
+neuroimjs rests on two ideas: a **space**, which says where voxels sit in the world, and a **volume**, which stores values on that space. Once these two are clear, the rest of the library follows.
 
-## NeuroSpace — the coordinate frame
+## NeuroSpace: the coordinate frame
 
-A `NeuroSpace` describes the geometry of a grid: its dimensions, voxel spacing, origin, anatomical orientation, and the affine transform that maps voxel indices to physical (world) coordinates in millimeters.
+A `NeuroSpace` describes the geometry of a grid: its dimensions, voxel spacing, origin, anatomical axes, and the affine transform that maps voxel indices to world coordinates in millimetres.
 
 ```ts
 import { NeuroSpace } from 'neuroimjs'
 
 const space = new NeuroSpace(
-  [64, 64, 40],     // dim:     grid size in voxels
-  [3, 3, 4],        // spacing: mm per voxel
-  [0, 0, 0],        // origin:  world position of voxel [0,0,0]
+  [64, 64, 40], // dim:     grid size in voxels
+  [3, 3, 4], // spacing: mm per voxel
+  [0, 0, 0], // origin:  world position of voxel [0,0,0]
 )
 
-space.dim       // [64, 64, 40]
-space.spacing   // [3, 3, 4]
-space.gridToCoord([32, 32, 20])   // → world coordinate in mm
-space.coordToGrid([0, 0, 0])      // → nearest voxel index
+space.dim // [64, 64, 40]
+space.spacing // [3, 3, 4]
+space.gridToCoord([32, 32, 20]) // [96, 96, 80] — world mm
+space.coordToGrid([96, 96, 80]) // [32, 32, 20]
+space.coordToGrid([97, 96, 80]) // [32.33…, 32, 20] — continuous, not rounded
 ```
 
-A space can also be constructed from a full 4×4 affine (e.g. one read from a NIfTI header) — that's what the loaders do. See **[Coordinate Systems](/guide/coordinate-systems)** for the full transform story.
+A space can also be built from a full 4×4 affine (the fifth constructor argument), as the NIfTI readers do. **[Coordinate Systems](/guide/coordinate-systems)** covers the transforms in full. A space with a fourth dimension describes a time series (see below).
 
-## NeuroVol — 3D volumes
+## NeuroVol: 3D volumes
 
-`NeuroVol` is the interface for 3D volumetric data. There are several implementations for different storage strategies:
+`NeuroVol` is the interface for 3D data. Every implementation supports `getAt(i, j, k)`, `setAt`, `get(linearIndex)`, `getData()`, `getRange()` and slicing:
 
-| Class | When to use |
-|---|---|
-| `DenseNeuroVol` (and typed subclasses like `FloatNeuroVol`, `Int16NeuroVol`) | The default — every voxel stored in a typed array. |
-| `SparseNeuroVol` | Mostly-empty volumes (masks, sparse activation maps). |
-| `ClusteredNeuroVol` | Parcellations / atlases — voxels labeled by region. |
-| `LogicalNeuroVol` | A computed/boolean view over another volume. |
+| Class | Storage | When to use |
+|---|---|---|
+| `DenseNeuroVol` subclasses: `FloatNeuroVol`, `Int16NeuroVol`, `UInt8NeuroVol`, … | One typed array | The default |
+| `LogicalNeuroVol` | 0/1 `Uint8Array` | Masks and thresholded maps |
+| `SparseNeuroVol` | `Map` of non-default voxels | Peaks, spheres, small ROIs on large grids |
+| `ClusteredNeuroVol` | Mask + one label per in-mask voxel | Parcellations and atlases (wrapped by `NeuroAtlas`) |
 
 ```ts
-import { FloatNeuroVol, NeuroSpace } from 'neuroimjs'
+import { NeuroSpace, FloatNeuroVol } from 'neuroimjs'
 
-const space = new NeuroSpace([2, 2, 2])
+const vspace = new NeuroSpace([2, 2, 2])
 const data = new Float32Array([0, 1, 2, 3, 4, 5, 6, 7])
-
-// Note the argument order: (space, data)
-const vol = new FloatNeuroVol(space, data)
-
-vol.getAt(1, 0, 0)      // 1
-vol.space               // the NeuroSpace above
+const vol = new FloatNeuroVol(vspace, data) // (space, data)
+vol.getAt(1, 0, 0) // 1
+vol.getAt(0, 1, 0) // 2  — i varies fastest: index = i + j·nx + k·nx·ny
 ```
 
 ::: tip Constructor order
-Typed volume constructors take **`(space, data)`** — space first, then the typed array.
+Typed volume constructors take **`(space, data)`**: the space first, then the typed array. The data array is adopted as is, without a copy, and is laid out x-fastest as in NIfTI.
 :::
 
-## NeuroVec — 4D time-series
+**[Volumes & Slices](/guide/volumes)** covers each class in depth: masks, sparse volumes, parcellations, geometry checks and 2D slice extraction.
 
-`NeuroVec` extends the idea to 4D: a stack of 3D volumes over time, the natural shape for fMRI. Typed variants (`Float32NeuroVec`, etc.) and enhanced variants with preprocessing live alongside it.
+## NeuroVec: 4D time series
 
-```ts
-import { NeuroSpace, Float32NeuroVec } from 'neuroimjs'
+A `NeuroVec` is a stack of 3D volumes on one grid, the natural shape for an fMRI run. Every implementation takes `(i, j, k, t)` in `getAt`/`setAt`, returns a voxel's series from `getSeries(i, j, k)`, and returns frame `t` as a `NeuroVol` from `getVolume(t)`. The family includes:
 
-// 10 time points of a 64 × 64 × 40 volume: spatial dims first, time last
-const space = new NeuroSpace([64, 64, 40, 10], [3, 3, 4, 2])
-const vec = new Float32NeuroVec(space, new Float32Array(64 * 64 * 40 * 10))
+- dense typed vecs (`Float32NeuroVec`, …) built on a 4D space,
+- `EnhancedFloat32NeuroVec`, which adds `detrend`, `temporalFilter` and temporal statistics,
+- `FileBackedNeuroVec` (volumes fetched on demand through a callback you supply, with an LRU cache) and `MappedNeuroVec` (a `DataView` over an `ArrayBuffer` you supply) for runs you don't want to convert up front; neither opens or memory-maps files itself,
+- `SparseNeuroVec`,
+- `BigNeuroVec`, which is what `readVec` returns.
 
-vec.dim                          // [64, 64, 40, 10]
-vec.getSeries(32, 32, 20)        // the 10 values at voxel (32, 32, 20)
-vec.getVolume(0)                 // the first 3D volume, a FloatNeuroVol
-```
-
-::: warning `readVec` uses a different, time-first shape
-`readVec` returns a `BigNeuroVec` whose `dim` (and `space.dim`) is **`[T, X, Y, Z]`**, so `vec.space` does not describe the image grid. Its 3D geometry, including the affine, is on `vec.volumeSpace`, and `getSeries(i, j, k)` and `getVolume(t)` work as above. Details are in [Reading & Writing](/guide/io#_4d-time-series-readvec).
+::: warning Two axis orders
+For most vec classes `space.dim` is `[X, Y, Z, T]`. `BigNeuroVec`, which `readVec` returns, uses `[T, X, Y, Z]`, so its `space` does not describe the image grid; its 3D geometry, including the affine, is on `vec.volumeSpace` ([details](/guide/io#_4d-time-series-readvec)). On all of them, `vec.length` is the total element count, not the number of time points.
 :::
 
-`vec.length` is the total number of values (voxels × time points), not the number of time points; read the time-point count from `dim`.
+**[Time Series](/guide/time-series)** has verified examples of each class, the preprocessing operations, and how to load large runs.
 
-Two other 4D containers take their data from you rather than from a file:
+## Hypervectors: 5D and beyond
 
-- **`FileBackedNeuroVec`** calls a function you supply, `(t) => Float32Array`, to fetch volume `t` on demand and keeps recently used volumes in an LRU cache (10 by default). It never opens files itself; the callback decides where data come from.
-- **`MappedNeuroVec`** reads values through a `DataView` over an `ArrayBuffer` you supply (float32, float64, int16 or uint8, either byte order), without copying it. It is not a memory-mapped file.
-
-::: tip
-Temporal preprocessing (`detrend`, `temporalFilter`) lives on the *enhanced* vec classes (`EnhancedDenseNeuroVec`, `EnhancedFloat32NeuroVec`) and on `FileBackedNeuroVec`, and performs real per-voxel filtering.
-:::
-
-## NeuroHyperVec — 5D and beyond
-
-`DenseNeuroHyperVec` (created with `createNeuroHyperVec`) adds named dimensions beyond time (subjects × conditions × …) for multi-dimensional designs. Indexing, `getSubVolume`, `reduce`, `concat`, `split`, `permute` and `view` are implemented; `glm`, `extractFeatures` and `save` throw "not yet implemented". The whole module is <span class="stability-badge experimental">experimental</span> ([stability](/guide/stability)).
+`createNeuroHyperVec(space, dimensions)` returns a `DenseNeuroHyperVec`: a 3D grid plus any number of named axes (subject, condition, session, …). It supports sub-volume extraction, reductions (`ReductionOp`), concatenation, splitting and permutation. Several advanced operations (`glm`, `extractFeatures`, `save`) throw "not yet implemented". **[Time Series → Hypervectors](/guide/time-series#hypervectors-5d-and-beyond)** lists what works and what throws.
 
 ## Display building blocks
 
@@ -97,11 +82,14 @@ VolStack  ─ holds one or more ─►  VolLayer  ─ wraps ─►  NeuroVol + C
 ```
 
 ```ts
-import { VolLayer, VolStack, ColorMapFactory } from 'neuroimjs'
+// Display code runs in the browser, so import from the browser entry.
+import { NeuroSpace, FloatNeuroVol, VolLayer, VolStack, ColorMapFactory } from 'neuroimjs/browser'
 
-const cmap = ColorMapFactory.createGrayscale({ range: [0, 1000] })
-const layer = new VolLayer('t1', vol, cmap, [0, 1000])
-const stack = new VolStack(layer)   // add more layers to overlay
+const vol = new FloatNeuroVol(new NeuroSpace([2, 2, 2]), new Float32Array([0, 1, 2, 3, 4, 5, 6, 7]))
+
+const cmap = ColorMapFactory.createGrayscale({ range: [0, 7] })
+const layer = new VolLayer('t1', vol, cmap, [0, 7])
+const stack = new VolStack(layer) // pass more layers to overlay
 ```
 
 See **[Colormaps & Layers](/guide/colormaps)** for overlays and thresholding, and **[Viewers](/guide/viewers)** to put a stack on screen.

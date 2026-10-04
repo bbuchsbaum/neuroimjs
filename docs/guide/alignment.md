@@ -21,7 +21,7 @@ The three heuristics reuse the reference slice index for every layer and fit sli
 ## Choosing a strategy
 
 ```ts
-import { SimpleOrthogonalViewer } from 'neuroimjs'
+import { SimpleOrthogonalViewer } from 'neuroimjs/browser'
 
 // At construction (applies to all three views)
 const viewer = await SimpleOrthogonalViewer.create(container, stack, {
@@ -35,7 +35,7 @@ viewer.setAlignmentStrategy('auto')
 Lower-level code that builds an `ImageLayer` directly passes the strategy in its alignment options and can change it with `setAlignmentStrategy`:
 
 ```ts
-import { ImageLayer } from 'neuroimjs'
+import { ImageLayer } from 'neuroimjs/browser'
 
 const imageLayer = new ImageLayer(stack, { strategy: 'world' })
 imageLayer.setAlignmentStrategy('center')

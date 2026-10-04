@@ -686,7 +686,9 @@ export class LayerControlPanel extends LitElement {
     return presets.includes(name) ? presets : [name, ...presets];
   }
 
-  updated(changedProperties: Map<string, any>) {
+  // Derive control state in willUpdate (not updated) so it lands in the same
+  // render instead of scheduling a second update cycle.
+  willUpdate(changedProperties: Map<string, any>) {
     if (changedProperties.has('imageLayer') && this.imageLayer) {
       this.initializeFromImageLayer();
     }
