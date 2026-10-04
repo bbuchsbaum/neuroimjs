@@ -221,6 +221,11 @@ The [API reference](https://bbuchsbaum.github.io/neuroimjs/api/) is generated fr
 - `readHeader` - Read NIfTI headers without loading data
 - `getVolumeGeometry` / `assertSameVolumeGeometry` - Inspect and compare volume geometry
 
+For Node processes that should not load the viewer stack (pixi.js, mobx,
+lit), such as an Electron main process, import from the viewer-free
+subpaths `neuroimjs/io`, `neuroimjs/slices` and `neuroimjs/geometry`. See
+[Viewer-free imports](https://bbuchsbaum.github.io/neuroimjs/guide/io#viewer-free-imports).
+
 ### Spatial Processing
 
 - `SpatialFilter` - Filtering operations (Gaussian, bilateral, median, morphology)

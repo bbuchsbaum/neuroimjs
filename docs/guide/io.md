@@ -66,6 +66,32 @@ assertSameVolumeGeometry(template, statMap)
 
 Overlays on a *different* grid do not need to match: the viewers place them by world position. See [Multi-Layer Alignment](/guide/alignment).
 
+## Viewer-free imports (`neuroimjs/io`, `neuroimjs/slices`, `neuroimjs/geometry`) {#viewer-free-imports}
+
+Importing the root `neuroimjs` entry also loads the viewer stack: pixi.js, mobx and lit. In a Node service, a CLI or an Electron main process you usually want only I/O and geometry. Three subpath exports provide those without loading any display code:
+
+| Subpath | Exports |
+|---|---|
+| `neuroimjs/io` | `readVol`, `writeVol`, `readHeader`, `readVolList`, `readVec`, `writeVec`, `read_vol`, `write_vol`, `FileFormat`, `NIFTIFormat`, `NIFTIDualFormat`, `AFNIFormat`, `findDescriptor`, `getFormat`; types `ReadVolOptions`, `WriteVolOptions`, `HeaderInfo`, `NeuroVol`, `NeuroVec` |
+| `neuroimjs/slices` | `extractOrthogonalSlices`, `extractAxialSlice`, `extractSagittalSlice`, `extractCoronalSlice`, `getSliceOrientation`, `getWorldBoundsForSlice`, `extractSliceForView`, `getSliceAxisIndex`, `getMaxSliceIndex`, `isValidSliceIndex`, `getSliceAxisName`, `getCenterSliceIndex`, `getSafeSliceIndicesForSpaces`, `NeuroSlice`; type `NeuroVol` |
+| `neuroimjs/geometry` | `NeuroSpace`, `NamedAxis`, `AxisSet`, `AxisSet1D`, `AxisSet2D`, `AxisSet3D`, `AXIAL_LPI`, `CORONAL_LIP`, `SAGITTAL_AIL`, `getVolumeGeometry`, `assertSameVolumeGeometry`; type `VolumeGeometry` |
+
+Each subpath works with both `import` and `require`, and ships its own type declarations. Every symbol is also exported from the root entry, so you can switch an import between the two without other changes.
+
+```ts
+// Electron main process: build a thumbnail without loading pixi.js
+import { readVol } from 'neuroimjs/io'
+import { extractOrthogonalSlices } from 'neuroimjs/slices'
+
+const vol = await readVol('sub-01_T1w.nii.gz')
+const centre = vol.space.gridToCoord(vol.dim.slice(0, 3).map((d) => (d - 1) / 2))
+const { axial, sagittal, coronal } = extractOrthogonalSlices(vol, centre)
+```
+
+`readNiftiArrayBuffer` is not in `neuroimjs/io`. It statically imports the ESM-only `nifti-reader-js`, which would break `require('neuroimjs/io')`. In Node, pass the bytes to `readVol` instead, which also accepts an `ArrayBuffer`. In the browser, `readNiftiArrayBuffer` is available from `neuroimjs/browser`.
+
+`npm run test:package` checks the compiled import graph of each subpath, then imports it from the packed tarball in plain Node (ESM and CommonJS). It fails if pixi.js, `@pixi/*`, mobx, lit or any display module is resolved. These subpaths are an interim measure. A later release is planned to split the package into separate core and viewer entries; the intent is to keep these subpaths working after that split.
+
 ## Node.js: read from disk
 
 ```ts
@@ -152,3 +178,59 @@ console.log(info.dim, info.spacing, info.datatype, info.affine)
 ## Legacy aliases
 
 `read_vol(input)` and `write_vol(vol, path)` are thin wrappers over `readVol` and `writeVol`, kept for backward compatibility. Prefer `readVol` / `writeVol` in new code.
+
+## Errors
+
+The library's own errors are instances of `NeuroimError`. Each carries a stable
+`code`, and some also carry a `details` object (for example `{ index, volumeCount }`)
+and a `cause`. Branch on the code rather than on the message: message wording
+may change between releases, but codes will not.
+
+```ts
+import { readVol, isNeuroimError } from 'neuroimjs'
+
+try {
+  const vol = await readVol(buffer, { index: 3 })
+} catch (error) {
+  if (isNeuroimError(error, 'OUT_OF_RANGE')) {
+    console.warn(`only ${error.details?.volumeCount} volumes`)
+  } else if (isNeuroimError(error, 'CORRUPT_FILE')) {
+    console.warn('not a readable NIfTI file')
+  } else {
+    throw error
+  }
+}
+```
+
+`isNeuroimError` also recognises errors from another copy of the library, such
+as the CommonJS and ESM builds loaded side by side, where `instanceof` fails.
+`NeuroimError`, `NeuroimTypeError` and `isNeuroimError` are exported from both
+`neuroimjs` and `neuroimjs/browser`. The deprecated `ValueError`, `IOError` and
+`NotImplementedError` are exported from `neuroimjs` only.
+
+An error that crosses a worker boundary (`postMessage`, `structuredClone`)
+arrives as a plain `Error`: the clone drops `code`, `details` and the brand
+that `isNeuroimError` checks, so send `{ code, message }` explicitly if the
+other side needs to branch on it.
+
+| Code | Meaning | Typical sources |
+|---|---|---|
+| `INVALID_ARGUMENT` | An argument has the wrong shape, type or value | `NeuroSpace` with non-positive spacing or a singular affine; unknown axis names; empty `readVec` selection |
+| `OUT_OF_RANGE` | An index or coordinate is outside the valid range | `readVol`/`readVec`/`readNiftiArrayBuffer` volume index past the end; `extractSliceNeuroSpace` past an axis |
+| `GEOMETRY_MISMATCH` | Spaces, volumes or axis sets that must agree do not | `assertSameVolumeGeometry`; `withDimensions` with a different spatial rank; incompatible axis permutations |
+| `UNSUPPORTED_FORMAT` | The format, or a valid feature of it, is not supported | unknown file extension; writing a non-NIfTI format; a NIfTI that is neither 3D nor 4D |
+| `UNSUPPORTED_DATATYPE` | The voxel data type is not supported | NIfTI datatypes such as FLOAT128 or RGB24 |
+| `CORRUPT_FILE` | The bytes do not decode as the expected format | bad magic number, unreadable header, invalid dimensions, truncated image data |
+| `NOT_IMPLEMENTED` | The API exists but has no implementation for this input | `reorient` on a space that is not 2D or 3D; `NotImplementedError` |
+| `IO_ERROR` | Reading from or writing to storage failed | `IOError` |
+
+Errors raised by Node itself, such as `ENOENT` for a missing file, and by
+third-party decoders, such as a failed gunzip, propagate unchanged and are not
+`NeuroimError`s.
+
+**Deprecated names.** `ValueError` is now a subclass of `NeuroimError`.
+Functions that used to throw `ValueError` still do, now with a specific code,
+so existing `instanceof ValueError` checks keep working. New code should use
+`isNeuroimError` instead. The old `TypeError` export, which shadowed the global
+`TypeError`, has been removed. Its replacement is `NeuroimTypeError`, which has
+code `INVALID_ARGUMENT`.

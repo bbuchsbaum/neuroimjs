@@ -9,7 +9,8 @@ in the pull request that makes the change.
 
 Upgrading: `readVol` now takes `space.spacing` from the affine rather than
 from `pixdim`. Callers that need the raw `pixdim[1..3]` should use
-`readHeader().spacing`. See Changed.
+`readHeader().spacing`. See Changed. The `TypeError` export is removed; import
+`NeuroimTypeError` instead. See Removed.
 
 ### Added
 
@@ -30,8 +31,30 @@ from `pixdim`. Callers that need the raw `pixdim[1..3]` should use
 - Downstream consumer contract tests (`npm run test:consumers`, part of
   `verify:release` and CI): the call surfaces of neuromosaic, FROIAtlas,
   neuroimjs-vscode and xnat2bids, run against the packed tarball.
+- Viewer-free subpath exports `neuroimjs/io` (readVol, writeVol, readHeader,
+  readVolList, readVec, writeVec, read_vol, write_vol, format descriptors),
+  `neuroimjs/slices` (extractOrthogonalSlices and the slice helpers,
+  NeuroSlice) and `neuroimjs/geometry` (NeuroSpace, axes, volume geometry).
+  Each has `types`/`import`/`require` conditions and never loads pixi.js,
+  mobx, lit or display code. `npm run test:package` enforces this with a
+  static import-graph check and a runtime check against the packed tarball.
+  Node consumers such as Electron main processes no longer need deep
+  `dist/esm/...` imports. `readNiftiArrayBuffer` stays browser-only.
 - `BigNeuroVec` accepts `storage: 'memory'` (no backing file), `volumeSpace`
   and `shareData` options, and exposes `storage` and `volumeSpace`.
+- Typed errors. `NeuroimError` (base class) carries a stable `code` of type
+  `NeuroimErrorCode`, which is one of `INVALID_ARGUMENT`, `OUT_OF_RANGE`,
+  `GEOMETRY_MISMATCH`, `UNSUPPORTED_FORMAT`, `UNSUPPORTED_DATATYPE`,
+  `CORRUPT_FILE`, `NOT_IMPLEMENTED` or `IO_ERROR`. It may also carry a `details`
+  object and an ES2022 `cause`. `isNeuroimError(error, code?)` narrows an
+  unknown error, including one from a second copy of the library (for example
+  the CJS and ESM builds loaded together). `NEUROIM_ERROR_CODES` lists the
+  codes. The TypeScript modules in `src/io` and `src/geometry` throw only
+  coded errors, with messages unchanged; other modules are not yet migrated.
+  `NeuroimError`, `NeuroimTypeError` and `isNeuroimError` are also exported
+  from `neuroimjs/browser`. `ValueError`, `NotImplementedError` and
+  `IOError` are now subclasses of `NeuroimError` and keep their `name`s. See
+  the Errors section of the I/O guide.
 
 ### Changed
 
@@ -67,6 +90,21 @@ from `pixdim`. Callers that need the raw `pixdim[1..3]` should use
   GitHub release, using npm Trusted Publishing (OIDC) with a provenance
   attestation; `scripts/verify-published.mjs` checks that the registry
   tarball matches the CI build file for file. See `RELEASING.md`.
+
+### Deprecated
+
+- `ValueError`. Catch library errors with `isNeuroimError(error, code)`.
+  Functions that threw `ValueError` still throw instances of it (now with a
+  specific `code`, e.g. `CORRUPT_FILE` for a non-NIfTI buffer), so existing
+  `instanceof ValueError` checks keep working until 1.0.
+
+### Removed
+
+- The `TypeError` export. `export * from './types'` exposed it, so
+  `import * as nij from 'neuroimjs'` and `import { TypeError } from 'neuroimjs'`
+  shadowed the global `TypeError`. No library function threw it. Use
+  `NeuroimTypeError` (a `NeuroimError` with code `INVALID_ARGUMENT`) or the
+  global `TypeError`.
 
 ### Fixed
 

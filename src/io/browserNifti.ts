@@ -3,6 +3,7 @@ import { Matrix } from 'ml-matrix';
 import { nearestAnatomy } from '../geometry/Axis';
 import { NeuroSpace } from '../geometry/NeuroSpace';
 import { affineVoxelSizes, niftiScaling } from './niftiGeometry';
+import { NeuroimError } from '../errors';
 import type { NeuroVol } from '../volume/NeuroVol';
 import {
   Float64NeuroVol,
@@ -65,7 +66,9 @@ function typedImage(buffer: ArrayBuffer, header: NiftiHeader): NiftiTypedArray {
   };
   const Constructor = constructors[header.datatypeCode];
   if (!Constructor) {
-    throw new Error(`Unsupported NIfTI datatype code: ${header.datatypeCode}`);
+    throw new NeuroimError('UNSUPPORTED_DATATYPE', `Unsupported NIfTI datatype code: ${header.datatypeCode}`, {
+      details: { datatypeCode: header.datatypeCode },
+    });
   }
   const data = new Constructor(buffer);
   if (header.littleEndian === false) swapBytesInPlace(data);
@@ -112,24 +115,30 @@ export function readNiftiArrayBuffer(input: ArrayBuffer, options: BrowserNiftiOp
     buffer = toArrayBuffer(nifti.decompress(buffer));
   }
   if (!nifti.isNIFTI(buffer)) {
-    throw new Error('Input is not a valid NIfTI-1 or NIfTI-2 image.');
+    throw new NeuroimError('CORRUPT_FILE', 'Input is not a valid NIfTI-1 or NIfTI-2 image.');
   }
   const header = nifti.readHeader(buffer);
   if (!header?.dims || header.dims.length < 4) {
-    throw new Error('NIfTI header has invalid dimensions.');
+    throw new NeuroimError('CORRUPT_FILE', 'NIfTI header has invalid dimensions.');
   }
   const rank = Number(header.dims[0]);
   if (rank !== 3 && rank !== 4) {
-    throw new Error(`Expected a 3D or 4D NIfTI image, found ${rank}D.`);
+    throw new NeuroimError('UNSUPPORTED_FORMAT', `Expected a 3D or 4D NIfTI image, found ${rank}D.`, {
+      details: { rank },
+    });
   }
   const dimensions = [Number(header.dims[1]), Number(header.dims[2]), Number(header.dims[3])];
   if (dimensions.some(value => !Number.isInteger(value) || value <= 0)) {
-    throw new Error(`NIfTI has invalid spatial dimensions: ${dimensions.join('x')}.`);
+    throw new NeuroimError('CORRUPT_FILE', `NIfTI has invalid spatial dimensions: ${dimensions.join('x')}.`, {
+      details: { dimensions },
+    });
   }
   const volumeCount = rank === 4 ? Number(header.dims[4]) : 1;
   const index = options.index ?? 0;
   if (!Number.isInteger(index) || index < 0 || index >= volumeCount) {
-    throw new Error(`Volume index ${index} is outside [0, ${volumeCount - 1}].`);
+    throw new NeuroimError('OUT_OF_RANGE', `Volume index ${index} is outside [0, ${volumeCount - 1}].`, {
+      details: { index, volumeCount },
+    });
   }
 
   const completeImage = toArrayBuffer(nifti.readImage(header, buffer));
@@ -138,7 +147,9 @@ export function readNiftiArrayBuffer(input: ArrayBuffer, options: BrowserNiftiOp
   const start = index * bytesPerVolume;
   const image = completeImage.slice(start, start + bytesPerVolume);
   if (image.byteLength !== bytesPerVolume) {
-    throw new Error('NIfTI image data is truncated.');
+    throw new NeuroimError('CORRUPT_FILE', 'NIfTI image data is truncated.', {
+      details: { expectedBytes: bytesPerVolume, actualBytes: image.byteLength },
+    });
   }
 
   const affineValues = header.affine.map(row => Array.from(row, Number));
