@@ -73,7 +73,14 @@ const perRegion = clusteredSearchlight(labelVol, 4)
 const boots = bootstrapSearchlight(mask, 4, 50)
 ```
 
-`randomSearchlight` and `bootstrapSearchlight` use `Math.random` and are not seeded.
+`randomSearchlight` and `bootstrapSearchlight` draw a fresh seed on every call. Pass a seed (or your own generator) to make the centers reproducible:
+
+```ts
+const tiles = randomSearchlight(mask, 6, { seed: 42 })
+const boot = bootstrapSearchlight(mask, 8, 200, { seed: 42 })
+// or share one generator across calls: { rng: createRng(42) }
+```
+
 
 ## Connected components
 

@@ -9,6 +9,21 @@ in the pull request that makes the change.
 
 ### Added
 
+- `toInt32Labels()` converts a label volume (or its voxel data) to an
+  `Int32Array` by value, for every typed-array datatype. It rejects
+  non-finite, non-integer and out-of-range values with an error naming the
+  voxel. (#13)
+- `createRng(seed)` returns a seeded generator (mulberry32) of numbers in
+  [0, 1); `Rng` and `RandomOptions` are exported.
+- `randomSearchlight(mask, radius, { seed, rng })` and
+  `bootstrapSearchlight(mask, radius, iter, { seed, rng })` take an options
+  argument for reproducible centers. Without one, each call still draws a
+  fresh seed, so successive calls give different searchlights as before.
+- `NeuroAtlas.loadGlasserAtlas({ useCache, seed, rng })` chooses the random
+  region colours from a seeded generator. By default it uses
+  `GLASSER_DEFAULT_COLOR_SEED`, so colours are now the same on every load;
+  `loadGlasserAtlas(useCache)` still works.
+
 - Downstream consumer contract tests (`npm run test:consumers`, part of
   `verify:release` and CI): the call surfaces of neuromosaic, FROIAtlas,
   neuroimjs-vscode and xnat2bids, run against the packed tarball.
@@ -17,6 +32,16 @@ in the pull request that makes the change.
 
 ### Changed
 
+- `partition(x, k, method, mask, seed)` throws `RangeError` for a NaN or
+  infinite `seed`; such seeds were previously coerced to 0.
+- The label map of a Glasser or Schaefer `NeuroAtlas` (`atlas.atlas.labelMap`,
+  and the labels returned by `getClusterInfo`/`getClusterLabel`) is keyed by
+  the hemisphere-qualified names from the label file, e.g. `Right_V1` /
+  `Left_V1` and `7Networks_LH_Vis_1`. `loadGlasserAtlas` now sets
+  `origLabels` to those names; `labels` still holds the bare region names.
+  `getROI({ label })` accepts either form, but a bare name shared by both
+  hemispheres (`V1`) now throws an ambiguity error instead of returning the
+  left-hemisphere region.
 - `bigNeuroVecSeq` returns an in-memory `BigNeuroVec` that keeps the first
   volume's space (including its affine) as `volumeSpace`; it previously wrote
   an untracked `.dat` file to `$TMPDIR` and dropped the affine.
@@ -31,6 +56,19 @@ in the pull request that makes the change.
 
 ### Fixed
 
+- `NeuroAtlas.loadSchaeferAtlas`, `loadGlasserAtlas` and `loadAtlas` accept
+  label volumes stored as int8, uint8, int16, uint16, int32, float32 or float64.
+  Schaefer reinterpreted the bytes of non-float volumes (wrong labels, or a
+  `RangeError` for an odd voxel count) and Glasser threw `Unsupported data type`
+  for int8, uint8 and int16. Labels made non-integer by `scl_slope`/`scl_inter`
+  now raise an error instead of being rounded silently. (#13)
+- Right-hemisphere Glasser and Schaefer regions can be looked up by label.
+  The label map was keyed by region name, which both hemispheres share, so each
+  left-hemisphere entry replaced its right-hemisphere twin.
+- `readVol` reads uint16 NIfTI volumes (datatype 512) as `UInt16NeuroVol`; it
+  threw `Unsupported TypedArray type: uint16`.
+- `loadSchaeferAtlas` no longer writes diagnostics to the console; they go to
+  the display logger at DEBUG.
 - The browser bundles are built with a relative base, so the ES bundle refers
   to the scatter-field worker chunk relative to itself
   (`new URL('assets/...', import.meta.url)`) instead of the origin root

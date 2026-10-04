@@ -139,7 +139,11 @@ export {
 } from './roi/ROI_factories';
 export { SparseNeuroVol } from './sparse/SparseNeuroVol';
 export { NeuroAtlas } from './atlas/NeuroAtlas';
-export type { AtlasMetadata, SchaeferAtlasOptions } from './atlas/NeuroAtlas';
+export { toInt32Labels } from './atlas/labels';
+export { GLASSER_DEFAULT_COLOR_SEED } from './atlas/NeuroAtlas';
+export type { AtlasMetadata, SchaeferAtlasOptions, GlasserAtlasOptions } from './atlas/NeuroAtlas';
+export { createRng } from './utils/rng';
+export type { Rng, RandomOptions } from './utils/rng';
 
 // Vector classes
 export { BigNeuroVec, bigNeuroVecSeq } from './vector/BigNeuroVec';
@@ -234,7 +238,7 @@ export {
   clusteredSearchlight,
   bootstrapSearchlight
 } from './searchlight/searchlight';
-export type { SearchlightOptions } from './searchlight/searchlight';
+export type { SearchlightOptions, RandomSearchlightOptions } from './searchlight/searchlight';
 
 // Orthogonal slice extraction
 export {

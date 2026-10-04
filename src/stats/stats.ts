@@ -17,6 +17,7 @@ import { ClusteredNeuroVol } from '../volume/ClusteredNeuroVol';
 import { NeuroSpace } from '../geometry/NeuroSpace';
 import { ROIVol } from '../roi/ROI_improved';
 import { TypedArray, ValueError } from '../types';
+import { createRng } from '../utils/rng';
 
 /**
  * Helper function to create ClusteredNeuroVol from a volume containing cluster IDs.
@@ -630,7 +631,10 @@ export function splitScale(
  * @param k - Number of partitions/clusters
  * @param method - Clustering method (currently only "kmeans")
  * @param mask - Optional mask to restrict clustering to specific voxels
+ * @param seed - Seed for the k-means++ initialisation (default 1); the same
+ *   seed gives the same partition. Must be finite.
  * @returns Clustered volume with partition labels
+ * @throws {RangeError} If `seed` is NaN or infinite.
  */
 export function partition(
   x: NeuroVol,
@@ -690,20 +694,6 @@ export function partition(
 }
 
 /**
- * Deterministic PRNG (mulberry32). Used so clustering is reproducible and
- * independent of global `Math.random` state (and therefore of test ordering).
- */
-function mulberry32(seed: number): () => number {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-/**
  * Simple k-means clustering implementation.
  *
  * Initialization uses seeded k-means++: the first center is chosen at random and
@@ -719,7 +709,7 @@ function mulberry32(seed: number): () => number {
 function simpleKMeans(values: number[], k: number, seed: number = 1): number[] {
   const n = values.length;
   const labels = new Array(n).fill(0);
-  const rand = mulberry32(seed);
+  const rand = createRng(seed);
 
   // k-means++ initialization (seeded).
   const centers = new Float32Array(k);
