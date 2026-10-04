@@ -166,6 +166,18 @@ const EXERCISE = {
     const bytes = readFileSync(fixture);
     const fromBuffer = await mod.readVol(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
     if (fromBuffer.dim[1] !== 4) throw new Error('readVol(ArrayBuffer) returned dim ' + fromBuffer.dim);
+    const geometry = await load('neuroimjs/geometry');
+    const written = fixture.replace(/fixture\.nii\.gz$/, 'written-' + Date.now() + '.nii');
+    await mod.writeVol(new mod.FloatNeuroVol(new geometry.NeuroSpace([2, 2, 2]), new Float32Array(8).fill(3)), written);
+    const roundTrip = await mod.readVol(written);
+    if (roundTrip.get(7) !== 3) throw new Error('FloatNeuroVol/writeVol round trip failed');
+    try {
+      await mod.readVol(new ArrayBuffer(4));
+      throw new Error('invalid NIfTI accepted');
+    } catch (error) {
+      if (!mod.isNeuroimError(error)) throw new Error('readVol did not throw a NeuroimError: ' + error);
+    }
+    if (!Array.isArray(mod.NEUROIM_ERROR_CODES) || typeof mod.NeuroimTypeError !== 'function') throw new Error('missing error exports');
     for (const name of ['writeVol', 'readVec', 'writeVec', 'write_vol', 'getFormat', 'findDescriptor']) {
       if (typeof mod[name] !== 'function') throw new Error('missing ' + name);
     }
@@ -186,6 +198,12 @@ const EXERCISE = {
     if (space.size !== 24) throw new Error('NeuroSpace size ' + space.size);
     if (!(mod.AXIAL_LPI instanceof mod.AxisSet3D)) throw new Error('AXIAL_LPI is not an AxisSet3D');
     if (typeof mod.getVolumeGeometry !== 'function') throw new Error('missing getVolumeGeometry');
+    try {
+      new mod.NeuroSpace([]);
+      throw new Error('empty NeuroSpace accepted');
+    } catch (error) {
+      if (!mod.isNeuroimError(error)) throw new Error('NeuroSpace did not throw a NeuroimError: ' + error);
+    }
   `,
 };
 
@@ -285,7 +303,15 @@ async function thumbnail(path: string): Promise<NeuroSlice> {
   void geometry;
   return extractOrthogonalSlices(vol, vol.space.gridToCoord([0, 0, 0])).axial;
 }
-void [read_vol, writeVol, readHeader, space, axis, thumbnail, getCenterSliceIndex, readNiftiArrayBuffer];
+import { FloatNeuroVol, isNeuroimError, NeuroimError, type NeuroimErrorCode } from 'neuroimjs/io';
+import { isNeuroimError as isGeometryError, NEUROIM_ERROR_CODES } from 'neuroimjs/geometry';
+const built = new FloatNeuroVol(space, new Float32Array(8));
+const code: NeuroimErrorCode = NEUROIM_ERROR_CODES[0];
+function describe(error: unknown): string {
+  if (isNeuroimError(error, code) || isGeometryError(error)) return (error as NeuroimError).code;
+  return 'other';
+}
+void [read_vol, writeVol, readHeader, space, axis, thumbnail, getCenterSliceIndex, readNiftiArrayBuffer, built, describe];
 `);
     writeFileSync(join(consumerRoot, 'subpath-types.cts'), `
 import io = require('neuroimjs/io');
