@@ -103,103 +103,115 @@ export async function readVol(
   options: ReadVolOptions = {}
 ): Promise<NeuroVol> {
   const { index = 0, onProgress } = options;
-  const nifti = await loadNiftiReader();
-  
   try {
-    let buffer: ArrayBuffer;
-    
-    if (typeof input === 'string') {
-      // Check file format
-      const format = await findDescriptor(input);
-      if (!format) {
-        throw new ValueError(`Cannot determine file format for: ${input}`);
-      }
-      
-      // Read file asynchronously
-      const fs = await import('fs/promises');
-      onProgress?.(0.1);
-      
-      const data = await fs.readFile(input);
-      onProgress?.(0.3);
-      
-      buffer = toArrayBuffer(data);
-      
-      // Handle compression based on format
-      if (format.headerEncoding === 'gzip') {
-        onProgress?.(0.4);
-        try {
-          const compressed = new Uint8Array(buffer);
-          const decompressed = pako.ungzip(compressed);
-          buffer = toArrayBuffer(decompressed);
-          onProgress?.(0.5);
-        } catch (err) {
-          // If pako fails, try nifti-reader decompression
-          if (nifti.isCompressed(buffer)) {
-            buffer = toArrayBuffer(new Uint8Array(nifti.decompress(buffer)));
-            onProgress?.(0.5);
-          } else {
-            throw err;
-          }
-        }
-      }
-    } else {
-      buffer = input;
-      onProgress?.(0.3);
-      // An ArrayBuffer passed directly may still be gzip-compressed (e.g. raw
-      // bytes of a .nii.gz downloaded over the network). Decompress if needed.
-      if (nifti.isCompressed(buffer)) {
-        buffer = toArrayBuffer(new Uint8Array(nifti.decompress(buffer)));
-        onProgress?.(0.5);
-      }
-    }
-
-    if (!nifti.isNIFTI(buffer)) {
-      throw new ValueError('The file is not a valid NIfTI file.');
-    }
-    
-    // Read header
-    const header = nifti.readHeader(buffer);
-    if (!header) {
-      throw new ValueError('NIfTI header is null or undefined');
-    }
-    onProgress?.(0.6);
-    
-    // Validate dimensions
-    if (!header.dims || header.dims.length < 4) {
-      throw new ValueError('Invalid header dimensions');
-    }
-    
-    const numDims = header.dims[0];
-    if (numDims < 3 || numDims > 4) {
-      throw new ValueError(`Expected 3D or 4D image, found ${numDims}D image`);
-    }
-    
-    // Read image data
-    const imageBuffer = nifti.readImage(header, buffer);
+    const { header, imageBuffer } = await decodeNifti(input, onProgress);
     onProgress?.(0.8);
-    
-    // Handle 4D data
-    if (numDims === 4) {
-      const numVols = header.dims[4];
-      if (index < 0 || index >= numVols) {
-        throw new ValueError(`Index ${index} out of range for 4D data with ${numVols} volumes`);
-      }
-      
-      // Extract single volume
-      const volSize = header.dims[1] * header.dims[2] * header.dims[3];
-      const bytesPerVoxel = header.numBitsPerVoxel / 8;
-      const volBytes = volSize * bytesPerVoxel;
-      const startByte = index * volBytes;
-      
-      const volBuffer = imageBuffer.slice(startByte, startByte + volBytes);
-      return createVolFromBuffer(volBuffer, header, [header.dims[1], header.dims[2], header.dims[3]]);
-    } else {
-      // 3D data
-      return createVolFromBuffer(imageBuffer, header, [header.dims[1], header.dims[2], header.dims[3]]);
-    }
+    return volumeFromImage(header, imageBuffer, index);
   } finally {
     onProgress?.(1.0);
   }
+}
+
+/**
+ * Read, decompress and parse a NIfTI file or buffer once, returning the header
+ * and the raw image bytes for all volumes.
+ */
+async function decodeNifti(
+  input: string | ArrayBuffer,
+  onProgress?: (progress: number) => void
+): Promise<{ header: any; imageBuffer: ArrayBuffer }> {
+  const nifti = await loadNiftiReader();
+  let buffer: ArrayBuffer;
+
+  if (typeof input === 'string') {
+    // Check file format
+    const format = await findDescriptor(input);
+    if (!format) {
+      throw new ValueError(`Cannot determine file format for: ${input}`);
+    }
+    
+    // Read file asynchronously
+    const fs = await import('fs/promises');
+    onProgress?.(0.1);
+    
+    const data = await fs.readFile(input);
+    onProgress?.(0.3);
+    
+    buffer = toArrayBuffer(data);
+    
+    // Handle compression based on format
+    if (format.headerEncoding === 'gzip') {
+      onProgress?.(0.4);
+      try {
+        const compressed = new Uint8Array(buffer);
+        const decompressed = pako.ungzip(compressed);
+        buffer = toArrayBuffer(decompressed);
+        onProgress?.(0.5);
+      } catch (err) {
+        // If pako fails, try nifti-reader decompression
+        if (nifti.isCompressed(buffer)) {
+          buffer = toArrayBuffer(new Uint8Array(nifti.decompress(buffer)));
+          onProgress?.(0.5);
+        } else {
+          throw err;
+        }
+      }
+    }
+  } else {
+    buffer = input;
+    onProgress?.(0.3);
+    // An ArrayBuffer passed directly may still be gzip-compressed (e.g. raw
+    // bytes of a .nii.gz downloaded over the network). Decompress if needed.
+    if (nifti.isCompressed(buffer)) {
+      buffer = toArrayBuffer(new Uint8Array(nifti.decompress(buffer)));
+      onProgress?.(0.5);
+    }
+  }
+
+  if (!nifti.isNIFTI(buffer)) {
+    throw new ValueError('The file is not a valid NIfTI file.');
+  }
+  
+  // Read header
+  const header = nifti.readHeader(buffer);
+  if (!header) {
+    throw new ValueError('NIfTI header is null or undefined');
+  }
+  onProgress?.(0.6);
+  
+  // Validate dimensions
+  if (!header.dims || header.dims.length < 4) {
+    throw new ValueError('Invalid header dimensions');
+  }
+  
+  const numDims = header.dims[0];
+  if (numDims < 3 || numDims > 4) {
+    throw new ValueError(`Expected 3D or 4D image, found ${numDims}D image`);
+  }
+  
+  const imageBuffer = nifti.readImage(header, buffer);
+  return { header, imageBuffer };
+}
+
+/** Number of volumes in a decoded 3D (1) or 4D NIfTI image. */
+function volumeCount(header: any): number {
+  return header.dims[0] === 4 ? header.dims[4] : 1;
+}
+
+/** Build the 3D volume at `index` from already-decoded image bytes. */
+function volumeFromImage(header: any, imageBuffer: ArrayBuffer, index: number): NeuroVol {
+  const dim = [header.dims[1], header.dims[2], header.dims[3]];
+  if (header.dims[0] !== 4) {
+    return createVolFromBuffer(imageBuffer, header, dim);
+  }
+
+  const numVols = volumeCount(header);
+  if (index < 0 || index >= numVols) {
+    throw new ValueError(`Index ${index} out of range for 4D data with ${numVols} volumes`);
+  }
+  const volBytes = dim[0] * dim[1] * dim[2] * (header.numBitsPerVoxel / 8);
+  const startByte = index * volBytes;
+  return createVolFromBuffer(imageBuffer.slice(startByte, startByte + volBytes), header, dim);
 }
 
 /**
@@ -333,6 +345,14 @@ export async function readVolList(
 
 /**
  * Read a 4D neuroimaging vector from file.
+ *
+ * The file is read and decompressed once and held in memory; nothing is
+ * written to disk. The result keeps the legacy time-first shape
+ * (`dim = [T, X, Y, Z]`, `getAt(i, j, k, t)`); its spatial geometry, including
+ * the full affine, is available as `volumeSpace` and on every `getVolume(t)`.
+ *
+ * `useBigVec` is accepted for compatibility and no longer changes behaviour.
+ * `mask` is currently ignored.
  */
 export async function readVec(
   fileName: string,
@@ -343,96 +363,40 @@ export async function readVec(
     onProgress?: (progress: number) => void;
   } = {}
 ): Promise<NeuroVec> {
-  const { indices, mask, useBigVec = false, onProgress } = options;
-  
-  // Read header to get dimensions
-  const headerInfo = await readHeader(fileName);
-  const dims = headerInfo.dim;
-  
-  if (dims[0] < 3 || dims[0] > 4) {
-    throw new ValueError(`Expected 3D or 4D data, got ${dims[0]}D`);
+  const { indices, onProgress } = options;
+
+  const { header, imageBuffer } = await decodeNifti(fileName, p => onProgress?.(p * 0.5));
+  const numVols = volumeCount(header);
+  const volIndices = indices ?? Array.from({ length: numVols }, (_, i) => i);
+  if (volIndices.length === 0) {
+    throw new ValueError('indices must select at least one volume');
   }
-  
-  // For 3D data, convert to 4D with single timepoint
-  const is3D = dims[0] === 3;
-  const spatialDims = is3D ? [dims[1], dims[2], dims[3]] : [dims[1], dims[2], dims[3]];
-  const numVols = is3D ? 1 : dims[4];
-  
-  // Determine which volumes to load
-  const volIndices = indices || Array.from({ length: numVols }, (_, i) => i);
-  
-  // Validate indices
   for (const idx of volIndices) {
-    if (idx < 0 || idx >= numVols) {
+    if (!Number.isInteger(idx) || idx < 0 || idx >= numVols) {
       throw new ValueError(`Index ${idx} out of range for 4D data with ${numVols} volumes`);
     }
   }
-  
-  if (useBigVec || numVols > 100) {
-    // Use BigNeuroVec for large datasets
-    onProgress?.(0.1);
-    
-    // Create temporary file for memory mapping
-    const tempFile = `${fileName}.bigvec.tmp`;
-    const shape = [volIndices.length, ...spatialDims];
-    
-    const bigVec = new BigNeuroVec(tempFile, shape);
-    
-    // Load volumes one by one
-    for (let i = 0; i < volIndices.length; i++) {
-      const volIdx = volIndices[i];
-      const vol = await readVol(fileName, { 
-        index: volIdx,
-        onProgress: p => onProgress?.((i + p) / volIndices.length)
-      });
-      
-      // Copy data to BigNeuroVec
-      const data = vol.getData();
-      for (let j = 0; j < data.length; j++) {
-        const [x, y, z] = vol.space.indexToGrid(j);
-        bigVec.setAt(x, y, z, i, data[j]);
-      }
+
+  let volumeSpace: NeuroSpace | undefined;
+  let data: Float32Array | undefined;
+  for (let i = 0; i < volIndices.length; i++) {
+    const vol = volumeFromImage(header, imageBuffer, volIndices[i]);
+    if (!volumeSpace || !data) {
+      volumeSpace = vol.space;
+      data = new Float32Array(volIndices.length * vol.length);
     }
-    
-    bigVec.flush();
-    return bigVec;
-    
-  } else {
-    // Load all volumes into memory
-    const volumes: NeuroVol[] = [];
-    
-    for (let i = 0; i < volIndices.length; i++) {
-      const volIdx = volIndices[i];
-      const vol = await readVol(fileName, {
-        index: volIdx,
-        onProgress: p => onProgress?.((i + p) / volIndices.length)
-      });
-      volumes.push(vol);
-    }
-    
-    // Create 4D space
-    const firstVol = volumes[0];
-    const space4d = new NeuroSpace(
-      [volumes.length, ...firstVol.space.dim],
-      [1, ...firstVol.space.spacing],
-      [0, ...firstVol.space.origin]
-    );
-    
-    // Combine into DenseNeuroVec
-    const totalSize = volumes.length * firstVol.length;
-    const data = new Float32Array(totalSize);
-    
-    let offset = 0;
-    for (const vol of volumes) {
-      const volData = vol.getData();
-      data.set(volData, offset);
-      offset += volData.length;
-    }
-    
-    // TODO: Return proper DenseNeuroVec when implemented
-    // For now, return BigNeuroVec
-    return new BigNeuroVec(data, space4d);
+    data.set(vol.getData(), i * vol.length);
+    onProgress?.(0.5 + (0.5 * (i + 1)) / volIndices.length);
   }
+
+  // Legacy time-first 4D space: NeuroSpace treats the leading three dims as
+  // spatial, so this space does not describe world geometry. volumeSpace does.
+  const space4d = new NeuroSpace(
+    [volIndices.length, ...volumeSpace!.dim],
+    [1, ...volumeSpace!.spacing],
+    [0, ...volumeSpace!.origin]
+  );
+  return new BigNeuroVec(data!, space4d, { storage: 'memory', volumeSpace, shareData: true });
 }
 
 /**

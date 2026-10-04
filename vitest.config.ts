@@ -10,7 +10,7 @@ export default defineConfig({
     globalSetup: ['./scripts/prepare-test-data.mjs'],
     // e2e/ holds Playwright specs (test.describe from @playwright/test) which
     // vitest cannot run — exclude them so they aren't collected as failures.
-    exclude: ['**/node_modules/**', '**/dist/**', '**/e2e/**'],
+    exclude: ['**/node_modules/**', '**/dist/**', '**/e2e/**', '**/.claude/**'],
     // Ensure proper module resolution
     resolve: {
       alias: {
