@@ -2,6 +2,12 @@
 
 Every viewer on these pages is the real `neuroimjs` library running in your browser against an MNI152 template — interact with them directly.
 
+## Full viewer with controls
+
+Three planes, a thresholded statistical overlay, the layer control panel, and a live coordinate/value readout — the configuration most applications want.
+
+→ **[Open the live viewer, walkthrough & code](/examples/viewer-workbench)**
+
 ## Orthogonal viewer
 
 The classic three-plane layout, synchronized by a shared crosshair.
