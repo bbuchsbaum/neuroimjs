@@ -2,6 +2,7 @@ import * as nifti from 'nifti-reader-js';
 import { Matrix } from 'ml-matrix';
 import { nearestAnatomy } from '../geometry/Axis';
 import { NeuroSpace } from '../geometry/NeuroSpace';
+import { affineVoxelSizes, niftiScaling } from './niftiGeometry';
 import type { NeuroVol } from '../volume/NeuroVol';
 import {
   Float64NeuroVol,
@@ -72,10 +73,8 @@ function typedImage(buffer: ArrayBuffer, header: NiftiHeader): NiftiTypedArray {
 }
 
 function scaledImage(data: NiftiTypedArray, header: NiftiHeader): NiftiTypedArray {
-  const rawSlope = Number(header.scl_slope);
-  const rawIntercept = Number(header.scl_inter);
-  const slope = !rawSlope || Number.isNaN(rawSlope) ? 1 : rawSlope;
-  const intercept = !rawIntercept || Number.isNaN(rawIntercept) ? 0 : rawIntercept;
+  // A zero or non-finite scl_slope disables scaling entirely (scl_inter too).
+  const { slope, inter: intercept } = niftiScaling(header.scl_slope, header.scl_inter);
   if (slope === 1 && intercept === 0) return data;
   // Float64 avoids silently losing precision when scaling float64 or uint32 data.
   const scaled = new Float64Array(data.length);
@@ -144,9 +143,7 @@ export function readNiftiArrayBuffer(input: ArrayBuffer, options: BrowserNiftiOp
 
   const affineValues = header.affine.map(row => Array.from(row, Number));
   const affine = new Matrix(affineValues);
-  const spacing = [0, 1, 2].map(column =>
-    Math.hypot(affine.get(0, column), affine.get(1, column), affine.get(2, column))
-  );
+  const spacing = affineVoxelSizes(affineValues);
   const origin = [affine.get(0, 3), affine.get(1, 3), affine.get(2, 3)];
   const space = new NeuroSpace(dimensions, spacing, origin, nearestAnatomy(affine), affineValues);
   return createVolume(space, scaledImage(typedImage(image, header), header));

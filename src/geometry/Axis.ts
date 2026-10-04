@@ -495,21 +495,40 @@ export class AxisSet3D extends AxisSet {
 
 
   
+  /**
+   * The anatomical axis set closest to the voxel-to-world matrix `mat44`.
+   *
+   * Follows NIfTI's `nifti_mat44_to_orientation`. The columns of the
+   * upper-left 3x3 block are orthonormalised (Gram-Schmidt, in i, j, k order)
+   * and the signed permutation closest to the result is chosen. This agrees
+   * with nibabel's `aff2axcodes` for orthogonal and near-orthogonal affines.
+   * For strongly sheared affines the two methods can pick different axes.
+   *
+   * If the k column is zero, or lies in the i-j plane, k is taken as i x j.
+   * The result is then always a right-handed frame. nibabel would instead
+   * report no code for that axis. A zero i or j column, or a j column
+   * parallel to i, throws. `mat44` is never modified.
+   */
   export function nearestAnatomy(mat44: Matrix): AxisSet3D {
-    let mat33 = mat44.subMatrix(0, 2, 0, 2);
-    let icol = mat33.getColumnVector(0);
-    let jcol = mat33.getColumnVector(1);
-    let kcol = mat33.getColumnVector(2);
-  
-    // Normalize columns
-    icol = icol.div(Math.sqrt(icol.dot(icol)));
-    jcol = orthogonalize(icol, jcol);
-    const knorm = Math.sqrt(kcol.dot(kcol));
-    kcol = knorm === 0.0 ? crossProduct(icol, jcol) : kcol.div(knorm);
-    kcol = orthogonalize(icol, kcol);
-    kcol = orthogonalize(jcol, kcol);
-  
-    const Q = new Matrix([icol.to1DArray(), jcol.to1DArray(), kcol.to1DArray()]).transpose();
+    // Work on plain copies of the columns: ml-matrix arithmetic (mul/sub/div)
+    // is in place, which previously corrupted the i axis for sheared affines.
+    const column = (c: number): number[] => [mat44.get(0, c), mat44.get(1, c), mat44.get(2, c)];
+    const icol = normalize(column(0));
+    const jperp = orthogonalize(icol, normalize(column(1)));
+    // `!(x >= eps)` also rejects NaN from a zero i or j column.
+    if (!(norm(jperp) >= 1e-12)) {
+      throw new Error('Invalid matrix input, columns are degenerate');
+    }
+    const jcol = normalize(jperp);
+    // A zero k column, or one lying in the i-j plane, falls back to i x j.
+    const kraw = column(2);
+    const kperp = norm(kraw) === 0 ? [0, 0, 0] : orthogonalize(jcol, orthogonalize(icol, normalize(kraw)));
+    const kcol = norm(kperp) < 1e-12 ? crossProduct(icol, jcol) : normalize(kperp);
+    if (![...icol, ...jcol, ...kcol].every(Number.isFinite)) {
+      throw new Error('Invalid matrix input, columns are degenerate');
+    }
+
+    const Q = new Matrix([icol, jcol, kcol]).transpose();
     const detQ = determinant(Q);
     if (detQ === 0.0) throw new Error('Invalid matrix input, determinant is 0');
   
@@ -574,24 +593,28 @@ export class AxisSet3D extends AxisSet {
     return new AxisSet3D(ax1, ax2, ax3);
   }
   
-  // Utility function to orthogonalize two vectors
-  function orthogonalize(col1: Matrix, col2: Matrix): Matrix {
-    const dotp = col1.dot(col2);
-    if (Math.abs(dotp) > 1.e-4) {
-      col2 = col2.sub(col1.mul(dotp));
-      const norm = Math.sqrt(col2.dot(col2));
-      col2 = col2.div(norm);
-    }
-    return col2;
+  function norm(v: readonly number[]): number {
+    return Math.hypot(v[0], v[1], v[2]);
   }
-  
-  // Utility function to compute cross product
-  function crossProduct(a: Matrix, b: Matrix): Matrix {
-    return new Matrix([
-      [a.get(1, 0) * b.get(2, 0) - a.get(2, 0) * b.get(1, 0)],
-      [a.get(2, 0) * b.get(0, 0) - b.get(2, 0) * a.get(0, 0)],
-      [a.get(0, 0) * b.get(1, 0) - a.get(1, 0) * b.get(0, 0)]
-    ]);
+
+  function dot(a: readonly number[], b: readonly number[]): number {
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  }
+
+  /** A new unit vector parallel to `v` (non-finite if `v` is zero). */
+  function normalize(v: readonly number[]): number[] {
+    const n = norm(v);
+    return [v[0] / n, v[1] / n, v[2] / n];
+  }
+
+  /** A new vector: `v` minus its projection onto the unit vector `unit`. */
+  function orthogonalize(unit: readonly number[], v: readonly number[]): number[] {
+    const d = dot(unit, v);
+    return [v[0] - d * unit[0], v[1] - d * unit[1], v[2] - d * unit[2]];
+  }
+
+  function crossProduct(a: readonly number[], b: readonly number[]): number[] {
+    return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
   }
 
 // Standalone exports for common orientations (aliases to AxisSet3D static members)

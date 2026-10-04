@@ -7,6 +7,10 @@ in the pull request that makes the change.
 
 ## Unreleased
 
+Upgrading: `readVol` now takes `space.spacing` from the affine rather than
+from `pixdim`. Callers that need the raw `pixdim[1..3]` should use
+`readHeader().spacing`. See Changed.
+
 ### Added
 
 - `toInt32Labels()` converts a label volume (or its voxel data) to an
@@ -23,7 +27,6 @@ in the pull request that makes the change.
   region colours from a seeded generator. By default it uses
   `GLASSER_DEFAULT_COLOR_SEED`, so colours are now the same on every load;
   `loadGlasserAtlas(useCache)` still works.
-
 - Downstream consumer contract tests (`npm run test:consumers`, part of
   `verify:release` and CI): the call surfaces of neuromosaic, FROIAtlas,
   neuroimjs-vscode and xnat2bids, run against the packed tarball.
@@ -32,6 +35,17 @@ in the pull request that makes the change.
 
 ### Changed
 
+- `readVol` sets `space.spacing` to the voxel sizes of the selected transform,
+  that is, the column norms of `space.trans`, instead of `pixdim[1..3]`. These
+  are the values nibabel returns from `nibabel.affines.voxel_sizes(img.affine)`
+  (not `header.get_zooms()`, which returns pixdim). `readNiftiArrayBuffer`
+  already used them.
+  - **Who is affected:** files whose sform scaling differs from pixdim, such
+    as an oblique or rescaled sform.
+  - **Before:** `readVol` reported a spacing that contradicted the affine,
+    and the two decoders disagreed.
+  - **Now:** `readHeader().spacing` still returns the raw `pixdim[1..3]`.
+    Callers that want pixdim should read it there.
 - `partition(x, k, method, mask, seed)` throws `RangeError` for a NaN or
   infinite `seed`; such seeds were previously coerced to 0.
 - The label map of a Glasser or Schaefer `NeuroAtlas` (`atlas.atlas.labelMap`,
@@ -56,6 +70,23 @@ in the pull request that makes the change.
 
 ### Fixed
 
+- `readVol` and `readNiftiArrayBuffer` no longer add `scl_inter` when
+  `scl_slope` is 0 or non-finite. Such a slope means "no scaling" (NIfTI-1
+  spec, nibabel), so voxel values are now returned exactly as stored.
+  Previously every voxel was offset by `scl_inter`. A valid slope still yields
+  `value * scl_slope + scl_inter`. A non-finite `scl_inter` with a valid
+  slope is read as 0, following nifti1_io's `FIXED_FLOAT` rule. nibabel
+  instead refuses to load such a file.
+- `nearestAnatomy()` reports the correct axis codes for non-orthogonal
+  (sheared) affines. Its Gram-Schmidt step scaled the i column in place by
+  `dot(i, j)`, so a sheared RAS image could be reported as LAS.
+  - **Affected:** `readVol`, `readNiftiArrayBuffer` and any `NeuroSpace` built
+    from such an affine got the wrong `axes`, and `reorient()` picked the
+    wrong frame.
+  - **Now:** it orthonormalises copies of the columns, as NIfTI's
+    `nifti_mat44_to_orientation` does. The result agrees with nibabel's
+    `aff2axcodes` for near-orthogonal affines but can differ for strongly
+    sheared ones.
 - `NeuroAtlas.loadSchaeferAtlas`, `loadGlasserAtlas` and `loadAtlas` accept
   label volumes stored as int8, uint8, int16, uint16, int32, float32 or float64.
   Schaefer reinterpreted the bytes of non-float volumes (wrong labels, or a

@@ -43,6 +43,8 @@
     "test:watch": "vitest --watch",
     "test:alignment": "vitest run src/display/__tests__/integration/MultiLayerAlignment",
     "test:debug": "vitest run --reporter=verbose --no-coverage",
+    "test:conformance": "vitest run tests/conformance",
+    "conformance:generate": "node scripts/conformance/generate.mjs",
     "lint": "eslint src tests",
     "lint:ci": "eslint src tests --max-warnings 608",
     "format": "prettier --write src tests",
