@@ -66,11 +66,20 @@ export interface ReadVolOptions {
  * Options for writing volumes.
  */
 export interface WriteVolOptions {
-  /** Output format (default: "NIFTI") */
+  /**
+   * Output format: `'NIFTI'` (default) or `'NIFTI_GZ'`. `'NIFTI'` names the
+   * single-file NIfTI-1 container and leaves compression to the extension (or
+   * `compress`); `'NIFTI_GZ'` requests gzip.
+   */
   format?: string;
   /** Output data type (e.g., "FLOAT32", "INT16") */
   dataType?: string;
-  /** Whether to compress the output */
+  /**
+   * Whether to gzip the output. By default this follows the path: `.nii.gz`
+   * is gzipped and `.nii` is not. A value that contradicts a `.nii` or
+   * `.nii.gz` extension throws a `NeuroimError` with code `INVALID_ARGUMENT`.
+   * For any other extension it defaults to `false`.
+   */
   compress?: boolean;
   /** Progress callback */
   onProgress?: (progress: number) => void;
@@ -233,6 +242,55 @@ function volumeFromImage(header: any, imageBuffer: ArrayBuffer, index: number): 
 }
 
 /**
+ * Decide whether a writer gzips its output.
+ *
+ * The extension decides for NIfTI paths: `.nii.gz` is gzipped and `.nii` is
+ * not, so the file can be read back (the readers gunzip by extension). Options
+ * may confirm that choice but not contradict it; a contradiction throws
+ * `INVALID_ARGUMENT` rather than writing a file that no reader opens. For other
+ * extensions, `compress` decides, then `format: 'NIFTI_GZ'`, else no gzip.
+ * `format: 'NIFTI'` is encoding-neutral.
+ */
+function resolveGzip(filePath: string, formatDesc: FileFormat, options: WriteVolOptions): boolean {
+  const lower = filePath.toLowerCase();
+  const fromExtension = lower.endsWith('.nii.gz') ? true : lower.endsWith('.nii') ? false : undefined;
+  const fromFormat = formatDesc.headerEncoding === 'gzip' ? true : undefined;
+  const { compress } = options;
+
+  if (compress !== undefined && fromFormat !== undefined && compress !== fromFormat) {
+    throw new ValueError(`compress: ${compress} contradicts format '${options.format}'`, {
+      code: 'INVALID_ARGUMENT',
+      details: { path: filePath, format: options.format, compress },
+    });
+  }
+  const requested = compress ?? fromFormat;
+  if (fromExtension !== undefined && requested !== undefined && requested !== fromExtension) {
+    const wanted = requested ? 'gzip' : 'uncompressed';
+    const fix = requested ? 'end the path in .nii.gz' : 'end the path in .nii';
+    throw new ValueError(
+      `Cannot write ${wanted} NIfTI to ${filePath}: the extension implies ` +
+        `${fromExtension ? 'gzip' : 'no compression'}. Drop the option or ${fix}.`,
+      { code: 'INVALID_ARGUMENT', details: { path: filePath, format: options.format, compress } }
+    );
+  }
+  return fromExtension ?? requested ?? false;
+}
+
+/**
+ * Get the NIfTI format descriptor for a writer, rejecting non-NIfTI formats.
+ */
+function niftiWriteFormat(format: string, what: string): FileFormat {
+  const formatDesc = getFormat(format);
+  if (!(formatDesc instanceof NIFTIFormat)) {
+    throw new ValueError(`Format ${format} not yet supported for writing${what}`, {
+      code: 'UNSUPPORTED_FORMAT',
+      details: { format },
+    });
+  }
+  return formatDesc;
+}
+
+/**
  * Write a NeuroVol to file.
  * 
  * Enhanced version with async operations, compression, and progress callback.
@@ -242,44 +300,30 @@ export async function writeVol(
   filePath: string,
   options: WriteVolOptions = {}
 ): Promise<void> {
-  const { format = 'NIFTI', compress = false, dataType, onProgress } = options;
-  
-  try {
-    onProgress?.(0.1);
-    
-    // Get format descriptor
-    const formatDesc = getFormat(format);
-    if (!(formatDesc instanceof NIFTIFormat)) {
-      throw new ValueError(`Format ${format} not yet supported for writing`, {
-        code: 'UNSUPPORTED_FORMAT',
-        details: { format },
-      });
-    }
-    
-    // Create NIfTI buffer
-    const buffer = await createNiftiBuffer(vol, dataType);
-    onProgress?.(0.6);
-    
-    // Compress if requested
-    let outputBuffer = buffer;
-    if (compress || formatDesc.headerEncoding === 'gzip') {
-      onProgress?.(0.7);
-      const compressed = pako.gzip(new Uint8Array(buffer));
-      outputBuffer = compressed.buffer.slice(
-        compressed.byteOffset,
-        compressed.byteOffset + compressed.byteLength
-      );
-      onProgress?.(0.8);
-    }
-    
-    // Write to file
-    const fs = await import('fs/promises');
-    await fs.writeFile(filePath, new Uint8Array(outputBuffer));
-    onProgress?.(1.0);
-    
-  } catch (error) {
-    throw error;
+  const { format = 'NIFTI', dataType, onProgress } = options;
+
+  onProgress?.(0.1);
+  const formatDesc = niftiWriteFormat(format, '');
+  const gzip = resolveGzip(filePath, formatDesc, options);
+
+  // Create NIfTI buffer
+  const buffer = await createNiftiBuffer(vol, dataType);
+  onProgress?.(0.6);
+
+  let outputBuffer: ArrayBuffer = buffer;
+  if (gzip) {
+    onProgress?.(0.7);
+    const compressed = pako.gzip(new Uint8Array(buffer));
+    outputBuffer = compressed.buffer.slice(
+      compressed.byteOffset,
+      compressed.byteOffset + compressed.byteLength
+    ) as ArrayBuffer;
+    onProgress?.(0.8);
   }
+
+  const fs = await import('fs/promises');
+  await fs.writeFile(filePath, new Uint8Array(outputBuffer));
+  onProgress?.(1.0);
 }
 
 /**
@@ -434,16 +478,10 @@ export async function writeVec(
   fileName: string,
   options: WriteVolOptions = {}
 ): Promise<void> {
-  const { format = 'NIFTI', compress = false, dataType, onProgress } = options;
-  
-  // For now, only support NIfTI format
-  const formatDesc = getFormat(format);
-  if (!(formatDesc instanceof NIFTIFormat)) {
-    throw new ValueError(`Format ${format} not yet supported for writing 4D data`, {
-      code: 'UNSUPPORTED_FORMAT',
-      details: { format },
-    });
-  }
+  const { format = 'NIFTI', dataType, onProgress } = options;
+
+  const formatDesc = niftiWriteFormat(format, ' 4D data');
+  const gzip = resolveGzip(fileName, formatDesc, options);
   
   // Get data
   const data = vec.getData();
@@ -471,7 +509,7 @@ export async function writeVec(
   
   // Compress if needed
   let outputBuffer = totalBuffer;
-  if (compress || formatDesc.headerEncoding === 'gzip') {
+  if (gzip) {
     const compressed = pako.gzip(new Uint8Array(totalBuffer));
     outputBuffer = Buffer.from(compressed.buffer.slice(
       compressed.byteOffset,

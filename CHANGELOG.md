@@ -113,6 +113,14 @@ from `pixdim`. Callers that need the raw `pixdim[1..3]` should use
 
 ### Fixed
 
+- `writeVol`, `writeVec` and `write_vol` gzip a path ending in `.nii.gz`.
+  Previously they gzipped only with `{ compress: true }` or
+  `format: 'NIFTI_GZ'`, so `writeVol(vol, 'x.nii.gz')` wrote uncompressed
+  bytes that `readVol` then failed to read ("incorrect header check").
+  Compression now follows the extension (`.nii.gz` gzipped, `.nii` not), and
+  a `compress` or `format` option that contradicts a NIfTI extension throws a
+  `NeuroimError` with code `INVALID_ARGUMENT` before anything is written. For
+  other extensions the options decide as before.
 - `readVol` and `readNiftiArrayBuffer` no longer add `scl_inter` when
   `scl_slope` is 0 or non-finite. Such a slope means "no scaling" (NIfTI-1
   spec, nibabel), so voxel values are now returned exactly as stored.

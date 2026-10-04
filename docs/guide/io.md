@@ -87,22 +87,21 @@ import { readVol, writeVol, readHeader } from 'neuroimjs'
 const vol = await readVol('sub-01_T1w.nii.gz')
 
 await writeVol(vol, 'out.nii') // uncompressed, datatype follows the volume (INT16 here)
-await writeVol(vol, 'out.nii.gz', { compress: true }) // gzip — must be requested explicitly
-await writeVol(vol, 'out_f32.nii.gz', { compress: true, dataType: 'FLOAT32' })
+await writeVol(vol, 'out.nii.gz') // gzip: compression follows the extension
+await writeVol(vol, 'out_f32.nii.gz', { dataType: 'FLOAT32' })
 
 const hdr = await readHeader('out_f32.nii.gz')
 hdr.datatype // 'FLOAT32'
 ```
 
-::: warning Compression is not inferred from the file name
-`writeVol` and `writeVec` gzip only when you pass `{ compress: true }` (or `format: 'NIFTI_GZ'`). `writeVol(vol, 'x.nii.gz')` without it writes **uncompressed** bytes under a `.gz` name. `readVol` and `readHeader` then fail on that file, because they gunzip anything named `.nii.gz` (bug, tracked: mote bd-01M4298YPGHKDWBSV61RAMF2VB).
-:::
+Compression follows the file name. `writeVol`, `writeVec` and `write_vol` gzip a path ending in `.nii.gz` and leave a path ending in `.nii` uncompressed; the extension is matched case-insensitively. The `compress` and `format` options may repeat that choice, but they may not contradict it: `{ compress: false }` on a `.nii.gz` path, or `{ compress: true }` or `format: 'NIFTI_GZ'` on a `.nii` path, throws a `NeuroimError` with code `INVALID_ARGUMENT` and writes nothing, because the readers choose gunzip from the extension and could not open the result. For a path with any other extension, `compress` decides, then `format: 'NIFTI_GZ'`; the default is uncompressed.
 
 `writeVol` options:
 
 - `dataType` (`'FLOAT32'`, `'FLOAT64'`, `'INT8'`, `'UINT8'`, `'INT16'`, `'UINT16'`, `'INT32'`, `'UINT32'`) converts on write. Integer targets are rounded and clamped to the type's range.
 - `onProgress` reports progress.
-- `format` accepts only NIfTI names (`'NIFTI'`, `'NIFTI_GZ'`); anything else throws. With `format: 'NIFTI_GZ'` the output is gzipped as well.
+- `format` accepts only NIfTI names (`'NIFTI'`, `'NIFTI_GZ'`); anything else throws `UNSUPPORTED_FORMAT`. `'NIFTI'`, the default, leaves compression to the extension; `'NIFTI_GZ'` requests gzip.
+- `compress` requests (`true`) or refuses (`false`) gzip, subject to the extension rule above.
 
 `writeVol` stores both the qform and the sform from the volume's affine. `writeVec` writes only an axis-aligned sform built from the vec's spacing and origin, so rotations and flips in the original affine are lost.
 
@@ -215,7 +214,7 @@ Each `FileFormat` records its header and data extensions and encodings, and its 
 
 ## Legacy aliases
 
-`read_vol(input)` and `write_vol(vol, path)` are thin snake_case wrappers kept for backward compatibility. `read_vol` is `readVol` with default options. `write_vol` is `writeVol` with no options, so it never compresses. Prefer `readVol` / `writeVol` in new code.
+`read_vol(input)` and `write_vol(vol, path)` are thin snake_case wrappers kept for backward compatibility. `read_vol` is `readVol` with default options. `write_vol` is `writeVol` with no options, so it gzips a `.nii.gz` path and not a `.nii` path. Prefer `readVol` / `writeVol` in new code.
 
 ## Errors
 

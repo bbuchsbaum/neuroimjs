@@ -20,7 +20,7 @@ NIfTI I/O. Reads NIfTI-1 and NIfTI-2 (`.nii`, `.nii.gz`) and writes single-file 
 
 ### Working In This Directory
 - There are two decoders, `io.ts` and `browserNifti.ts`. Any change to how headers are interpreted (scaling, voxel sizes, orientation) must go in `niftiGeometry.ts` or be made in both, and the conformance suite (`npm run test:conformance`) must keep passing.
-- Gzip is detected from the bytes for `ArrayBuffer` input. `writeVol`/`writeVec` compress only with `{ compress: true }` or `format: 'NIFTI_GZ'`, not from a `.gz` extension.
+- Gzip is detected from the bytes for `ArrayBuffer` input, and from the extension for paths. `writeVol`/`writeVec` gzip a `.nii.gz` path and not a `.nii` path (`resolveGzip`); `compress`/`format` that contradict a NIfTI extension throw `INVALID_ARGUMENT`. For other extensions, `compress` or `format: 'NIFTI_GZ'` decides.
 - `readVec` returns a `BigNeuroVec` with the legacy time-first shape (`dim = [T, X, Y, Z]`); the 3D geometry is on `volumeSpace`.
 - `NIFTIDualFormat` and `AFNIFormat` are descriptors only: there is no reader for `.hdr`/`.img` pairs or AFNI, and `writeVol` rejects them.
 
