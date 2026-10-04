@@ -6,6 +6,32 @@ neuroimjs reads and writes NIfTI (`.nii`, `.nii.gz`) in both Node and the browse
 The I/O layer applies NIfTI intensity scaling (`scl_slope` / `scl_inter`) and handles endianness on read. AFNI support is still limited — NIfTI is the supported path. See the [Stability matrix](/guide/stability) for the full picture.
 :::
 
+## Viewer-free imports (`neuroimjs/io`, `neuroimjs/slices`, `neuroimjs/geometry`) {#viewer-free-imports}
+
+Importing the root `neuroimjs` entry also loads the viewer stack: pixi.js, mobx and lit. In a Node service, a CLI or an Electron main process you usually want only I/O and geometry. Three subpath exports provide those without loading any display code:
+
+| Subpath | Exports |
+|---|---|
+| `neuroimjs/io` | `readVol`, `writeVol`, `readHeader`, `readVolList`, `readVec`, `writeVec`, `read_vol`, `write_vol`, `FileFormat`, `NIFTIFormat`, `NIFTIDualFormat`, `AFNIFormat`, `findDescriptor`, `getFormat`; types `ReadVolOptions`, `WriteVolOptions`, `HeaderInfo`, `NeuroVol`, `NeuroVec` |
+| `neuroimjs/slices` | `extractOrthogonalSlices`, `extractAxialSlice`, `extractSagittalSlice`, `extractCoronalSlice`, `getSliceOrientation`, `getWorldBoundsForSlice`, `extractSliceForView`, `getSliceAxisIndex`, `getMaxSliceIndex`, `isValidSliceIndex`, `getSliceAxisName`, `getCenterSliceIndex`, `getSafeSliceIndicesForSpaces`, `NeuroSlice`; type `NeuroVol` |
+| `neuroimjs/geometry` | `NeuroSpace`, `NamedAxis`, `AxisSet`, `AxisSet1D`, `AxisSet2D`, `AxisSet3D`, `AXIAL_LPI`, `CORONAL_LIP`, `SAGITTAL_AIL`, `getVolumeGeometry`, `assertSameVolumeGeometry`; type `VolumeGeometry` |
+
+Each subpath works with both `import` and `require`, and ships its own type declarations. Every symbol is also exported from the root entry, so you can switch an import between the two without other changes.
+
+```ts
+// Electron main process: build a thumbnail without loading pixi.js
+import { readVol } from 'neuroimjs/io'
+import { extractOrthogonalSlices } from 'neuroimjs/slices'
+
+const vol = await readVol('sub-01_T1w.nii.gz')
+const centre = vol.space.gridToCoord(vol.dim.slice(0, 3).map((d) => (d - 1) / 2))
+const { axial, sagittal, coronal } = extractOrthogonalSlices(vol, centre)
+```
+
+`readNiftiArrayBuffer` is not in `neuroimjs/io`. It statically imports the ESM-only `nifti-reader-js`, which would break `require('neuroimjs/io')`. In Node, pass the bytes to `readVol` instead, which also accepts an `ArrayBuffer`. In the browser, `readNiftiArrayBuffer` is available from `neuroimjs/browser`.
+
+`npm run test:package` checks the compiled import graph of each subpath, then imports it from the packed tarball in plain Node (ESM and CommonJS). It fails if pixi.js, `@pixi/*`, mobx, lit or any display module is resolved. These subpaths are an interim measure. A later release is planned to split the package into separate core and viewer entries; the intent is to keep these subpaths working after that split.
+
 ## Node.js: read from disk
 
 ```ts
