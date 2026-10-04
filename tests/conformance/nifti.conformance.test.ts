@@ -45,8 +45,8 @@ import {
 // Known discrepancies (each is a bug ticket). Keys are the check names below.
 // ---------------------------------------------------------------------------
 const UINT_READVOL =
-  'readVol throws "Unsupported TypedArray type: uint16/uint32" - createVolFromBuffer maps datatype 512/768 ' +
-  'but createNeuroVol has no uint16/uint32 branch (readNiftiArrayBuffer decodes these fine)';
+  'readVol throws "Unsupported TypedArray type: uint32" - createVolFromBuffer maps datatype 768 ' +
+  'but there is no UInt32NeuroVol (readNiftiArrayBuffer decodes it fine); tracked as a mote bead';
 const PRECEDENCE =
   'transform precedence: nibabel uses the sform whenever sform_code != 0; nifti-reader-js (both decoders) ' +
   'uses the qform when qform_code > sform_code';
@@ -54,8 +54,9 @@ const NO_XFORM =
   'qform_code = sform_code = 0: nibabel returns the Analyze base affine (x flipped, grid centred at 0); ' +
   'neuroimjs returns diag(pixdim) with zero offset (NIfTI-1 "method 1")';
 const READVEC_AFFINE =
-  'readVec affine loss, fixed on fix/readvec-geometry: readVec builds its [T,X,Y,Z] NeuroSpace from ' +
-  'spacing/origin only, dropping rotation/shear and shifting the axes';
+  'readVec keeps the legacy time-first [T,X,Y,Z] vec.space, which NeuroSpace cannot give spatial geometry; ' +
+  'the file geometry is on vec.volumeSpace and getVolume(t) (checked separately). A canonical time-last ' +
+  'NeuroVec is tracked by mote ticket data-4d-dense';
 const NIFTI2_QFORM =
   'TODO(fmt-nifti-complete): nifti-reader-js reads NIfTI-2 transforms from srow_* only and ignores the qform; ' +
   'with sform_code 0 the srow is all zeros, so both decoders throw on the singular affine';
@@ -103,13 +104,11 @@ const mismatching = (checks: string[], reason: string): Record<string, KnownDisc
     })
   );
 
-const UINT_THROWS = /^Unsupported TypedArray type: uint(16|32)$/;
+const UINT_THROWS = /^Unsupported TypedArray type: uint32$/;
 // The all-zero NIfTI-2 srow reaches nearestAnatomy(), which rejects it.
 const SINGULAR_THROWS = /^Invalid matrix input, (columns are degenerate|determinant is 0)$/;
 
 const KNOWN: KnownDiscrepancies = {
-  dtype_uint16_le: throwing(READVOL_ALL, UINT_READVOL, UINT_THROWS),
-  dtype_uint16_be: throwing(READVOL_ALL, UINT_READVOL, UINT_THROWS),
   dtype_uint32_le: throwing(READVOL_ALL, UINT_READVOL, UINT_THROWS),
   dtype_uint32_be: throwing(READVOL_ALL, UINT_READVOL, UINT_THROWS),
   xform_both_qform_code_higher: mismatching(
@@ -378,6 +377,15 @@ for (const c of manifest.cases) {
             }
           } finally {
             if (vec instanceof BigNeuroVec) vec.cleanup();
+          }
+        });
+
+        conformanceIt(KNOWN, c.id, 'readVec: volumeSpace and getVolume(t) affine match nibabel', async () => {
+          const vec = await readVec(fixturePath(c));
+          if (!(vec instanceof BigNeuroVec)) throw new Error('readVec is expected to return a BigNeuroVec');
+          expectMatrixClose(vec.volumeSpace.trans.to2DArray(), c.affine, 'readVec volumeSpace affine');
+          for (let t = 0; t < vec.dim[0]; t++) {
+            expectMatrixClose(vec.getVolume(t).space.trans.to2DArray(), c.affine, `readVec getVolume(${t}) affine`);
           }
         });
 
