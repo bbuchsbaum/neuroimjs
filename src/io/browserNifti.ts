@@ -2,6 +2,8 @@ import * as nifti from 'nifti-reader-js';
 import { Matrix } from 'ml-matrix';
 import { nearestAnatomy } from '../geometry/Axis';
 import { NeuroSpace } from '../geometry/NeuroSpace';
+import { affineVoxelSizes, niftiScaling } from './niftiGeometry';
+import { NeuroimError } from '../errors';
 import type { NeuroVol } from '../volume/NeuroVol';
 import {
   Float64NeuroVol,
@@ -64,7 +66,9 @@ function typedImage(buffer: ArrayBuffer, header: NiftiHeader): NiftiTypedArray {
   };
   const Constructor = constructors[header.datatypeCode];
   if (!Constructor) {
-    throw new Error(`Unsupported NIfTI datatype code: ${header.datatypeCode}`);
+    throw new NeuroimError('UNSUPPORTED_DATATYPE', `Unsupported NIfTI datatype code: ${header.datatypeCode}`, {
+      details: { datatypeCode: header.datatypeCode },
+    });
   }
   const data = new Constructor(buffer);
   if (header.littleEndian === false) swapBytesInPlace(data);
@@ -72,10 +76,8 @@ function typedImage(buffer: ArrayBuffer, header: NiftiHeader): NiftiTypedArray {
 }
 
 function scaledImage(data: NiftiTypedArray, header: NiftiHeader): NiftiTypedArray {
-  const rawSlope = Number(header.scl_slope);
-  const rawIntercept = Number(header.scl_inter);
-  const slope = !rawSlope || Number.isNaN(rawSlope) ? 1 : rawSlope;
-  const intercept = !rawIntercept || Number.isNaN(rawIntercept) ? 0 : rawIntercept;
+  // A zero or non-finite scl_slope disables scaling entirely (scl_inter too).
+  const { slope, inter: intercept } = niftiScaling(header.scl_slope, header.scl_inter);
   if (slope === 1 && intercept === 0) return data;
   // Float64 avoids silently losing precision when scaling float64 or uint32 data.
   const scaled = new Float64Array(data.length);
@@ -113,24 +115,30 @@ export function readNiftiArrayBuffer(input: ArrayBuffer, options: BrowserNiftiOp
     buffer = toArrayBuffer(nifti.decompress(buffer));
   }
   if (!nifti.isNIFTI(buffer)) {
-    throw new Error('Input is not a valid NIfTI-1 or NIfTI-2 image.');
+    throw new NeuroimError('CORRUPT_FILE', 'Input is not a valid NIfTI-1 or NIfTI-2 image.');
   }
   const header = nifti.readHeader(buffer);
   if (!header?.dims || header.dims.length < 4) {
-    throw new Error('NIfTI header has invalid dimensions.');
+    throw new NeuroimError('CORRUPT_FILE', 'NIfTI header has invalid dimensions.');
   }
   const rank = Number(header.dims[0]);
   if (rank !== 3 && rank !== 4) {
-    throw new Error(`Expected a 3D or 4D NIfTI image, found ${rank}D.`);
+    throw new NeuroimError('UNSUPPORTED_FORMAT', `Expected a 3D or 4D NIfTI image, found ${rank}D.`, {
+      details: { rank },
+    });
   }
   const dimensions = [Number(header.dims[1]), Number(header.dims[2]), Number(header.dims[3])];
   if (dimensions.some(value => !Number.isInteger(value) || value <= 0)) {
-    throw new Error(`NIfTI has invalid spatial dimensions: ${dimensions.join('x')}.`);
+    throw new NeuroimError('CORRUPT_FILE', `NIfTI has invalid spatial dimensions: ${dimensions.join('x')}.`, {
+      details: { dimensions },
+    });
   }
   const volumeCount = rank === 4 ? Number(header.dims[4]) : 1;
   const index = options.index ?? 0;
   if (!Number.isInteger(index) || index < 0 || index >= volumeCount) {
-    throw new Error(`Volume index ${index} is outside [0, ${volumeCount - 1}].`);
+    throw new NeuroimError('OUT_OF_RANGE', `Volume index ${index} is outside [0, ${volumeCount - 1}].`, {
+      details: { index, volumeCount },
+    });
   }
 
   const completeImage = toArrayBuffer(nifti.readImage(header, buffer));
@@ -139,14 +147,14 @@ export function readNiftiArrayBuffer(input: ArrayBuffer, options: BrowserNiftiOp
   const start = index * bytesPerVolume;
   const image = completeImage.slice(start, start + bytesPerVolume);
   if (image.byteLength !== bytesPerVolume) {
-    throw new Error('NIfTI image data is truncated.');
+    throw new NeuroimError('CORRUPT_FILE', 'NIfTI image data is truncated.', {
+      details: { expectedBytes: bytesPerVolume, actualBytes: image.byteLength },
+    });
   }
 
   const affineValues = header.affine.map(row => Array.from(row, Number));
   const affine = new Matrix(affineValues);
-  const spacing = [0, 1, 2].map(column =>
-    Math.hypot(affine.get(0, column), affine.get(1, column), affine.get(2, column))
-  );
+  const spacing = affineVoxelSizes(affineValues);
   const origin = [affine.get(0, 3), affine.get(1, 3), affine.get(2, 3)];
   const space = new NeuroSpace(dimensions, spacing, origin, nearestAnatomy(affine), affineValues);
   return createVolume(space, scaledImage(typedImage(image, header), header));

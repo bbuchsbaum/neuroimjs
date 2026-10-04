@@ -7,6 +7,7 @@ import { Int16NeuroVol } from './DenseNeuroVol';
 import { UInt8NeuroVol } from './DenseNeuroVol';
 import { Int32NeuroVol } from './DenseNeuroVol';
 import { Int8NeuroVol } from './DenseNeuroVol';
+import { UInt16NeuroVol } from './DenseNeuroVol';
 import { Float64NeuroVol } from './DenseNeuroVol';
 import { FloatNeuroVol } from './DenseNeuroVol';
 import { Int32NeuroSlice } from './NeuroSlice';
@@ -65,6 +66,8 @@ export function createNeuroVol(
       return new UInt8NeuroVol(space, data as Uint8Array);
     case 'int16':
       return new Int16NeuroVol(space, data as Int16Array);
+    case 'uint16':
+      return new UInt16NeuroVol(space, data as Uint16Array);
     case 'int32':
       return new Int32NeuroVol(space, data as Int32Array);
     case 'int8':

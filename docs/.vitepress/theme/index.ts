@@ -2,6 +2,7 @@ import DefaultTheme from 'vitepress/theme'
 import type { Theme } from 'vitepress'
 import { h } from 'vue'
 import BrainViewer from '../components/BrainViewer.vue'
+import ViewerWorkbench from '../components/ViewerWorkbench.vue'
 import './custom.css'
 
 export default {
@@ -21,5 +22,6 @@ export default {
   enhanceApp({ app }) {
     // Make <BrainViewer /> usable directly in any markdown page.
     app.component('BrainViewer', BrainViewer)
+    app.component('ViewerWorkbench', ViewerWorkbench)
   },
 } satisfies Theme

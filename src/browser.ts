@@ -37,6 +37,10 @@ export type {
 export { ColorMapFactory } from './display/ColorMapFactory';
 export type { PresetConfig } from './display/ColorMapFactory';
 
+// Typed errors: branch on `error.code` via isNeuroimError(error, code).
+export { NeuroimError, NeuroimTypeError, isNeuroimError, NEUROIM_ERROR_CODES } from './errors';
+export type { NeuroimErrorCode, NeuroimErrorOptions } from './errors';
+
 export { AxisSet1D, AxisSet2D, AxisSet3D, NamedAxis } from './geometry/Axis';
 export { NeuroSpace } from './geometry/NeuroSpace';
 export { getVolumeGeometry, assertSameVolumeGeometry } from './geometry/VolumeGeometry';
@@ -61,6 +65,7 @@ export type {
 export type { ISliceModel, ISliceView, ISliceController, ICoordinateTransformer } from './display/interfaces/index';
 
 // Volume factory and concrete volume classes for browser consumers
+export type { NeuroVol } from './volume/NeuroVol';
 export { createNeuroVol } from './volume/NeuroIm';
 export {
   DenseNeuroVol,
@@ -99,7 +104,9 @@ export {
   clusteredSearchlight,
   bootstrapSearchlight,
 } from './searchlight/searchlight';
-export type { SearchlightOptions } from './searchlight/searchlight';
+export type { SearchlightOptions, RandomSearchlightOptions } from './searchlight/searchlight';
+export { createRng } from './utils/rng';
+export type { Rng, RandomOptions } from './utils/rng';
 
 // Overlay review / subject consistency helpers
 export {

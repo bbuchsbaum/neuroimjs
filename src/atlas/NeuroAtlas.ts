@@ -8,17 +8,31 @@ import { Cache } from '../utils/Cache';
 import { TypedArray } from '../types';
 import { read_vol } from '../io/nifti'; // Ensure this import is correct
 import { deepEqual } from '../utils/deepEqual';
+import { getLogger, getLogLevel, LogLevel } from '../display/logging/Logger';
+import { toInt32Labels } from './labels';
+import { resolveRng, type RandomOptions } from '../utils/rng';
+
+const log = getLogger('atlas');
 
 /**
  * Interface for Atlas Metadata
  */
 export interface AtlasMetadata {
   name: string;
+  /**
+   * Region names, one per id. These need not be unique: Glasser and Schaefer
+   * use the same region name in both hemispheres.
+   */
   labels: string[];
   ids: number[];
   cmap: number[][];
   hemi?: string[];
   network?: string[];
+  /**
+   * Unique, hemisphere-qualified names as they appear in the atlas' label file
+   * (e.g. `Left_V1`, `7Networks_LH_Vis_1`). When present they key the
+   * volume's label map; otherwise `labels` do.
+   */
   origLabels?: string[];
   dimensions?: number[];
   spacing?: number[];
@@ -32,6 +46,21 @@ export interface SchaeferAtlasOptions {
   useCache?: boolean;
 }
 
+/**
+ * Options for {@link NeuroAtlas.loadGlasserAtlas}.
+ *
+ * The Glasser label file has no colours, so each region gets a random colour.
+ * `seed` or `rng` choose the colours; without either the default seed
+ * {@link GLASSER_DEFAULT_COLOR_SEED} is used, so colours are the same on every
+ * load.
+ */
+export interface GlasserAtlasOptions extends RandomOptions {
+  /** Use cached downloads when available (default true). */
+  useCache?: boolean;
+}
+
+/** Seed for the Glasser region colours when no `seed` or `rng` is given. */
+export const GLASSER_DEFAULT_COLOR_SEED = 360;
 
 /**
  * NeuroAtlas Class
@@ -59,6 +88,12 @@ export class NeuroAtlas {
 
   /**
    * Retrieves an ROI by label or id.
+   *
+   * `label` is looked up first among the unique label-map keys (`origLabels`
+   * when the atlas has them, e.g. `Left_V1`), then among the region names in
+   * `labels`. A region name shared by several regions (e.g. `V1`, present in
+   * both hemispheres) is ambiguous and throws; use the qualified name or `id`.
+   *
    * @param params Object containing either 'label' or 'id'.
    */
   public getROI(params: { label?: string; id?: number }): ROIVol | null {
@@ -68,11 +103,7 @@ export class NeuroAtlas {
 
     let targetId: number | undefined;
     if (params.label) {
-      // Use labelMap to get ID from label
-      targetId = this.atlas.labelMap[params.label];
-      if (targetId === undefined) {
-        throw new Error(`Label '${params.label}' not found in atlas.`);
-      }
+      targetId = this.resolveLabel(params.label);
     } else if (params.id !== undefined) {
       targetId = params.id;
       // Check if the ID exists in the cluster map
@@ -94,6 +125,39 @@ export class NeuroAtlas {
 
     // ROI_improved.ROIVol signature: (data, space, coords)
     return new ROIVol(data, this.atlas.space, coords);
+  }
+
+  /**
+   * Resolve a label (unique label-map key or unambiguous region name) to an id.
+   */
+  private resolveLabel(label: string): number {
+    const direct = this.atlas.labelMap[label];
+    if (direct !== undefined) return direct;
+    const matches: number[] = [];
+    this.labels.forEach((name, i) => {
+      if (name === label) matches.push(i);
+    });
+    if (matches.length === 1) return this.ids[matches[0]];
+    if (matches.length > 1) {
+      const names = matches.map(i => this.origLabels?.[i] ?? String(this.ids[i]));
+      throw new Error(
+        `Label '${label}' is ambiguous in atlas ${this.name}: it names ${matches.length} regions ` +
+          `(${names.join(', ')}). Use one of those names or an id.`
+      );
+    }
+    throw new Error(`Label '${label}' not found in atlas.`);
+  }
+
+  /**
+   * Build the label map (unique label -> id) for atlas metadata. Keys are
+   * `origLabels` when present, since region names repeat across hemispheres.
+   */
+  private static labelMapFor(metadata: AtlasMetadata): LabelMap {
+    const labelMap: LabelMap = {};
+    metadata.ids.forEach((id, index) => {
+      labelMap[metadata.origLabels?.[index] ?? metadata.labels[index]] = id;
+    });
+    return labelMap;
   }
 
   /**
@@ -138,7 +202,7 @@ export class NeuroAtlas {
     // Add other atlas labels with potentially offset IDs
     otherAtlas.ids.forEach((id, index) => {
       const newId = offset ? id + offset : id;
-      const label = otherAtlas.labels[index];
+      const label = otherAtlas.origLabels?.[index] ?? otherAtlas.labels[index];
       mergedLabelMap[label] = newId;
     });
 
@@ -185,9 +249,30 @@ export class NeuroAtlas {
   private extractLabelMapFromAtlas(otherAtlas: NeuroAtlas): LabelMap {
     const labelMap: LabelMap = {};
     otherAtlas.ids.forEach((id, index) => {
-      labelMap[otherAtlas.labels[index]] = id;
+      labelMap[otherAtlas.origLabels?.[index] ?? otherAtlas.labels[index]] = id;
     });
     return labelMap;
+  }
+
+  /**
+   * Build a ClusteredNeuroVol from a full-grid Int32 label array: voxels with
+   * a non-zero label form the mask and keep their label as cluster id.
+   */
+  private static clusteredFromLabels(
+    space: NeuroSpace,
+    labels: Int32Array,
+    labelMap: LabelMap
+  ): ClusteredNeuroVol {
+    const nonZeroIndices: number[] = [];
+    for (let i = 0; i < labels.length; i++) {
+      if (labels[i] !== 0) nonZeroIndices.push(i);
+    }
+    const mask = new LogicalNeuroVol(space, undefined, nonZeroIndices);
+    const clusterValues = new Int32Array(nonZeroIndices.length);
+    for (let i = 0; i < nonZeroIndices.length; i++) {
+      clusterValues[i] = labels[nonZeroIndices[i]];
+    }
+    return new ClusteredNeuroVol(mask, clusterValues, labelMap);
   }
 
   /**
@@ -222,8 +307,7 @@ export class NeuroAtlas {
     }
 
     if (!atlasData) {
-      const downloadedData = await Downloader.downloadArray(url);
-      atlasData = new Int32Array(downloadedData); // Ensure it's Int32Array
+      atlasData = toInt32Labels(await Downloader.downloadArray(url));
       cache.set(url, atlasData);
     }
 
@@ -246,41 +330,29 @@ export class NeuroAtlas {
 
     const space = new NeuroSpace(dimensions, spacing);
 
-    // Create labelMap from metadata.ids and metadata.labels
-    // LabelMap maps labels (strings) to IDs (numbers)
-    const labelMap: LabelMap = {};
-    metadata.ids.forEach((id, index) => {
-      labelMap[metadata.labels[index]] = id;
-    });
+    const labelMap = NeuroAtlas.labelMapFor(metadata);
 
-    // Create a mask from non-zero values in the atlas
-    const nonZeroIndices: number[] = [];
-    const atlasDataInt32 = atlasData as Int32Array;
-    for (let i = 0; i < atlasDataInt32.length; i++) {
-      if (atlasDataInt32[i] !== 0) {
-        nonZeroIndices.push(i);
-      }
-    }
-    
-    // Create the mask as a LogicalNeuroVol
-    const mask = new LogicalNeuroVol(space, undefined, nonZeroIndices);
-    
-    // Extract the cluster values for non-zero voxels
-    const clusterValues = new Int32Array(nonZeroIndices.length);
-    for (let i = 0; i < nonZeroIndices.length; i++) {
-      clusterValues[i] = atlasDataInt32[nonZeroIndices[i]];
-    }
-    
-    const atlasVol = new ClusteredNeuroVol(mask, clusterValues, labelMap);
+    const atlasVol = NeuroAtlas.clusteredFromLabels(space, toInt32Labels(atlasData), labelMap);
 
     return new NeuroAtlas(atlasVol, metadata);
   }
 
   /**
    * Static method to load the Glasser atlas.
-   * @param useCache Whether to use cached data if available.
+   *
+   * Region colours are drawn from a seeded generator (see
+   * {@link GlasserAtlasOptions}); they are reproducible, and identical across
+   * loads unless a different `seed` or `rng` is passed.
+   *
+   * @param options Options, or a boolean for `useCache` (the former signature).
    */
-  public static async loadGlasserAtlas(useCache = true): Promise<NeuroAtlas> {
+  public static async loadGlasserAtlas(
+    options: boolean | GlasserAtlasOptions = {}
+  ): Promise<NeuroAtlas> {
+    const opts: GlasserAtlasOptions =
+      typeof options === 'boolean' ? { useCache: options } : options;
+    const useCache = opts.useCache ?? true;
+    const rng = resolveRng(opts, GLASSER_DEFAULT_COLOR_SEED);
     const atlasUrl = 'https://github.com/PennBBL/xcpEngine/raw/master/atlas/glasser360/glasser360MNI.nii.gz';
     const labelsUrl = 'https://github.com/PennBBL/xcpEngine/raw/master/atlas/glasser360/glasser360NodeNames.txt';
 
@@ -309,7 +381,7 @@ export class NeuroAtlas {
 
     const labels = labelsData.trim().split('\n').map(line => line.trim());
     const ids = labels.map((_, index) => index + 1);
-    const cmap = ids.map(() => [Math.random() * 255, Math.random() * 255, Math.random() * 255]); // Random colors
+    const cmap = ids.map(() => [rng() * 255, rng() * 255, rng() * 255]); // Random colors
     const hemi = labels.map(label => label.split('_')[0].toLowerCase());
     const region = labels.map(label => label.split('_')[1]);
 
@@ -319,61 +391,15 @@ export class NeuroAtlas {
       ids,
       cmap,
       hemi,
+      // `Right_V1` / `Left_V1`: unique keys for the label map.
+      origLabels: labels,
     };
 
-    // Create labelMap from metadata.ids and metadata.labels
-    // LabelMap maps labels (strings) to IDs (numbers)
-    const labelMap: LabelMap = {};
-    metadata.ids.forEach((id, index) => {
-      labelMap[metadata.labels[index]] = id;
-    });
+    const labelMap = NeuroAtlas.labelMapFor(metadata);
 
-    // Safely convert to Int32Array if necessary
-    let atlasVolInt32: Int32Array;
-
-    const data = atlasVol.getData();
-    if (data instanceof Int32Array) {
-      atlasVolInt32 = data;
-    } else if (data instanceof Float32Array) {
-      // Convert Float32Array to Int32Array safely
-      atlasVolInt32 = new Int32Array(data.length);
-      for (let i = 0; i < data.length; i++) {
-        atlasVolInt32[i] = Math.round(data[i]);
-      }
-    } else if (data instanceof Float64Array) {
-      // Convert Float64Array to Int32Array safely
-      atlasVolInt32 = new Int32Array(data.length);
-      for (let i = 0; i < data.length; i++) {
-        atlasVolInt32[i] = Math.round(data[i]);
-      }
-    } else if (data instanceof Uint16Array) {
-      // Convert Uint16Array to Int32Array safely
-      atlasVolInt32 = new Int32Array(data.length);
-      for (let i = 0; i < data.length; i++) {
-        atlasVolInt32[i] = data[i];
-      }
-    } else {
-      throw new Error(`Unsupported data type: ${data.constructor.name}`);
-    }
-
-    // Create a mask from non-zero values in the atlas
-    const nonZeroIndices: number[] = [];
-    for (let i = 0; i < atlasVolInt32.length; i++) {
-      if (atlasVolInt32[i] !== 0) {
-        nonZeroIndices.push(i);
-      }
-    }
-    
-    // Create the mask as a LogicalNeuroVol
-    const mask = new LogicalNeuroVol(atlasVol.space, undefined, nonZeroIndices);
-    
-    // Extract the cluster values for non-zero voxels
-    const clusterValues = new Int32Array(nonZeroIndices.length);
-    for (let i = 0; i < nonZeroIndices.length; i++) {
-      clusterValues[i] = atlasVolInt32[nonZeroIndices[i]];
-    }
-    
-    const clusteredVol = new ClusteredNeuroVol(mask, clusterValues, labelMap);
+    // Convert labels by value; any integer or integral float datatype works.
+    const atlasVolInt32 = toInt32Labels(atlasVol);
+    const clusteredVol = NeuroAtlas.clusteredFromLabels(atlasVol.space, atlasVolInt32, labelMap);
 
     return new NeuroAtlas(clusteredVol, metadata);
   }
@@ -432,29 +458,8 @@ export class NeuroAtlas {
 
     const labels = labelsData.trim().split('\n').map(line => line.trim().split('\t'));
     const ids = labels.map(label => parseInt(label[0], 10));
-    
-    console.log("Schaefer atlas - Number of labels:", labels.length);
-    console.log("Schaefer atlas - ID range:", Math.min(...ids), "to", Math.max(...ids));
-    console.log("Schaefer atlas - IDs:", ids.length > 20 ? 
-               ids.slice(0, 5).join(', ') + '...' + ids.slice(-5).join(', ') : 
-               ids.join(', '));
-    
     const fullLabels = labels.map(label => label[1]);
-    
-    // Check the raw volume data
-    console.log("Schaefer atlas - Volume data type:", atlasVol.getData().constructor.name);
-    
-    // Sample the volume to see what IDs are actually present
-    const volumeData = atlasVol.getData();
-    const nonZeroValues = new Set();
-    for (let i = 0; i < Math.min(volumeData.length, 1000000); i++) {
-      const value = volumeData[i];
-      if (value !== 0) nonZeroValues.add(value);
-    }
-    
-    console.log("Schaefer atlas - Sample of non-zero values in volume:", 
-               Array.from(nonZeroValues).sort((a: any, b: any) => a - b).slice(0, 20));
-    
+
     const cmap = labels.map(label => [
       parseInt(label[2], 10),
       parseInt(label[3], 10),
@@ -480,76 +485,22 @@ export class NeuroAtlas {
       spacing: atlasVol.space.spacing,
     };
 
-    // Create labelMap from metadata.ids and metadata.labels
-    // LabelMap maps labels (strings) to IDs (numbers)
-    const labelMap: LabelMap = {};
-    metadata.ids.forEach((id, index) => {
-      labelMap[metadata.labels[index]] = id;
-    });
+    const labelMap = NeuroAtlas.labelMapFor(metadata);
 
-    // Explicitly log the number of parcels being used, which should match the atlas data
-    console.log(`Creating Schaefer atlas with ${parcels} parcels, metadata has ${ids.length} labels`);
-
-    // Check the data type of the atlas volume
-    const atlasData = atlasVol.getData();
-    console.log(`Atlas data type: ${atlasData.constructor.name}`);
-    
-    // Proper conversion from Float32Array to Int32Array if needed
-    let atlasVolInt32: Int32Array;
-    
-    if (atlasData instanceof Int32Array) {
-      console.log("Atlas data is already Int32Array, using directly");
-      atlasVolInt32 = atlasData;
-    } else if (atlasData instanceof Float32Array) {
-      console.log("Atlas data is Float32Array, properly converting values to Int32Array");
-      // Convert Float32Array to Int32Array by value, not by reinterpreting the buffer
-      atlasVolInt32 = new Int32Array(atlasData.length);
-      
-      // Sample some values before conversion
-      const nonZeroFloat = Array.from(atlasData).filter(v => v > 0).slice(0, 5);
-      console.log("Sample Float32 values before conversion:", nonZeroFloat);
-      
-      // Convert the values properly
-      for (let i = 0; i < atlasData.length; i++) {
-        atlasVolInt32[i] = Math.round(atlasData[i]);
-      }
-      
-      // Sample after conversion
-      const nonZeroIndices: number[] = [];
-      for (let i = 0; i < 1000 && nonZeroIndices.length < 5; i++) {
-        if (atlasVolInt32[i] > 0) nonZeroIndices.push(i);
-      }
-      
-      console.log("Sample Int32 values after conversion:", 
-                 nonZeroIndices.map(i => `index ${i}: ${atlasVolInt32[i]}`));
-    } else {
-      console.warn(`Unexpected data type: ${atlasData.constructor.name}, attempting direct buffer reinterpretation`);
-      atlasVolInt32 = new Int32Array(atlasData.buffer);
+    // Convert labels by value; any integer or integral float datatype works.
+    const atlasVolInt32 = toInt32Labels(atlasVol);
+    const clusteredVol = NeuroAtlas.clusteredFromLabels(atlasVol.space, atlasVolInt32, labelMap);
+    if (getLogLevel() <= LogLevel.DEBUG) {
+      // getRange() scans every voxel; only pay for it when DEBUG is on.
+      log.debug('Loaded Schaefer atlas', {
+        parcels,
+        networks,
+        labels: ids.length,
+        datatype: atlasVol.getData().constructor.name,
+        range: clusteredVol.getRange(),
+      });
     }
 
-    // Create a mask from non-zero values in the atlas
-    const nonZeroIndices: number[] = [];
-    for (let i = 0; i < atlasVolInt32.length; i++) {
-      if (atlasVolInt32[i] !== 0) {
-        nonZeroIndices.push(i);
-      }
-    }
-    
-    // Create the mask as a LogicalNeuroVol
-    const mask = new LogicalNeuroVol(atlasVol.space, undefined, nonZeroIndices);
-    
-    // Extract the cluster values for non-zero voxels
-    const clusterValues = new Int32Array(nonZeroIndices.length);
-    for (let i = 0; i < nonZeroIndices.length; i++) {
-      clusterValues[i] = atlasVolInt32[nonZeroIndices[i]];
-    }
-    
-    const clusteredVol = new ClusteredNeuroVol(mask, clusterValues, labelMap);
-    
-    // Check the range after proper conversion
-    const actualRange = clusteredVol.getRange();
-    console.log(`Schaefer atlas original range: [${actualRange[0]}, ${actualRange[1]}]`);
-    
     // Return the NeuroAtlas
     return new NeuroAtlas(clusteredVol, metadata);
   }

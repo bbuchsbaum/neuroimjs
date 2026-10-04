@@ -11,6 +11,7 @@ import {
   nearestAnatomy,
 } from '../src/geometry/Axis';
 import { Matrix } from 'ml-matrix';
+import { NeuroSpace } from '../src/geometry/NeuroSpace';
 
 describe('NamedAxis', () => {
   it('should create a NamedAxis instance correctly', () => {
@@ -171,5 +172,108 @@ describe('Utility Functions', () => {
         NamedAxis.INF_SUP
       )
     );
+  });
+});
+
+describe('nearestAnatomy with non-orthogonal (sheared) affines', () => {
+  const RAS = new AxisSet3D(NamedAxis.LEFT_RIGHT, NamedAxis.POST_ANT, NamedAxis.INF_SUP);
+  const shearedRas = () => [
+    [2, -0.5, 0.3, 10],
+    [0.2, 2, -0.4, 20],
+    [-0.1, 0.6, 3, 30],
+    [0, 0, 0, 1],
+  ];
+
+  it('does not modify the input matrix', () => {
+    const mat = new Matrix(shearedRas());
+    nearestAnatomy(mat);
+    expect(mat.to2DArray()).toEqual(shearedRas());
+  });
+
+  it('reports RAS for a sheared RAS-like affine whose j column has a negative x component', () => {
+    // Before the fix, orthogonalize() scaled the i column in place by
+    // dot(i, j) = -0.5, flipping it and reporting LAS.
+    const mat = new Matrix([
+      [2, -0.5, 0, 0],
+      [0, 2, 0, 0],
+      [0, 0, 2, 0],
+      [0, 0, 0, 1],
+    ]);
+    expect(nearestAnatomy(mat)).toEqual(RAS);
+  });
+
+  it('reports RAS for a generally sheared, anisotropic RAS-like affine', () => {
+    expect(nearestAnatomy(new Matrix(shearedRas()))).toEqual(RAS);
+  });
+
+  it('gives a NeuroSpace built from a sheared RAS-like affine RAS axes', () => {
+    const trans = [
+      [2, -0.5, 0, 0],
+      [0, 2, 0, 0],
+      [0, 0, 2, 0],
+      [0, 0, 0, 1],
+    ];
+    const space = new NeuroSpace([4, 4, 4], undefined, undefined, undefined, trans);
+    expect(space.axes).toEqual(RAS);
+  });
+
+  it('reports LPS for a sheared LPS-like affine', () => {
+    const mat = new Matrix([
+      [-2, 0.5, 0, 0],
+      [0, -2, 0.3, 0],
+      [0, -0.4, 2, 0],
+      [0, 0, 0, 1],
+    ]);
+    expect(nearestAnatomy(mat)).toEqual(
+      new AxisSet3D(NamedAxis.RIGHT_LEFT, NamedAxis.ANT_POST, NamedAxis.INF_SUP)
+    );
+  });
+
+  it('handles a permuted (coronal-stored) sheared affine', () => {
+    // i -> +x (R), j -> +z (S), k -> -y (P), with shear.
+    const mat = new Matrix([
+      [1, -0.3, 0, 0],
+      [0, 0, -1, 0],
+      [0, 1, 0.2, 0],
+      [0, 0, 0, 1],
+    ]);
+    expect(nearestAnatomy(mat)).toEqual(
+      new AxisSet3D(NamedAxis.LEFT_RIGHT, NamedAxis.INF_SUP, NamedAxis.ANT_POST)
+    );
+  });
+});
+
+describe('nearestAnatomy degenerate columns', () => {
+  it('takes k = i x j (right-handed) when the k column is zero', () => {
+    // i -> -x (L), j -> +y (A); i x j = -z, so k -> I.
+    const mat = new Matrix([
+      [-2, 0, 0, 0],
+      [0, 2, 0, 0],
+      [0, 0, 0, 0],
+      [0, 0, 0, 1],
+    ]);
+    expect(nearestAnatomy(mat)).toEqual(
+      new AxisSet3D(NamedAxis.RIGHT_LEFT, NamedAxis.POST_ANT, NamedAxis.SUP_INF)
+    );
+  });
+
+  it('takes k = i x j when the k column lies in the i-j plane', () => {
+    const mat = new Matrix([
+      [2, 0, 1, 0],
+      [0, 2, 1, 0],
+      [0, 0, 0, 0],
+      [0, 0, 0, 1],
+    ]);
+    expect(nearestAnatomy(mat)).toEqual(
+      new AxisSet3D(NamedAxis.LEFT_RIGHT, NamedAxis.POST_ANT, NamedAxis.INF_SUP)
+    );
+  });
+
+  it.each([
+    ['i is zero', [[0, 0, 0, 0], [0, 2, 0, 0], [0, 0, 2, 0], [0, 0, 0, 1]]],
+    ['j is zero', [[2, 0, 0, 0], [0, 0, 0, 0], [0, 0, 2, 0], [0, 0, 0, 1]]],
+    ['j is parallel to i', [[2, -4, 0, 0], [0, 0, 0, 0], [0, 0, 2, 0], [0, 0, 0, 1]]],
+  ])('throws when %s', (_label, values) => {
+    expect(() => nearestAnatomy(new Matrix(values))).toThrow('Invalid matrix input, columns are degenerate');
   });
 });

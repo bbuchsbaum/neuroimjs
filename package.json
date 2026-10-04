@@ -11,10 +11,41 @@
       "import": "./dist/esm/index.js",
       "require": "./dist/cjs/index.js"
     },
+    "./io": {
+      "types": "./dist/types/entries/io.d.ts",
+      "import": "./dist/esm/entries/io.js",
+      "require": "./dist/cjs/entries/io.js"
+    },
+    "./slices": {
+      "types": "./dist/types/entries/slices.d.ts",
+      "import": "./dist/esm/entries/slices.js",
+      "require": "./dist/cjs/entries/slices.js"
+    },
+    "./geometry": {
+      "types": "./dist/types/entries/geometry.d.ts",
+      "import": "./dist/esm/entries/geometry.js",
+      "require": "./dist/cjs/entries/geometry.js"
+    },
     "./browser": {
       "types": "./dist/types/browser.d.ts",
       "import": "./dist/neuroimjs.es.js",
       "default": "./dist/neuroimjs.es.js"
+    }
+  },
+  "typesVersions": {
+    "*": {
+      "io": [
+        "dist/types/entries/io.d.ts"
+      ],
+      "slices": [
+        "dist/types/entries/slices.d.ts"
+      ],
+      "geometry": [
+        "dist/types/entries/geometry.d.ts"
+      ],
+      "browser": [
+        "dist/types/browser.d.ts"
+      ]
     }
   },
   "files": [
@@ -43,6 +74,8 @@
     "test:watch": "vitest --watch",
     "test:alignment": "vitest run src/display/__tests__/integration/MultiLayerAlignment",
     "test:debug": "vitest run --reporter=verbose --no-coverage",
+    "test:conformance": "vitest run tests/conformance",
+    "conformance:generate": "node scripts/conformance/generate.mjs",
     "lint": "eslint src tests",
     "lint:ci": "eslint src tests --max-warnings 608",
     "format": "prettier --write src tests",
@@ -68,10 +101,12 @@
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:update": "playwright test --update-snapshots",
-    "test:package": "node scripts/verify-package.mjs",
+    "test:package": "node scripts/verify-package.mjs && node scripts/verify-subpaths.mjs",
+    "test:subpaths": "node scripts/verify-subpaths.mjs",
+    "test:consumers": "node scripts/verify-consumers.mjs",
     "check:bundle-size": "node scripts/check-bundle-size.mjs",
     "audit:prod": "npm audit --omit=dev --audit-level=high",
-    "verify:release": "npm run test:types && npm run lint:ci && npm test -- --run --silent && npm run build && npm run build:vite && npm run check:bundle-size && npm run test:package && npm run docs:api && npm run audit:prod"
+    "verify:release": "npm run test:types && npm run lint:ci && npm test -- --run --silent && npm run build && npm run build:vite && npm run check:bundle-size && npm run test:package && npm run test:consumers && npm run docs:api && npm run audit:prod"
   },
   "keywords": [
     "neuroimaging",

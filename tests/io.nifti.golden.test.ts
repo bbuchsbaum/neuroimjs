@@ -5,6 +5,7 @@ import { readVol, readHeader, writeVol, readVec, writeVec } from '../src/io/io';
 import { FloatNeuroVol } from '../src/volume/DenseNeuroVol';
 import { NeuroSpace } from '../src/geometry/NeuroSpace';
 import { BigNeuroVec } from '../src/vector/BigNeuroVec';
+import { readNiftiArrayBuffer } from '../src/io/browserNifti';
 
 /**
  * Build a minimal but valid NIfTI-1 single-file (.nii) buffer in memory with
@@ -105,6 +106,32 @@ describe('NIfTI read-path correctness', () => {
     }
   });
 
+  it.each([
+    ['0', 0],
+    ['NaN', Number.NaN],
+    ['Infinity', Number.POSITIVE_INFINITY],
+  ])('ignores scl_inter when scl_slope = %s (no scaling at all), in both decoders', async (_label, slope) => {
+    const values = [3, 4, 5, 6, 7, 8, 9, 10];
+    const buf = buildNiftiInt16({ dims: [2, 2, 2], values, sclSlope: slope, sclInter: 50 });
+    const nodeData = (await readVol(buf)).getData();
+    const browserData = readNiftiArrayBuffer(buf).getData();
+    for (let i = 0; i < values.length; i++) {
+      expect(nodeData[i]).toBe(values[i]);
+      expect(browserData[i]).toBe(values[i]);
+    }
+  });
+
+  it('applies scl_inter when scl_slope = 1, in both decoders', async () => {
+    const values = [3, 4, 5, 6, 7, 8, 9, 10];
+    const buf = buildNiftiInt16({ dims: [2, 2, 2], values, sclSlope: 1, sclInter: 50 });
+    const nodeData = (await readVol(buf)).getData();
+    const browserData = readNiftiArrayBuffer(buf).getData();
+    for (let i = 0; i < values.length; i++) {
+      expect(nodeData[i]).toBe(values[i] + 50);
+      expect(browserData[i]).toBe(values[i] + 50);
+    }
+  });
+
   it('byte-swaps big-endian image data so it matches the little-endian read', async () => {
     const values = [0, 256, 1000, -1000, 32000, -32000, 7, 9];
     const leBuf = buildNiftiInt16({ dims: [2, 2, 2], values, littleEndian: true });
@@ -118,6 +145,26 @@ describe('NIfTI read-path correctness', () => {
     for (let i = 0; i < values.length; i++) {
       expect(beData[i]).toBe(values[i]);
       expect(beData[i]).toBe(leData[i]);
+    }
+  });
+
+  it('takes NeuroSpace spacing from the sform column norms, not pixdim, in both decoders', async () => {
+    // Oblique sform (rotation about z) whose voxel sizes (2, 3, 4) deliberately
+    // disagree with pixdim[1..3] = (1, 1, 1).
+    const c = Math.cos(Math.PI / 6);
+    const s = Math.sin(Math.PI / 6);
+    const srow = [
+      [2 * c, -3 * s, 0, 10],
+      [2 * s, 3 * c, 0, 20],
+      [0, 0, 4, 30],
+    ];
+    const buf = buildNiftiInt16({ dims: [2, 2, 2], values: [0, 1, 2, 3, 4, 5, 6, 7], spacing: [1, 1, 1], srow });
+    const nodeVol = await readVol(buf);
+    const browserVol = readNiftiArrayBuffer(buf);
+    for (const vol of [nodeVol, browserVol]) {
+      expect(vol.space.spacing[0]).toBeCloseTo(2, 5);
+      expect(vol.space.spacing[1]).toBeCloseTo(3, 5);
+      expect(vol.space.spacing[2]).toBeCloseTo(4, 5);
     }
   });
 

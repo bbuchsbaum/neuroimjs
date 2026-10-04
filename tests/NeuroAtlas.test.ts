@@ -7,9 +7,12 @@ import { ROIVol } from '../src/roi/ROI_improved';
 import { useSyntheticAtlasDownloads } from './helpers/syntheticAtlas';
 
 // The Glasser/Schaefer loaders download their files. Serve synthetic files with
-// the published geometry and label formats instead, unless
-// NEUROIMJS_NETWORK_TESTS=1 asks for the real downloads.
-beforeAll(() => useSyntheticAtlasDownloads());
+// the published datatypes, affines and label formats instead, unless
+// NEUROIMJS_NETWORK_TESTS=1 asks for the real downloads. These tests check
+// labels, ids and colours, not geometry, so the small grid suffices; the
+// published grids are exercised in tests/atlas/labelDatatypes.test.ts,
+// DenseNeuroVol.test.ts and SliceTransform.test.ts.
+beforeAll(() => useSyntheticAtlasDownloads({ grid: 'small' }));
 
 describe('NeuroAtlas', () => {
   let mockAtlasVol: ClusteredNeuroVol;
@@ -235,5 +238,83 @@ describe('NeuroAtlas - Schaefer Atlas', () => {
         }, 30000); // Increased timeout if loading involves network operations
       });
     });
+  });
+});
+
+describe('NeuroAtlas - hemisphere-qualified label maps', () => {
+  // Glasser and Schaefer reuse region names across hemispheres; the label map
+  // used to be keyed by the bare name, so the left entry overwrote the right.
+
+  it('Glasser: both hemispheres of a region are addressable by label', async () => {
+    const atlas = await NeuroAtlas.loadGlasserAtlas({ useCache: false });
+    const labelMap = atlas.atlas.getLabelMap();
+    expect(Object.keys(labelMap)).toHaveLength(360);
+    expect(labelMap['Right_V1']).toBe(1);
+    expect(labelMap['Left_V1']).toBe(181);
+    expect(atlas.origLabels?.[0]).toBe('Right_V1');
+    expect(atlas.origLabels?.[180]).toBe('Left_V1');
+    // Region names are unchanged.
+    expect(atlas.labels[0]).toBe('V1');
+    expect(atlas.labels[180]).toBe('V1');
+
+    const right = atlas.getROI({ label: 'Right_V1' });
+    const left = atlas.getROI({ label: 'Left_V1' });
+    expect(right?.coords.length).toBeGreaterThan(0);
+    expect(left?.coords.length).toBeGreaterThan(0);
+    expect(right?.coords.length).toBe(atlas.getROI({ id: 1 })?.coords.length);
+    expect(left?.coords.length).toBe(atlas.getROI({ id: 181 })?.coords.length);
+    expect(right?.coords[0]).not.toEqual(left?.coords[0]);
+
+    // Reverse lookup names the hemisphere.
+    expect(atlas.atlas.getClusterInfo(1)?.label).toBe('Right_V1');
+    expect(atlas.atlas.getClusterInfo(181)?.label).toBe('Left_V1');
+
+    // A bare region name present in both hemispheres is ambiguous.
+    expect(() => atlas.getROI({ label: 'V1' })).toThrow(/ambiguous.*Right_V1, Left_V1/);
+  }, 30000);
+
+  it('Schaefer: both hemispheres of a parcel are addressable by label', async () => {
+    const atlas = await NeuroAtlas.loadSchaeferAtlas({
+      parcels: 100,
+      networks: 7,
+      resolution: 2,
+      useCache: false,
+    });
+    const labelMap = atlas.atlas.getLabelMap();
+    expect(Object.keys(labelMap)).toHaveLength(100);
+    const lhId = labelMap['7Networks_LH_Vis_1'];
+    const rhId = labelMap['7Networks_RH_Vis_1'];
+    expect(lhId).toBeDefined();
+    expect(rhId).toBeDefined();
+    expect(lhId).not.toBe(rhId);
+    expect(atlas.hemi?.[atlas.ids.indexOf(lhId)]).toBe('LH');
+    expect(atlas.hemi?.[atlas.ids.indexOf(rhId)]).toBe('RH');
+
+    expect(atlas.getROI({ label: '7Networks_LH_Vis_1' })?.coords.length).toBe(
+      atlas.getROI({ id: lhId })?.coords.length
+    );
+    expect(atlas.getROI({ label: '7Networks_RH_Vis_1' })?.coords.length).toBe(
+      atlas.getROI({ id: rhId })?.coords.length
+    );
+    expect(() => atlas.getROI({ label: 'Vis_1' })).toThrow(/ambiguous/);
+  }, 30000);
+
+  it('a region name that occurs once still resolves', () => {
+    const space = new NeuroSpace([4, 4, 4], [1, 1, 1]);
+    const mask = new LogicalNeuroVol(space, undefined, [0, 1, 2]);
+    const vol = new ClusteredNeuroVol(mask, new Int32Array([1, 1, 2]), { L_A: 1, R_B: 2 });
+    const atlas = new NeuroAtlas(vol, {
+      name: 'tiny',
+      labels: ['A', 'B'],
+      ids: [1, 2],
+      cmap: [
+        [0, 0, 0],
+        [1, 1, 1],
+      ],
+      origLabels: ['L_A', 'R_B'],
+    });
+    expect(atlas.getROI({ label: 'A' })?.coords.length).toBe(2);
+    expect(atlas.getROI({ label: 'R_B' })?.coords.length).toBe(1);
+    expect(() => atlas.getROI({ label: 'C' })).toThrow(/not found/);
   });
 });
