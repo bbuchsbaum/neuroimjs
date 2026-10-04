@@ -113,6 +113,22 @@ from `pixdim`. Callers that need the raw `pixdim[1..3]` should use
 
 ### Fixed
 
+- uint16 volumes can be sliced and displayed. `createNeuroVol` accepted
+  `'uint16'` but `createNeuroSlice` did not, so a UINT16 NIfTI loaded through
+  `readVol` or `readNiftiArrayBuffer` threw `Unsupported TypedArray type:
+  uint16` from `getSlice`, `getSliceAt`, `extractOrthogonalSlices` and every
+  viewer. Slices of a uint16 volume are now `Uint16Array`-backed, and the
+  display path maps the full 0..65535 range across the colour map.
+  `SparseNeuroVol` with `dataType: 'uint16'` and `Resampler` output of a uint16
+  volume slice the same way.
+- `createNeuroSlice` and `createNeuroVol` throw a `NeuroimError` with code
+  `UNSUPPORTED_DATATYPE` (message unchanged) for a type with no class, which
+  is now only `'uint32'`. `SparseNeuroVol` rejects `'uint32'` when it is
+  constructed rather than on the first slice, and `Resampler` raises the same
+  code for an unsupported data array.
+- `ColorMap.getColorArray()` accepts every numeric TypedArray, as
+  `fillImageData()` already did. It used to reject anything but `number[]`
+  and `Float32Array`, including the slices of integer volumes.
 - `readVol` and `readNiftiArrayBuffer` no longer add `scl_inter` when
   `scl_slope` is 0 or non-finite. Such a slope means "no scaling" (NIfTI-1
   spec, nibabel), so voxel values are now returned exactly as stored.
