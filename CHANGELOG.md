@@ -32,12 +32,17 @@ from `pixdim`. Callers that need the raw `pixdim[1..3]` should use
   `verify:release` and CI): the call surfaces of neuromosaic, FROIAtlas,
   neuroimjs-vscode and xnat2bids, run against the packed tarball.
 - Viewer-free subpath exports `neuroimjs/io` (readVol, writeVol, readHeader,
-  readVolList, readVec, writeVec, read_vol, write_vol, format descriptors),
-  `neuroimjs/slices` (extractOrthogonalSlices and the slice helpers,
-  NeuroSlice) and `neuroimjs/geometry` (NeuroSpace, axes, volume geometry).
-  Each has `types`/`import`/`require` conditions and never loads pixi.js,
-  mobx, lit or display code. `npm run test:package` enforces this with a
-  static import-graph check and a runtime check against the packed tarball.
+  readVolList, readVec, writeVec, read_vol, write_vol, format descriptors,
+  DenseNeuroVol and its concrete subclasses), `neuroimjs/slices`
+  (extractOrthogonalSlices and the slice helpers, NeuroSlice) and
+  `neuroimjs/geometry` (NeuroSpace, axes, volume geometry). `io` and
+  `geometry` also export the typed-error API (NeuroimError,
+  NeuroimTypeError, isNeuroimError, NEUROIM_ERROR_CODES). Each subpath has
+  `types`/`import`/`require` conditions, plus a `typesVersions` mapping for
+  `moduleResolution: node10`, and never loads pixi.js, mobx, lit or display
+  code. `npm run test:package` enforces this with a static import-graph
+  check (dependency allowlist), a runtime check against the packed tarball,
+  and type checks under NodeNext, Bundler and node10.
   Node consumers such as Electron main processes no longer need deep
   `dist/esm/...` imports. `readNiftiArrayBuffer` stays browser-only.
 - `BigNeuroVec` accepts `storage: 'memory'` (no backing file), `volumeSpace`

@@ -23,5 +23,19 @@ export {
   findDescriptor,
   getFormat,
 } from '../io/formats';
+// Concrete volumes, so writeVol callers can build data without the root entry.
+export {
+  DenseNeuroVol,
+  FloatNeuroVol,
+  Float64NeuroVol,
+  Int8NeuroVol,
+  Int16NeuroVol,
+  Int32NeuroVol,
+  UInt8NeuroVol,
+  UInt16NeuroVol,
+} from '../volume/DenseNeuroVol';
 export type { NeuroVol } from '../volume/NeuroVol';
 export type { NeuroVec } from '../vec/NeuroVec';
+// Typed errors: branch on `error.code` via isNeuroimError(error, code).
+export { NeuroimError, NeuroimTypeError, isNeuroimError, NEUROIM_ERROR_CODES } from '../errors';
+export type { NeuroimErrorCode, NeuroimErrorOptions } from '../errors';
