@@ -58,5 +58,5 @@ Everything below is a real `neuroimjs` viewer rendering the MNI152 template with
 The layout is one `SimpleOrthogonalViewer`, and the side panel is the library's `<layer-control-panel>` web component bound to the same `VolStack`. **[See the full source →](/examples/viewer-workbench)**
 
 ::: tip Pre-1.0 — and actively hardening
-neuroimjs is at `0.5.0`. The viewer stack, core data structures, NIfTI reading, geometry, processing, and analysis primitives are covered by a green test suite, and NIfTI reading is checked against nibabel-generated fixtures. Some paths still have confirmed bugs or limitations (4D writing, unscaled `UINT16`/`UINT32` NIfTI data, hypervector reductions, a few processing edge cases); the **[Stability matrix](/guide/stability)** lists the verified status of every feature, so you know what is safe to build on.
+neuroimjs is at `0.5.0`. The viewer stack, core data structures, NIfTI reading, geometry, processing, and analysis primitives are covered by a green test suite, and NIfTI reading is checked against nibabel-generated fixtures. Some paths still have confirmed bugs or limitations (4D writing, unscaled `UINT32` NIfTI data in `readVol`, hypervector reductions, a few processing edge cases); the **[Stability matrix](/guide/stability)** lists the verified status of every feature, so you know what is safe to build on.
 :::

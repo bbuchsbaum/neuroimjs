@@ -79,10 +79,6 @@ const viewer = await SingleSliceViewer.createAxial(
 viewer.onCoordChange((coord) => console.log('world coord (mm):', coord))
 ```
 
-::: warning `UINT16` images
-`readNiftiArrayBuffer` keeps the stored datatype. For `UINT16` data that is a `UInt16NeuroVol`, and slicing one currently throws, so the viewer cannot display it. Convert the volume first: `new FloatNeuroVol(vol.space, Float32Array.from(vol.getData()))`. See [Volumes & Slices](/guide/volumes#dense-volumes).
-:::
-
 Want all three planes at once? Swap `SingleSliceViewer.createAxial` for [`SimpleOrthogonalViewer.create`](/guide/viewers). The **[Single Slice View example](/examples/single-view)** has a complete page.
 
 ## Hello, volume (Node.js)

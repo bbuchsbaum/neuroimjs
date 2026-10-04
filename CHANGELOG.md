@@ -63,6 +63,10 @@ from `pixdim`. Callers that need the raw `pixdim[1..3]` should use
 
 ### Changed
 
+- The `SparseNeuroVol` constructor rejects `dataType: 'uint32'` up front with
+  a `NeuroimError` (code `UNSUPPORTED_DATATYPE`). Previously construction
+  succeeded and `getAt`/`setAt` worked, but slicing or densifying failed later
+  with a plain `Error`.
 - `readVol` sets `space.spacing` to the voxel sizes of the selected transform,
   that is, the column norms of `space.trans`, instead of `pixdim[1..3]`. These
   are the values nibabel returns from `nibabel.affines.voxel_sizes(img.affine)`
@@ -123,9 +127,8 @@ from `pixdim`. Callers that need the raw `pixdim[1..3]` should use
   volume slice the same way.
 - `createNeuroSlice` and `createNeuroVol` throw a `NeuroimError` with code
   `UNSUPPORTED_DATATYPE` (message unchanged) for a type with no class, which
-  is now only `'uint32'`. `SparseNeuroVol` rejects `'uint32'` when it is
-  constructed rather than on the first slice, and `Resampler` raises the same
-  code for an unsupported data array.
+  is now only `'uint32'`. `Resampler` raises the same code for an unsupported
+  data array.
 - `ColorMap.getColorArray()` accepts every numeric TypedArray, as
   `fillImageData()` already did. It used to reject anything but `number[]`
   and `Float32Array`, including the slices of integer volumes.
@@ -205,6 +208,10 @@ logger is quiet by default. Each is described below.
 
 ### Changed
 
+- The `SparseNeuroVol` constructor rejects `dataType: 'uint32'` up front with
+  a `NeuroimError` (code `UNSUPPORTED_DATATYPE`). Previously construction
+  succeeded and `getAt`/`setAt` worked, but slicing or densifying failed later
+  with a plain `Error`.
 - Require Node.js 22 or later (`engines.node` was `>=20.19`). pixi.js 8, a
   runtime dependency, reads `navigator` when it loads, so `require('neuroimjs')`
   and `import 'neuroimjs'` already threw `ReferenceError: navigator is not
