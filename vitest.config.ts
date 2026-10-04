@@ -11,7 +11,8 @@ export default defineConfig({
     // e2e/ and tests/consumers/ hold Playwright specs (test.describe from
     // @playwright/test) which vitest cannot run — exclude them so they aren't
     // collected as failures. tests/consumers/ runs via `npm run test:consumers`.
-    exclude: ['**/node_modules/**', '**/dist/**', '**/e2e/**', 'tests/consumers/**'],
+    // .claude/ holds agent worktrees with full copies of tests/.
+    exclude: ['**/node_modules/**', '**/dist/**', '**/e2e/**', 'tests/consumers/**', '**/.claude/**'],
     // Ensure proper module resolution
     resolve: {
       alias: {

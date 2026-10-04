@@ -7,6 +7,28 @@ in the pull request that makes the change.
 
 ## Unreleased
 
+### Added
+
+- Downstream consumer contract tests (`npm run test:consumers`, part of
+  `verify:release` and CI): the call surfaces of neuromosaic, FROIAtlas,
+  neuroimjs-vscode and xnat2bids, run against the packed tarball.
+- `BigNeuroVec` accepts `storage: 'memory'` (no backing file), `volumeSpace`
+  and `shareData` options, and exposes `storage` and `volumeSpace`.
+
+### Changed
+
+- `bigNeuroVecSeq` returns an in-memory `BigNeuroVec` that keeps the first
+  volume's space (including its affine) as `volumeSpace`; it previously wrote
+  an untracked `.dat` file to `$TMPDIR` and dropped the affine.
+- `BigNeuroVec.subVector` on an in-memory vector stays in memory and keeps
+  `volumeSpace`; an empty selection throws a `ValueError`.
+- Flushing a file-backed `BigNeuroVec` after `close()` throws instead of
+  failing with `EBADF`; a second `close()` is a no-op.
+- Releases are published from CI by the `Release` workflow, triggered by a
+  GitHub release, using npm Trusted Publishing (OIDC) with a provenance
+  attestation; `scripts/verify-published.mjs` checks that the registry
+  tarball matches the CI build file for file. See `RELEASING.md`.
+
 ### Fixed
 
 - The browser bundles are built with a relative base, so the ES bundle refers
@@ -21,12 +43,16 @@ in the pull request that makes the change.
   used only when the `Worker` constructor threw. This covers UMD hosts that do
   not serve the bundle's `assets/` directory: the UMD bundle resolves the
   worker URL against the page, not the bundle, so the worker 404s there.
-
-### Added
-
-- Downstream consumer contract tests (`npm run test:consumers`, part of
-  `verify:release` and CI): the call surfaces of neuromosaic, FROIAtlas,
-  neuroimjs-vscode and xnat2bids, run against the packed tarball.
+- `readVec` kept only spacing and origin from the file, so `getVolume(t)` and
+  `vols()` dropped the rotation of an oblique affine. It also re-read and
+  re-decompressed the whole file once per volume, and above 100 volumes (or
+  with `useBigVec`) it wrote a `<file>.bigvec.tmp` next to the input that was
+  never deleted; otherwise it wrote a `.dat` copy to `$TMPDIR`. `readVec` now
+  decodes the file once, keeps the data in memory, writes nothing to disk, and
+  carries the file's full 3D space on the result as `volumeSpace`.
+  `getVolume(t)` uses that space. The time-first shape (`dim = [T, X, Y, Z]`)
+  is unchanged. `useBigVec` no longer changes behaviour, and `mask` is still
+  ignored.
 
 ## 0.5.0 - 2026-10-03
 
