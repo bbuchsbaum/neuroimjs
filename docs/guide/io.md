@@ -18,7 +18,7 @@ There are two NIfTI decoders, `readVol` (with `readVolList` and `readVec`, which
 They differ in storage types:
 
 - **Scaled data** become `Float32` (`FloatNeuroVol`) in `readVol` and `readVec`, but `Float64` (`Float64NeuroVol`) in `readNiftiArrayBuffer`, so scaled values can differ in the last float32 digits.
-- **Unscaled `UINT32` data** throw in `readVol` (`Unsupported TypedArray type: uint32`); `readNiftiArrayBuffer` promotes them losslessly to `Float64NeuroVol`. Unscaled `UINT16` data load as `UInt16NeuroVol` in both, but such a volume cannot be sliced or displayed yet.
+- **Unscaled `UINT32` data** throw in `readVol` (a `NeuroimError` with code `UNSUPPORTED_DATATYPE`, message `Unsupported TypedArray type: uint32`); `readNiftiArrayBuffer` promotes them losslessly to `Float64NeuroVol`. This gap is tracked separately. Unscaled `UINT16` data load as `UInt16NeuroVol` in both, and slice and display like any other datatype.
 
 ### Known differences from nibabel
 
@@ -55,7 +55,7 @@ await readVol('sub-01_T1w.nii.gz', { onProgress: p => console.log(`${Math.round(
 - `readVol` also accepts an `ArrayBuffer` in Node, gzipped or not. Gzip is detected from the bytes.
 - With a path, the file must exist, and the format is chosen from the extension. A path ending in `.nii.gz` is always gunzipped.
 - `readVolList` takes an **array of paths** and reads them one after another. To get every frame of a single 4D file, use `readVec` or loop over `readVol(path, { index })`.
-- `readVol` cannot load an **unscaled `UINT32`** file: it throws `Unsupported TypedArray type`. An unscaled `UINT16` file loads as `UInt16NeuroVol`, which cannot be sliced or displayed yet; convert it to `FloatNeuroVol` first. With intensity scaling active, both load as `FloatNeuroVol`.
+- `readVol` cannot load an **unscaled `UINT32`** file: it throws `UNSUPPORTED_DATATYPE` (`Unsupported TypedArray type: uint32`). Use `readNiftiArrayBuffer`, which promotes it to `Float64NeuroVol`. An unscaled `UINT16` file loads as `UInt16NeuroVol`. With intensity scaling active, both load as `FloatNeuroVol`.
 
 ### 4D time series: `readVec` {#_4d-time-series-readvec}
 
@@ -184,7 +184,7 @@ input.addEventListener('change', async () => {
 })
 ```
 
-`readNiftiArrayBuffer` is exported **only** from `neuroimjs/browser`. It is not in the main `neuroimjs` entry, because `nifti-reader-js` is ESM-only and a static import would break `require('neuroimjs')`. It returns the stored datatype (`Int16NeuroVol`, `FloatNeuroVol`, …). Scaled data come back as `Float64NeuroVol`, and `UINT32` is promoted to `Float64NeuroVol`. `UINT16` stays a `UInt16NeuroVol`, which loads fine but cannot be sliced or displayed yet; convert it to `FloatNeuroVol` first ([Volumes & Slices](/guide/volumes#dense-volumes)). It throws on invalid input, an out-of-range `index`, or truncated image data. It has no dependency on Node's `fs`, `path` or `Buffer`. To window the result for display, see the loader in [Getting Started](/guide/getting-started). To check that an overlay sits on the same grid as its template before drawing it, use `getVolumeGeometry` and `assertSameVolumeGeometry` ([Volumes & Slices](/guide/volumes#checking-that-volumes-share-a-grid)); overlays on a *different* grid are placed by world position ([Multi-Layer Alignment](/guide/alignment)).
+`readNiftiArrayBuffer` is exported **only** from `neuroimjs/browser`. It is not in the main `neuroimjs` entry, because `nifti-reader-js` is ESM-only and a static import would break `require('neuroimjs')`. It returns the stored datatype (`Int16NeuroVol`, `FloatNeuroVol`, …). Scaled data come back as `Float64NeuroVol`, and `UINT32` is promoted to `Float64NeuroVol`. `UINT16` stays a `UInt16NeuroVol`. It throws on invalid input, an out-of-range `index`, or truncated image data. It has no dependency on Node's `fs`, `path` or `Buffer`. To window the result for display, see the loader in [Getting Started](/guide/getting-started). To check that an overlay sits on the same grid as its template before drawing it, use `getVolumeGeometry` and `assertSameVolumeGeometry` ([Volumes & Slices](/guide/volumes#checking-that-volumes-share-a-grid)); overlays on a *different* grid are placed by world position ([Multi-Layer Alignment](/guide/alignment)).
 
 ## Formats
 

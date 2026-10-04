@@ -74,6 +74,22 @@ export type NumericTypedArray =
   | Float32Array
   | Float64Array;
 
+const NUMERIC_TYPED_ARRAYS = [
+  Int8Array,
+  Uint8Array,
+  Uint8ClampedArray,
+  Int16Array,
+  Uint16Array,
+  Int32Array,
+  Uint32Array,
+  Float32Array,
+  Float64Array,
+] as const;
+
+function isNumericTypedArray(value: unknown): value is NumericTypedArray {
+  return NUMERIC_TYPED_ARRAYS.some(Ctor => value instanceof Ctor);
+}
+
 /**
  * Range validation result
  */
@@ -457,12 +473,14 @@ export class ColorMap {
   /**
    * Maps a numeric array to a Float32Array of color components (RGB or RGBA).
    * This is often used for GPU-based rendering or custom shader pipelines.
-   * @param values An array or Float32Array of scalar values.
+   * @param values An array or numeric TypedArray (any voxel datatype) of scalar values.
    * @returns A Float32Array of length = values.length * (3 or 4).
    */
-  getColorArray(values: number[] | Float32Array): Float32Array {
-    if (!(Array.isArray(values) || values instanceof Float32Array) || values.length === 0) {
-      throw new TypeError('Values must be a non-empty array or Float32Array');
+  getColorArray(values: number[] | NumericTypedArray): Float32Array {
+    // Accept every numeric TypedArray, as fillImageData() does, so slices of
+    // integer volumes (uint8/int16/uint16/...) can be colour-mapped directly.
+    if (!(Array.isArray(values) || isNumericTypedArray(values)) || values.length === 0) {
+      throw new TypeError('Values must be a non-empty array or numeric TypedArray');
     }
 
     const componentsPerColor = this._hasAlpha ? 4 : 3;

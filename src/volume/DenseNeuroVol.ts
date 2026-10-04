@@ -8,6 +8,7 @@ import { VoxelIterator, computeVoxelMapping } from './VoxelIterator';
 import { createNeuroSlice } from './NeuroIm';
 import { CoronalVoxelIterator, SagittalVoxelIterator } from './VoxelIterator';
 import { extractSliceForView } from '../geometry/SliceHelpers';
+import { NeuroimError } from '../errors';
 
 function assertTypedArray(arr: TypedArray): Float32Array | Uint8Array | Int16Array | Float64Array | Int32Array | Uint16Array | Int8Array {
   if (arr instanceof Float32Array || arr instanceof Uint8Array || arr instanceof Int16Array || 
@@ -15,7 +16,7 @@ function assertTypedArray(arr: TypedArray): Float32Array | Uint8Array | Int16Arr
     arr instanceof Int8Array) {
     return arr;
   }
-  throw new Error('Unsupported TypedArray type');
+  throw new NeuroimError('UNSUPPORTED_DATATYPE', `Unsupported TypedArray type: ${arr.constructor.name}`);
 }
 
 export abstract class DenseNeuroVol implements NeuroVol {
@@ -351,7 +352,7 @@ export abstract class DenseNeuroVol implements NeuroVol {
     }
 
     const slice = createNeuroSlice(
-      this.getSliceTypedArrayType() as 'float32' | 'uint8' | 'int16' | 'float64' | 'int32' | 'int8' | 'uint16',
+      this.getSliceTypedArrayType(),
       dropped as NeuroSpace,
       assertTypedArray(sliceData)
     );
