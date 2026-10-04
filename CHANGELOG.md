@@ -7,19 +7,6 @@ in the pull request that makes the change.
 
 ## Unreleased
 
-### Fixed
-
-- `readVec` kept only spacing and origin from the file, so `getVolume(t)` and
-  `vols()` dropped the rotation of an oblique affine. It also re-read and
-  re-decompressed the whole file once per volume, and above 100 volumes (or
-  with `useBigVec`) it wrote a `<file>.bigvec.tmp` next to the input that was
-  never deleted; otherwise it wrote a `.dat` copy to `$TMPDIR`. `readVec` now
-  decodes the file once, keeps the data in memory, writes nothing to disk, and
-  carries the file's full 3D space on the result as `volumeSpace`.
-  `getVolume(t)` uses that space. The time-first shape (`dim = [T, X, Y, Z]`)
-  is unchanged. `useBigVec` no longer changes behaviour, and `mask` is still
-  ignored.
-
 ### Added
 
 - `BigNeuroVec` accepts `storage: 'memory'` (no backing file), `volumeSpace`
@@ -34,6 +21,23 @@ in the pull request that makes the change.
   `volumeSpace`; an empty selection throws a `ValueError`.
 - Flushing a file-backed `BigNeuroVec` after `close()` throws instead of
   failing with `EBADF`; a second `close()` is a no-op.
+- Releases are published from CI by the `Release` workflow, triggered by a
+  GitHub release, using npm Trusted Publishing (OIDC) with a provenance
+  attestation; `scripts/verify-published.mjs` checks that the registry
+  tarball matches the CI build file for file. See `RELEASING.md`.
+
+### Fixed
+
+- `readVec` kept only spacing and origin from the file, so `getVolume(t)` and
+  `vols()` dropped the rotation of an oblique affine. It also re-read and
+  re-decompressed the whole file once per volume, and above 100 volumes (or
+  with `useBigVec`) it wrote a `<file>.bigvec.tmp` next to the input that was
+  never deleted; otherwise it wrote a `.dat` copy to `$TMPDIR`. `readVec` now
+  decodes the file once, keeps the data in memory, writes nothing to disk, and
+  carries the file's full 3D space on the result as `volumeSpace`.
+  `getVolume(t)` uses that space. The time-first shape (`dim = [T, X, Y, Z]`)
+  is unchanged. `useBigVec` no longer changes behaviour, and `mask` is still
+  ignored.
 
 ## 0.5.0 - 2026-10-03
 
