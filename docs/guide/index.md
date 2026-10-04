@@ -31,7 +31,7 @@ The browser entry deliberately excludes Node-only code so bundlers don't choke o
 
 ## A note on maturity
 
-neuroimjs is **pre-1.0 (`0.1.0`)**. The viewer stack and the core geometry/volume types are dependable; some I/O and processing paths have known bugs, and a handful of advertised APIs are still aspirational. We track this transparently — see **[Stability & Roadmap](/guide/stability)** so you always know what's safe to build on.
+neuroimjs is **pre-1.0 (`0.5.0`)**. The viewer stack and the core geometry/volume types are dependable; some I/O and processing paths have known bugs, and a handful of advertised APIs are still aspirational. We track this transparently — see **[Stability & Roadmap](/guide/stability)** so you always know what's safe to build on.
 
 ## Next steps
 

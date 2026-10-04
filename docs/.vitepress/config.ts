@@ -4,6 +4,9 @@ import { readFileSync } from 'node:fs'
 
 // Deployed at https://bbuchsbaum.github.io/neuroimjs/
 const base = '/neuroimjs/'
+const version: string = JSON.parse(
+  readFileSync(fileURLToPath(new URL('../../package.json', import.meta.url)), 'utf-8'),
+).version
 
 // TypeDoc (via typedoc-vitepress-theme) writes the API sidebar here on `docs:api`.
 // Load it defensively so `vitepress dev` works even before the first generation.
@@ -28,7 +31,8 @@ export default defineConfig({
     'Neuroimaging for JavaScript — volumetric data, NIfTI I/O, spatial transforms, and live WebGL brain viewers, in the browser and Node.',
   cleanUrls: true,
   lastUpdated: true,
-  ignoreDeadLinks: true,
+  // API pages are generated; everything else must link to a real page.
+  ignoreDeadLinks: [/^\/api\//],
 
   head: [
     ['link', { rel: 'icon', type: 'image/svg+xml', href: `${base}favicon.svg` }],
@@ -53,7 +57,7 @@ export default defineConfig({
       { text: 'Examples', link: '/examples/', activeMatch: '/examples/' },
       { text: 'API', link: '/api/', activeMatch: '/api/' },
       {
-        text: 'v0.1.0',
+        text: `v${version}`,
         items: [
           { text: 'Release Notes', link: 'https://github.com/bbuchsbaum/neuroimjs/releases' },
           { text: 'npm', link: 'https://www.npmjs.com/package/neuroimjs' },
@@ -78,6 +82,8 @@ export default defineConfig({
           collapsed: false,
           items: [
             { text: 'Data Structures', link: '/guide/concepts' },
+            { text: 'Volumes & Slices', link: '/guide/volumes' },
+            { text: 'Time Series & Hypervectors', link: '/guide/time-series' },
             { text: 'Coordinate Systems', link: '/guide/coordinate-systems' },
             { text: 'Reading & Writing (I/O)', link: '/guide/io' },
           ],
@@ -88,6 +94,8 @@ export default defineConfig({
           items: [
             { text: 'Spatial & Resampling', link: '/guide/processing' },
             { text: 'Statistics & Searchlight', link: '/guide/analysis' },
+            { text: 'Regions of Interest', link: '/guide/roi' },
+            { text: 'Group Statistics & Review', link: '/guide/group-stats' },
           ],
         },
         {
@@ -95,8 +103,10 @@ export default defineConfig({
           collapsed: false,
           items: [
             { text: 'Viewers', link: '/guide/viewers' },
-            { text: 'Composable Views', link: '/guide/composable-views' },
             { text: 'Colormaps & Layers', link: '/guide/colormaps' },
+            { text: 'Composable Views', link: '/guide/composable-views' },
+            { text: 'UI Controls', link: '/guide/controls' },
+            { text: 'Custom Layers', link: '/guide/custom-layers' },
           ],
         },
       ],
@@ -105,6 +115,7 @@ export default defineConfig({
           text: 'Live Examples',
           items: [
             { text: 'Overview', link: '/examples/' },
+            { text: 'Full Viewer with Controls', link: '/examples/viewer-workbench' },
             { text: 'Orthogonal Viewer', link: '/examples/orthogonal-viewer' },
             { text: 'Single Slice View', link: '/examples/single-view' },
           ],
@@ -130,12 +141,23 @@ export default defineConfig({
     outline: { level: [2, 3] },
   },
 
+  vue: {
+    template: {
+      // Lit web components shipped by the library (e.g. <layer-control-panel>).
+      compilerOptions: { isCustomElement: (tag) => tag.includes('-panel') },
+    },
+  },
+
   vite: {
     resolve: {
-      alias: {
-        // The live demos import the library straight from source (browser-safe entry).
-        neuroimjs: fileURLToPath(new URL('../../src/browser.ts', import.meta.url)),
-      },
+      alias: [
+        // The live demos import the library straight from source. Both specifiers
+        // resolve to the browser-safe entry, so demos never pull in Node modules.
+        {
+          find: /^neuroimjs(\/browser)?$/,
+          replacement: fileURLToPath(new URL('../../src/browser.ts', import.meta.url)),
+        },
+      ],
     },
     optimizeDeps: {
       include: ['pixi.js', 'mobx', 'chroma-js', 'nifti-reader-js'],
