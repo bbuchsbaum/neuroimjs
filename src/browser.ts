@@ -37,6 +37,10 @@ export type {
 export { ColorMapFactory } from './display/ColorMapFactory';
 export type { PresetConfig } from './display/ColorMapFactory';
 
+// Typed errors: branch on `error.code` via isNeuroimError(error, code).
+export { NeuroimError, NeuroimTypeError, isNeuroimError, NEUROIM_ERROR_CODES } from './errors';
+export type { NeuroimErrorCode, NeuroimErrorOptions } from './errors';
+
 export { AxisSet1D, AxisSet2D, AxisSet3D, NamedAxis } from './geometry/Axis';
 export { NeuroSpace } from './geometry/NeuroSpace';
 export { getVolumeGeometry, assertSameVolumeGeometry } from './geometry/VolumeGeometry';

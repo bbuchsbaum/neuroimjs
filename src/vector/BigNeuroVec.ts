@@ -2,7 +2,7 @@ import { NeuroVec } from '../vec/NeuroVec';
 import { NeuroSpace } from '../geometry/NeuroSpace';
 import { NeuroVol } from '../volume/NeuroVol';
 import { FloatNeuroVol } from '../volume/DenseNeuroVol';
-import { ValueError, TypeError, TypedArray } from '../types';
+import { ValueError, TypedArray } from '../types';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
