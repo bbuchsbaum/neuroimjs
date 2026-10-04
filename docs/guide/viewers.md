@@ -62,6 +62,27 @@ viewer.removeLayer('stat')
 
 See **[Colormaps & Layers](/guide/colormaps)** for thresholding and opacity, and **[Multi-Layer Alignment](/guide/alignment)** for overlays on a different voxel grid from the first layer.
 
+## Styling
+
+Restyle a running viewer in place, without rebuilding it. Colours are PIXI numeric colours (`0xRRGGBB`); omitted fields keep their current value.
+
+```ts
+viewer.setBackground(0x111619)        // clear colour of every view (optional alpha second)
+viewer.setCrosshairStyle({ crossColor: 0x22d3ee, crossAlpha: 0.8, crossThickness: 1, crosshairGap: 4 })
+viewer.setOrientationLabelStyle({ color: 0xffffff, fontSize: 14, alpha: 0.9 })
+
+// Or all at once, e.g. when switching between light and dark themes
+viewer.setTheme({
+  backgroundColor: 0xfafaf7,
+  crosshair: { crossColor: 0x1c2226, haloColor: 0xffffff, haloAlpha: 0.6 },
+  orientationLabels: { color: 0x3e4952, shadowAlpha: 0 },
+})
+
+const canvas = viewer.getCanvas('axial')   // the view's <canvas>, e.g. for screenshots
+```
+
+`setTheme` takes a `ViewerTheme` (`backgroundColor`, `backgroundAlpha`, `crosshair`, `orientationLabels`) and is also available on `SingleSliceViewer`, together with `setBackground`, `setCrosshairStyle` and `setOrientationLabelStyle`. The same styles can be given at construction through the `backgroundColor`, `crosshairOptions` and `orientationLabelOptions` options. `toDataURL(view, type?, quality?)` exports one view as a PNG (or JPEG/WebP) data URL.
+
 ## When to use which
 
 | Use | Reach for |

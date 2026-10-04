@@ -2,17 +2,22 @@
 
 neuroimjs reads NIfTI-1 and NIfTI-2 (`.nii`, `.nii.gz`) and writes NIfTI-1. There are two decoders, one per entry point:
 
-| | Browser (`neuroimjs/browser`) | Node (`neuroimjs`) |
+| | Browser (`neuroimjs/browser`) | Node (`neuroimjs` or `neuroimjs/io`) |
 |---|---|---|
 | Read a 3D volume | `readNiftiArrayBuffer(buffer, { index })` (synchronous) | `readVol(pathOrBuffer, { index })` (async) |
 | Read a 4D series | call `readNiftiArrayBuffer` once per `index` | `readVec(path)` |
 | Write | — | `writeVol`, `writeVec` |
 
-Both decoders apply the same rules, so the same file gives the same values and geometry in either environment:
+Both decoders share these rules:
 
 - **Intensity scaling.** Values become `stored * scl_slope + scl_inter`. A `scl_slope` of 0 or a non-finite slope means "no scaling": the stored values come back unchanged and `scl_inter` is ignored too, as in the NIfTI-1 spec and nibabel.
 - **Byte order.** Big-endian files are byte-swapped on read.
-- **Geometry.** The volume's `NeuroSpace` carries the full affine (`space.trans`). `space.spacing` holds the voxel sizes implied by that affine (the norms of its first three columns, as nibabel's `voxel_sizes(img.affine)` computes), not the raw `pixdim`. The axis orientation is the one nearest the affine.
+- **Geometry.** The volume's `NeuroSpace` carries the full affine (`space.trans`). `space.spacing` holds the voxel sizes implied by that affine (the norms of its first three columns, as nibabel's `voxel_sizes(img.affine)` computes), not the raw `pixdim`. The axis orientation is the one nearest the affine. The affine comes from nifti-reader-js, whose transform choice differs from nibabel's in three cases (see the [conformance notes](https://github.com/bbuchsbaum/neuroimjs/blob/main/tests/conformance/README.md) and the transform-selection ADR in [PR #19](https://github.com/bbuchsbaum/neuroimjs/pull/19)): when `qform_code > sform_code > 0` it uses the qform where nibabel uses the sform; a file with neither transform gets `diag(pixdim)` with a zero offset instead of nibabel's centred base affine; and a NIfTI-2 file with only a qform fails to load.
+
+They differ in storage types:
+
+- **Scaled data** become `Float32` (`FloatNeuroVol`) in `readVol` and `readVec`, but `Float64` (`Float64NeuroVol`) in `readNiftiArrayBuffer`, so scaled values can differ in the last float32 digits.
+- **uint32 data** throw in `readVol` (`Unsupported TypedArray type: uint32`); `readNiftiArrayBuffer` promotes them losslessly to `Float64NeuroVol`.
 
 ## Loading data in the browser
 
@@ -148,7 +153,7 @@ await writeVec(vec, 'bold_copy.nii.gz', { compress: true })
 ```
 
 ::: warning Compression is not inferred from the file name
-`writeVol` and `writeVec` gzip the output only when you pass `{ compress: true }` (or `format: 'NIFTI_GZ'`). Writing to a `.nii.gz` path without it produces an uncompressed file with a `.gz` name, which `readVol` then cannot read.
+`writeVol` and `writeVec` gzip the output only when you pass `{ compress: true }` (or `format: 'NIFTI_GZ'`). Writing to a `.nii.gz` path without it produces an uncompressed file with a `.gz` name, which `readVol` then cannot read (bug, tracked: mote bd-01M4298YPGHKDWBSV61RAMF2VB).
 :::
 
 The output is a single-file NIfTI-1 image. `dataType` (for example `'FLOAT32'` or `'INT16'`) selects the stored type.

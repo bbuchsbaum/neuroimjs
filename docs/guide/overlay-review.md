@@ -2,7 +2,7 @@
 
 The overlay review tools are for quality-checking a group analysis: step through each subject's statistical map over a common template, compare it with the group, and spot subjects that disagree. <span class="stability-badge experimental">experimental</span>
 
-There are three layers, usable separately:
+There are three parts, usable separately:
 
 | Piece | Entry point | Role |
 |---|---|---|

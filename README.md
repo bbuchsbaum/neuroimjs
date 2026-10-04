@@ -2,19 +2,19 @@
 
 A comprehensive neuroimaging library for JavaScript/TypeScript that provides tools for loading, processing, visualizing, and analyzing brain imaging data in the browser and Node.js.
 
-> 📖 **[Documentation & live demos →](https://bbuchsbaum.github.io/neuroimjs/)** — interactive brain viewers, guides, and the full API reference.
+> **[Documentation & live demos →](https://bbuchsbaum.github.io/neuroimjs/)** — interactive brain viewers, guides, and the full API reference.
 >
-> ⚠️ **Pre-1.0.** Minor releases can still change the API; see [CHANGELOG.md](CHANGELOG.md). The viewers, core data structures and NIfTI I/O are tested and dependable. Some modules are experimental or missing (for example, there is no AFNI reader); the **[Stability matrix](https://bbuchsbaum.github.io/neuroimjs/guide/stability)** lists the status of each.
+> **Pre-1.0.** Minor releases can still change the API; see [CHANGELOG.md](CHANGELOG.md). The viewers, core data structures and NIfTI I/O are tested and dependable. Some modules are experimental or missing (for example, there is no AFNI reader); the **[Stability matrix](https://bbuchsbaum.github.io/neuroimjs/guide/stability)** lists the status of each.
 
 ## Features
 
-- 🧠 **NIfTI I/O** - Read NIfTI-1/2 (`.nii`, `.nii.gz`) in the browser and Node, write NIfTI-1 from Node, with intensity scaling and affine geometry
-- 📊 **3D/4D Data** - Dense, sparse, clustered and logical volumes; 4D time series; experimental 5D+ containers
-- 🎨 **Interactive Visualization** - WebGL-based 2D slice viewers with PIXI.js
-- 🔄 **Spatial Filtering** - Advanced filtering, resampling, and interpolation
-- 📈 **Statistical Analysis** - Searchlight analysis, clustering, and statistical operations
-- 🏗️ **Composable Views** - Build custom viewer layouts for external applications
-- 👥 **Group Overlay Review** - Browse per-subject maps over a template with live group summaries
+- **NIfTI I/O** - Read NIfTI-1/2 (`.nii`, `.nii.gz`) in the browser and Node, write NIfTI-1 from Node, with intensity scaling and affine geometry
+- **3D/4D Data** - Dense, sparse, clustered and logical volumes; 4D time series; experimental 5D+ containers
+- **Interactive Visualization** - WebGL-based 2D slice viewers with PIXI.js
+- **Spatial Filtering** - Advanced filtering, resampling, and interpolation
+- **Statistical Analysis** - Searchlight analysis, clustering, and statistical operations
+- **Composable Views** - Build custom viewer layouts for external applications
+- **Group Overlay Review** - Browse per-subject maps over a template with live group summaries
 
 ## Installation
 
@@ -82,10 +82,10 @@ axial.onCoordChange(coord => {
 ```
 
 **Why use composable views?**
-- 🎯 Place views in any custom panel layout
-- 🔗 Wire views across different windows or applications
-- ⚙️ Full control over synchronization behavior
-- 📡 Event-driven coordination with type-safe APIs
+- Place views in any custom panel layout
+- Wire views across different windows or applications
+- Full control over synchronization behavior
+- Event-driven coordination with type-safe APIs
 
 See the [Composable Views Guide](https://bbuchsbaum.github.io/neuroimjs/guide/composable-views) for complete documentation.
 

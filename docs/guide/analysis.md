@@ -1,6 +1,6 @@
 # Statistics & Searchlight
 
-neuroimjs includes analysis primitives that run anywhere JavaScript does — useful for in-browser exploration or lightweight Node pipelines.
+neuroimjs includes analysis primitives for Node pipelines and in-page exploration. Everything on this page is exported from `neuroimjs`. The browser entry, `neuroimjs/browser`, exports only the searchlights (`searchlightIterator` and its variants) and the ROI classes (`ROICoords`, `ROIVol`, `ROIVec`); `ConnectedComponents`, `clusterTable`, `StatFunctions`, `partition`, `sphericalROI` and the other helpers below are not in it.
 
 ## Searchlight
 

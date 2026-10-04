@@ -12,12 +12,12 @@ Legend:
 
 | Feature | Status | Notes |
 |---|---|---|
-| `readVol` (Node: path or `ArrayBuffer`) | <span class="stability-badge stable">stable</span> | NIfTI-1 and NIfTI-2, `.nii` and `.nii.gz`. Applies `scl_slope`/`scl_inter` (a zero or non-finite slope means no scaling), byte-swaps big-endian data, and takes `space.spacing` from the affine. Checked against nibabel-generated fixtures (`npm run test:conformance`). |
-| `readNiftiArrayBuffer` (browser) | <span class="stability-badge stable">stable</span> | The browser loader; same scaling, byte-order and geometry rules as `readVol`. See [Loading data in the browser](/guide/io#loading-data-in-the-browser). |
+| `readVol` (Node: path or `ArrayBuffer`) | <span class="stability-badge stable">stable</span> | NIfTI-1 and NIfTI-2, `.nii` and `.nii.gz`. Applies `scl_slope`/`scl_inter` (a zero or non-finite slope means no scaling), byte-swaps big-endian data, and takes `space.spacing` from the affine. Checked against nibabel-generated fixtures (`npm run test:conformance`). Known discrepancies: uint32 files throw; the qform wins when `qform_code > sform_code` (nibabel prefers the sform); files with no transform get `diag(pixdim)`, not nibabel's base affine; NIfTI-2 qform-only files throw. See the [conformance notes](https://github.com/bbuchsbaum/neuroimjs/blob/main/tests/conformance/README.md). |
+| `readNiftiArrayBuffer` (browser) | <span class="stability-badge stable">stable</span> | The browser loader; same scaling, byte-order and geometry rules as `readVol`, and the same transform-selection discrepancies except that uint32 is supported (promoted to Float64). Scaled data are Float64. See [Loading data in the browser](/guide/io#loading-data-in-the-browser). |
 | `readHeader` | <span class="stability-badge stable">stable</span> | Raw header fields; `spacing` is the raw `pixdim[1..3]`. |
 | `readVolList` | <span class="stability-badge stable">stable</span> | Reads a list of files, one `readVol` each. |
 | `readVec` | <span class="stability-badge stable">stable</span> | 4D in memory. Keeps the legacy time-first shape (`dim = [T, X, Y, Z]`); the 3D geometry is on `volumeSpace`. `mask` is ignored. |
-| `writeVol` / `writeVec` | <span class="stability-badge stable">stable</span> | NIfTI-1 single file. Gzip only when you pass `{ compress: true }`; a `.gz` extension alone does not compress. |
+| `writeVol` / `writeVec` | <span class="stability-badge stable">stable</span> | NIfTI-1 single file. Gzip only when you pass `{ compress: true }`; a `.gz` extension alone does not compress (bug, tracked: mote bd-01M4298YPGHKDWBSV61RAMF2VB). |
 | NIfTI dual-file (`.hdr`/`.img`) | <span class="stability-badge aspirational">unavailable</span> | A format descriptor exists, but `readVol` cannot read the pair and `writeVol` rejects the format. |
 | AFNI (`.HEAD`/`.BRIK`) | <span class="stability-badge aspirational">unavailable</span> | Only a format descriptor (`AFNIFormat`) used for file-name matching. There is no AFNI reader or writer. |
 

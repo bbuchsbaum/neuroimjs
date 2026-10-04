@@ -60,7 +60,7 @@ console.log('spacing (mm):', vol.space.spacing) // e.g. [1, 1, 1]
 const value = vol.getAt(96, 114, 96)
 ```
 
-`readVol` applies NIfTI intensity scaling (`scl_slope` / `scl_inter`) and handles big-endian data for you, so the values you read are already scaled. It follows the same rules as the browser loader.
+`readVol` applies NIfTI intensity scaling (`scl_slope` / `scl_inter`) and handles big-endian data for you, so the values you read are already scaled. It shares the browser loader's scaling and geometry rules, with two differences in storage: scaled data come back as Float32 rather than Float64, and uint32 files are not supported ([details](/guide/io)).
 
 ## Where to go next
 
