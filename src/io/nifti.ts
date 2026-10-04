@@ -9,9 +9,10 @@ export type { ReadVolOptions, WriteVolOptions, HeaderInfo } from './io';
 /**
  * Read a NIfTI file and return a NeuroVol.
  *
- * Thin wrapper over {@link readVol} kept for backward compatibility. The single
- * source of truth for NIfTI parsing (scl_slope/scl_inter scaling, endianness,
- * affine reconstruction, gzip) lives in `io.ts`.
+ * Thin wrapper over {@link readVol} kept for backward compatibility. There are
+ * two NIfTI decoders: `io.ts` (`readVol`, Node entry) and `browserNifti.ts`
+ * (`readNiftiArrayBuffer`, browser entry). Both take intensity scaling and
+ * affine voxel sizes from the shared helpers in `niftiGeometry.ts`.
  *
  * @param input - Path to the NIfTI file or an ArrayBuffer of its bytes.
  */

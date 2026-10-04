@@ -9,7 +9,26 @@ neuroimjs reads single-file **NIfTI** (`.nii`, `.nii.gz`; NIfTI-1 and NIfTI-2) a
 | Header only | `readHeader(path)` | — |
 | Write | `writeVol`, `writeVec` | — |
 
-All readers apply `scl_slope`/`scl_inter`, byte-swap big-endian data, and build the `NeuroSpace` from the file's affine. A slope of 0 (or NaN) is treated as 1, but a non-zero `scl_inter` is still added. This departs from the NIfTI spec, which ignores both fields when the slope is 0.
+There are two NIfTI decoders, `readVol` (with `readVolList` and `readVec`, which use the same code) and `readNiftiArrayBuffer`. They share these rules:
+
+- **Intensity scaling.** Values become `stored * scl_slope + scl_inter`. A `scl_slope` of 0 or a non-finite slope means "no scaling": the stored values come back unchanged and `scl_inter` is ignored too, as in the NIfTI-1 spec and nibabel.
+- **Byte order.** Big-endian files are byte-swapped on read.
+- **Geometry.** The volume's `NeuroSpace` carries the full affine (`space.trans`). `space.spacing` holds the voxel sizes implied by that affine (the norms of its first three columns, as nibabel's `voxel_sizes(img.affine)` computes), not the raw `pixdim`. The axis orientation is the one nearest the affine.
+
+They differ in storage types:
+
+- **Scaled data** become `Float32` (`FloatNeuroVol`) in `readVol` and `readVec`, but `Float64` (`Float64NeuroVol`) in `readNiftiArrayBuffer`, so scaled values can differ in the last float32 digits.
+- **Unscaled `UINT32` data** throw in `readVol` (`Unsupported TypedArray type: uint32`); `readNiftiArrayBuffer` promotes them losslessly to `Float64NeuroVol`. Unscaled `UINT16` data load as `UInt16NeuroVol` in both, but such a volume cannot be sliced or displayed yet.
+
+### Known differences from nibabel
+
+Reading is checked against nibabel-generated fixtures (`npm run test:conformance`). The affine comes from nifti-reader-js, whose transform choice differs from nibabel's in three cases (see the [conformance notes](https://github.com/bbuchsbaum/neuroimjs/blob/main/tests/conformance/README.md) and the transform-selection ADR in [PR #19](https://github.com/bbuchsbaum/neuroimjs/pull/19)):
+
+- when `qform_code > sform_code > 0`, neuroimjs uses the qform where nibabel uses the sform;
+- a file with neither transform gets `diag(pixdim)` with a zero offset instead of nibabel's centred base affine;
+- a NIfTI-2 file with only a qform fails to load.
+
+The `UINT32` gap in `readVol` (above) is the fourth known discrepancy.
 
 ## Node: read from disk
 
@@ -36,8 +55,29 @@ await readVol('sub-01_T1w.nii.gz', { onProgress: p => console.log(`${Math.round(
 - `readVol` also accepts an `ArrayBuffer` in Node, gzipped or not. Gzip is detected from the bytes.
 - With a path, the file must exist, and the format is chosen from the extension. A path ending in `.nii.gz` is always gunzipped.
 - `readVolList` takes an **array of paths** and reads them one after another. To get every frame of a single 4D file, use `readVec` or loop over `readVol(path, { index })`.
-- `readVol` cannot load an **unscaled `UINT16` or `UINT32`** file: it throws `Unsupported TypedArray type`. With intensity scaling active, both load as `FloatNeuroVol`. In the browser, `readNiftiArrayBuffer` handles both (see below).
-- `readVec` returns a **`BigNeuroVec` whose `space.dim` is `[T, X, Y, Z]`**. It re-reads the file once per frame and stages data in temporary files. It also loses geometry. Up to 100 frames, the 4D space keeps the voxel spacing and origin but drops the affine, and the time axis gets spacing 1 (the TR is not read). Above 100 frames, or with `useBigVec: true`, the space is `[1, 1, 1, 1]` spacing at origin `[0, 0, 0, 0]`. Read [Time Series → BigNeuroVec](/guide/time-series#bigneurovec-what-readvec-returns) before using it.
+- `readVol` cannot load an **unscaled `UINT32`** file: it throws `Unsupported TypedArray type`. An unscaled `UINT16` file loads as `UInt16NeuroVol`, which cannot be sliced or displayed yet; convert it to `FloatNeuroVol` first. With intensity scaling active, both load as `FloatNeuroVol`.
+
+### 4D time series: `readVec` {#_4d-time-series-readvec}
+
+```ts
+import { readVec, BigNeuroVec } from 'neuroimjs'
+
+// readVec is typed as returning NeuroVec; the object is a BigNeuroVec,
+// which is the type that declares volumeSpace.
+const vec = (await readVec('bold.nii.gz')) as BigNeuroVec
+
+const [nT, nX, nY, nZ] = vec.dim       // time first: [T, X, Y, Z]
+const ts = vec.getSeries(32, 32, 20)    // nT values at voxel (32, 32, 20)
+const first = vec.getVolume(0)          // a 3D NeuroVol with the file's geometry
+const geometry = vec.volumeSpace        // the file's 3D NeuroSpace, full affine
+```
+
+`readVec` decodes the file once and keeps the data in memory; it writes nothing to disk. Two things to know:
+
+- **The shape is time-first.** For compatibility, `vec.dim` and `vec.space.dim` are `[T, X, Y, Z]`, and `vec.getAt(i, j, k, t)` indexes voxel `(i, j, k)` at time `t`. Because `vec.space` treats the leading three entries as spatial, it does **not** describe the image geometry. The TR is not read.
+- **Use `volumeSpace` for geometry.** `vec.volumeSpace` is the file's 3D space, including the full affine; `getVolume(t)` returns volumes on that space.
+
+`options.indices` reads a subset of volumes. `options.mask` is accepted but currently ignored, and `useBigVec` no longer changes anything. See [Time Series → BigNeuroVec](/guide/time-series#bigneurovec-what-readvec-returns).
 
 ## Node: write
 
@@ -55,7 +95,7 @@ hdr.datatype // 'FLOAT32'
 ```
 
 ::: warning Compression is not inferred from the file name
-`writeVol` gzips only when you pass `{ compress: true }`. `writeVol(vol, 'x.nii.gz')` without it writes **uncompressed** bytes under a `.gz` name. `readVol` and `readHeader` then fail on that file, because they gunzip anything named `.nii.gz`.
+`writeVol` and `writeVec` gzip only when you pass `{ compress: true }` (or `format: 'NIFTI_GZ'`). `writeVol(vol, 'x.nii.gz')` without it writes **uncompressed** bytes under a `.gz` name. `readVol` and `readHeader` then fail on that file, because they gunzip anything named `.nii.gz` (bug, tracked: mote bd-01M4298YPGHKDWBSV61RAMF2VB).
 :::
 
 `writeVol` options:
@@ -121,7 +161,7 @@ const { axial, sagittal, coronal } = extractOrthogonalSlices(vol, centre)
 
 `npm run test:package` checks the compiled import graph of each subpath, then imports it from the packed tarball in plain Node (ESM and CommonJS). It fails if the graph reaches a display module or any package other than Node built-ins, `ml-matrix`, `pako`, `nifti-reader-js` and `buffer`, or if pixi.js, `@pixi/*`, mobx or lit is resolved at run time. It also type-checks the subpaths under NodeNext, Bundler and node10. These subpaths are an interim measure. A later release is planned to split the package into separate core and viewer entries; the intent is to keep these subpaths working after that split.
 
-## Browser: `readNiftiArrayBuffer`
+## Browser: `readNiftiArrayBuffer` {#loading-data-in-the-browser}
 
 The browser entry has no file system and does not export `readVol`. Fetch or read the bytes yourself, then decode them synchronously:
 
@@ -145,7 +185,7 @@ input.addEventListener('change', async () => {
 })
 ```
 
-`readNiftiArrayBuffer` is exported **only** from `neuroimjs/browser`. It is not in the main `neuroimjs` entry, because `nifti-reader-js` is ESM-only and a static import would break `require('neuroimjs')`. It returns the stored datatype (`Int16NeuroVol`, `FloatNeuroVol`, …). Scaled data come back as `Float64NeuroVol`, and `UINT32` is promoted to `Float64NeuroVol`. `UINT16` stays a `UInt16NeuroVol`, which loads fine but cannot be sliced or displayed yet; convert it to `FloatNeuroVol` first ([Volumes & Slices](/guide/volumes#dense-volumes)). It throws on invalid input, an out-of-range `index`, or truncated image data. To window the result for display, see the loader in [Getting Started](/guide/getting-started).
+`readNiftiArrayBuffer` is exported **only** from `neuroimjs/browser`. It is not in the main `neuroimjs` entry, because `nifti-reader-js` is ESM-only and a static import would break `require('neuroimjs')`. It returns the stored datatype (`Int16NeuroVol`, `FloatNeuroVol`, …). Scaled data come back as `Float64NeuroVol`, and `UINT32` is promoted to `Float64NeuroVol`. `UINT16` stays a `UInt16NeuroVol`, which loads fine but cannot be sliced or displayed yet; convert it to `FloatNeuroVol` first ([Volumes & Slices](/guide/volumes#dense-volumes)). It throws on invalid input, an out-of-range `index`, or truncated image data. It has no dependency on Node's `fs`, `path` or `Buffer`. To window the result for display, see the loader in [Getting Started](/guide/getting-started). To check that an overlay sits on the same grid as its template before drawing it, use `getVolumeGeometry` and `assertSameVolumeGeometry` ([Volumes & Slices](/guide/volumes#checking-that-volumes-share-a-grid)); overlays on a *different* grid are placed by world position ([Multi-Layer Alignment](/guide/alignment)).
 
 ## Formats
 

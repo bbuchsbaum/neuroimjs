@@ -23,7 +23,7 @@ const axial = await SingleSliceViewer.createAxial(container, stack, {
 
 Import from `neuroimjs/browser` in browser apps, and take every other neuroimjs import in the app from the same entry; see [Don't mix entry points](/guide/viewers#simpleorthogonalviewer).
 
-There are matching factories `createSagittal` and `createCoronal`, plus `create(container, stack, orientation, options)` for any `AxisSet3D` (e.g. `AxisSet3D.AXIAL_RPI` for radiological display).
+There are matching factories `createSagittal` and `createCoronal`, plus `create(container, stack, orientation, options)` for any `AxisSet3D` (the standard ones are also exported as `AXIAL_LPI`, `CORONAL_LIP` and `SAGITTAL_AIL`; e.g. `AxisSet3D.AXIAL_RPI` for radiological display).
 
 | Option | Default | Notes |
 |---|---|---|

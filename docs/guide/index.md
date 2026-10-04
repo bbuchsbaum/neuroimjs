@@ -23,18 +23,19 @@ If you know [nilearn](https://nilearn.github.io/) or [NiBabel](https://nipy.org/
 
 | | Browser | Node.js |
 |---|---|---|
-| Entry point | `neuroimjs/browser` (or the `browser` export) | `neuroimjs` |
-| Strength | Interactive WebGL viewers, in-page analysis | File I/O, batch processing, slice extraction |
-| Excludes | `fs`, `canvas` (Node-only modules) | nothing |
+| Entry point | `neuroimjs/browser` | `neuroimjs` |
+| Strength | Interactive WebGL viewers, in-page loading and review | File I/O, processing, statistics, slice extraction |
+| Leaves out | File-path I/O (`readVol`, `writeVol`, …), the processing and statistics modules, Node-only dependencies | `readNiftiArrayBuffer`, `SubjectOverlayViewer`, `OverlayReviewPanel`, `LayerControlPanel` |
 
-The browser entry deliberately excludes Node-only code so bundlers don't choke on `fs`.
+The browser entry is a display-focused subset that keeps Node-only code out of browser bundles. It also has a few exports the Node entry lacks: the [`readNiftiArrayBuffer`](/guide/io#loading-data-in-the-browser) loader, the [overlay review](/guide/controls#overlay-review-subjectoverlayviewer-overlayreviewpanel) viewer and panel, and the `LayerControlPanel` web component. The loader depends on the ESM-only `nifti-reader-js`, which would break `require('neuroimjs')`, and the panels are Lit web components.
 
 ## A note on maturity
 
-neuroimjs is **pre-1.0 (`0.5.0`)**. The viewer stack and the core geometry/volume types are dependable; some I/O and processing paths have known bugs, and a handful of advertised APIs are still aspirational. We track this transparently — see **[Stability & Roadmap](/guide/stability)** so you always know what's safe to build on.
+neuroimjs is **pre-1.0 (`0.5.0`)**, so minor releases can still change the API; each change is listed in the [changelog](https://github.com/bbuchsbaum/neuroimjs/blob/main/CHANGELOG.md). The viewer stack and the core geometry/volume types are dependable: they are covered by unit and browser (Playwright) tests, and NIfTI reading is checked against fixtures generated with nibabel. Some I/O and processing paths have known bugs, and a few APIs are still missing (AFNI and dual-file NIfTI cannot be read; some `NeuroHyperVec` operations throw "not yet implemented"). We track this transparently — see **[Stability & Roadmap](/guide/stability)** so you always know what's safe to build on.
 
 ## Next steps
 
 - **[Getting Started](/guide/getting-started)** — install and render your first brain.
+- **[Loading data in the browser](/guide/io#loading-data-in-the-browser)** — turn fetched or user-selected NIfTI bytes into a volume.
 - **[Data Structures](/guide/concepts)** — the mental model behind volumes and spaces.
 - **[Live Examples](/examples/)** — runnable viewers you can poke at right here.

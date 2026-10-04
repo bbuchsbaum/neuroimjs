@@ -2,18 +2,19 @@
 
 A comprehensive neuroimaging library for JavaScript/TypeScript that provides tools for loading, processing, visualizing, and analyzing brain imaging data in the browser and Node.js.
 
-> 📖 **[Documentation & live demos →](https://bbuchsbaum.github.io/neuroimjs/)** — interactive brain viewers, guides, and the full API reference.
+> **[Documentation & live demos →](https://bbuchsbaum.github.io/neuroimjs/)** — interactive brain viewers, guides, and the full API reference.
 >
-> ⚠️ **Pre-1.0 (`0.1.0`).** The viewer stack and core data structures are dependable; some I/O and processing paths have known issues. See the **[Stability matrix](https://bbuchsbaum.github.io/neuroimjs/guide/stability)** before depending on a feature.
+> **Pre-1.0.** Minor releases can still change the API; see [CHANGELOG.md](CHANGELOG.md). The viewers, core data structures and NIfTI I/O are tested and dependable. Some modules are experimental or missing (for example, there is no AFNI reader); the **[Stability matrix](https://bbuchsbaum.github.io/neuroimjs/guide/stability)** lists the status of each.
 
 ## Features
 
-- 🧠 **Volume Processing** - Load and manipulate NIfTI, AFNI, and other neuroimaging formats
-- 📊 **4D+ Data Support** - Handle time-series and high-dimensional neuroimaging data
-- 🎨 **Interactive Visualization** - WebGL-based 2D slice viewers with PIXI.js
-- 🔄 **Spatial Filtering** - Advanced filtering, resampling, and interpolation
-- 📈 **Statistical Analysis** - Searchlight analysis, clustering, and statistical operations
-- 🏗️ **Composable Views** - Build custom viewer layouts for external applications
+- **NIfTI I/O** - Read NIfTI-1/2 (`.nii`, `.nii.gz`) in the browser and Node, write NIfTI-1 from Node, with intensity scaling and affine geometry
+- **3D/4D Data** - Dense, sparse, clustered and logical volumes; 4D time series; experimental 5D+ containers
+- **Interactive Visualization** - WebGL-based 2D slice viewers with PIXI.js
+- **Spatial Filtering** - Advanced filtering, resampling, and interpolation
+- **Statistical Analysis** - Searchlight analysis, clustering, and statistical operations
+- **Composable Views** - Build custom viewer layouts for external applications
+- **Group Overlay Review** - Browse per-subject maps over a template with live group summaries
 
 ## Installation
 
@@ -27,11 +28,12 @@ npm install neuroimjs
 
 ```typescript
 import {
-  readVol, VolLayer, VolStack, ColorMapFactory, SimpleOrthogonalViewer,
-} from 'neuroimjs';
+  readNiftiArrayBuffer, VolLayer, VolStack, ColorMapFactory, SimpleOrthogonalViewer,
+} from 'neuroimjs/browser';
 
-// Load a NIfTI volume (Node path here; in the browser pass an ArrayBuffer)
-const vol = await readVol('brain.nii.gz');
+// Load a NIfTI volume in the browser (gzip, scaling, byte order and affine handled)
+const response = await fetch('brain.nii.gz');
+const vol = readNiftiArrayBuffer(await response.arrayBuffer());
 const range = vol.getRange();
 
 // Wrap it in a display layer stack
@@ -41,23 +43,25 @@ const stack = new VolStack(
 
 // Create a 3-view orthogonal viewer
 const viewer = await SimpleOrthogonalViewer.create(
-  document.getElementById('viewer-container'),
+  document.getElementById('viewer-container')!,
   stack
 );
 ```
 
-### Composable Views (NEW!)
+In Node, read from disk with `readVol('brain.nii.gz')` from `neuroimjs` instead.
+
+### Composable Views
 
 Create custom layouts with individual slice views:
 
 ```typescript
 import {
-  readVol, VolLayer, VolStack, ColorMapFactory,
+  readNiftiArrayBuffer, VolLayer, VolStack, ColorMapFactory,
   SingleSliceViewer, ViewSynchronizer,
-} from 'neuroimjs';
+} from 'neuroimjs/browser';
 
 // Build a display stack from a volume (see "Basic Volume Loading" above)
-const vol = await readVol('brain.nii.gz');
+const vol = readNiftiArrayBuffer(await (await fetch('brain.nii.gz')).arrayBuffer());
 const range = vol.getRange();
 const volStack = new VolStack(
   new VolLayer('t1', vol, ColorMapFactory.createGrayscale({ range }), range)
@@ -78,10 +82,10 @@ axial.onCoordChange(coord => {
 ```
 
 **Why use composable views?**
-- 🎯 Place views in any custom panel layout
-- 🔗 Wire views across different windows or applications
-- ⚙️ Full control over synchronization behavior
-- 📡 Event-driven coordination with type-safe APIs
+- Place views in any custom panel layout
+- Wire views across different windows or applications
+- Full control over synchronization behavior
+- Event-driven coordination with type-safe APIs
 
 See the [Composable Views Guide](https://bbuchsbaum.github.io/neuroimjs/guide/composable-views) for complete documentation.
 
@@ -115,10 +119,10 @@ import { FloatNeuroVol, NeuroSpace } from 'neuroimjs';
 const space = new NeuroSpace([64, 64, 64], [3, 3, 3]);
 const volume = new FloatNeuroVol(space, data);
 
-// Read/write NIfTI files (intensity scaling + endianness handled on read)
+// Read/write NIfTI files in Node (intensity scaling + endianness handled on read)
 import { readVol, writeVol } from 'neuroimjs';
 const vol = await readVol('input.nii.gz');
-await writeVol(vol, 'output.nii.gz');
+await writeVol(vol, 'output.nii.gz', { compress: true }); // gzip only with compress: true
 ```
 
 ### 4D Time-Series Data
@@ -126,15 +130,16 @@ await writeVol(vol, 'output.nii.gz');
 ```typescript
 import { readVec } from 'neuroimjs';
 
-// Load 4D fMRI data (Node path; in the browser pass an ArrayBuffer)
+// Load 4D fMRI data (Node, from a file path)
 const vec = await readVec('fmri.nii.gz');
 
-// Inspect the time-series at a voxel
-const series = vec.getSeries(32, 32, 20);
+// vec.dim is time-first: [T, X, Y, Z]. The 3D geometry (with the affine) is
+// on vec.volumeSpace; getVolume(t) returns 3D volumes on that space.
+const series = vec.getSeries(32, 32, 20); // T values
 ```
 
 > Temporal preprocessing (`detrend`, `temporalFilter`) is available on the enhanced
-> vec classes (`EnhancedDenseNeuroVec`, `FileBackedNeuroVec`). See the
+> vec classes (`EnhancedDenseNeuroVec`, `EnhancedFloat32NeuroVec`) and `FileBackedNeuroVec`. See the
 > [docs](https://bbuchsbaum.github.io/neuroimjs/guide/concepts).
 
 ### Spatial Operations
@@ -142,28 +147,29 @@ const series = vec.getSeries(32, 32, 20);
 ```typescript
 import { SpatialFilter } from 'neuroimjs';
 
-const filter = new SpatialFilter();
+const filter = new SpatialFilter(volume);
 
-// Gaussian smoothing
-const smoothed = await filter.gaussianBlur(volume, { sigma: 2.0 });
+// Gaussian smoothing (sigma in voxels; pass [sx, sy, sz] for anisotropic data)
+const smoothed = filter.gaussianBlur(2.0);
 
 // Bilateral filtering (edge-preserving)
-const filtered = await filter.bilateralFilter(volume, {
-  sigmaSpace: 2.0,
-  sigmaIntensity: 0.1
+const filtered = filter.bilateralFilter({
+  spatialSigma: 2.0,   // voxels
+  intensitySigma: 50   // intensity units
 });
 ```
 
 ### Statistical Analysis
 
 ```typescript
-import { searchlightIterator } from 'neuroimjs';
+import { searchlightIterator, type ROIVolWindow } from 'neuroimjs';
 
-// Searchlight analysis
-for await (const sphere of searchlightIterator(volume, { radius: 3 })) {
-  // Analyze voxels in sphere
-  const result = analyzeROI(sphere.voxels);
-  results.set(sphere.center, result);
+// Searchlight analysis: radius in mm; nonzero restricts centres to the mask
+const spheres = searchlightIterator(mask, 6, { eager: true, nonzero: true }) as ROIVolWindow[];
+for (const sphere of spheres) {
+  // sphere.coords: voxel coordinates in the sphere; read your data there
+  const values = sphere.coords.map(([i, j, k]) => dataVol.getAt(i, j, k));
+  const result = analyzeROI(values);
 }
 ```
 
@@ -174,20 +180,24 @@ for await (const sphere of searchlightIterator(volume, { radius: 3 })) {
 - **SimpleOrthogonalViewer** - Standard 3-view layout (axial, sagittal, coronal)
 - **OrthogonalImageViewer** - Lower-level 3-view orchestration
 
-### Composable Views (NEW)
+### Composable Views
 
 - **SingleSliceViewer** - Individual orientation views with events
 - **ViewSynchronizer** - Coordinate synchronization across views
 - **SliceLayer** - Custom rendering layer interface
 
-See [Composable Views Guide](docs/COMPOSABLE_VIEWS.md) for detailed documentation.
+See the [Composable Views guide](https://bbuchsbaum.github.io/neuroimjs/guide/composable-views) for detailed documentation.
 
 ## API Documentation
 
+The [API reference](https://bbuchsbaum.github.io/neuroimjs/api/) is generated from the source. Guides:
+
 ### Display Components
 
-- [Composable Views Guide](docs/COMPOSABLE_VIEWS.md) - Custom layouts and coordination
-- [SimpleOrthogonalViewer](docs/SimpleOrthogonalViewer.md) - Standard 3-view viewer
+- [Viewers](https://bbuchsbaum.github.io/neuroimjs/guide/viewers) - `SimpleOrthogonalViewer`, the standard 3-view viewer
+- [Composable Views](https://bbuchsbaum.github.io/neuroimjs/guide/composable-views) - Custom layouts and coordination
+- [Multi-Layer Alignment](https://bbuchsbaum.github.io/neuroimjs/guide/alignment) - Overlays on different voxel grids
+- [Group Overlay Review](https://bbuchsbaum.github.io/neuroimjs/guide/overlay-review) - `SubjectOverlayViewer` and `OverlayReviewPanel`
 
 ### Volume Processing
 
@@ -199,15 +209,17 @@ See [Composable Views Guide](docs/COMPOSABLE_VIEWS.md) for detailed documentatio
 ### 4D Data
 
 - `NeuroVec` - 4D time-series data
-- `EnhancedNeuroVec` - Enhanced 4D with preprocessing
-- `FileBackedNeuroVec` - Memory-mapped 4D data
-- `NeuroHyperVec` - 5D+ hyperdimensional data
+- `EnhancedDenseNeuroVec` - 4D with temporal preprocessing
+- `BigNeuroVec` - 4D storage in memory or backed by a file (what `readVec` returns)
+- `FileBackedNeuroVec` - 4D data loaded on demand through a callback, with an LRU cache
+- `DenseNeuroHyperVec` - 5D+ data (experimental)
 
 ### I/O
 
-- `readVol` / `writeVol` - NIfTI file I/O
-- `VolStack` - Multi-layer volume management
+- `readNiftiArrayBuffer` - NIfTI bytes to a volume in the browser (`neuroimjs/browser`)
+- `readVol` / `writeVol` / `readVec` / `writeVec` - NIfTI file I/O in Node
 - `readHeader` - Read NIfTI headers without loading data
+- `getVolumeGeometry` / `assertSameVolumeGeometry` - Inspect and compare volume geometry
 
 For Node processes that should not load the viewer stack (pixi.js, mobx,
 lit), such as an Electron main process, import from the viewer-free
@@ -217,7 +229,7 @@ subpaths `neuroimjs/io`, `neuroimjs/slices` and `neuroimjs/geometry`. See
 ### Spatial Processing
 
 - `SpatialFilter` - Filtering operations (Gaussian, bilateral, median, morphology)
-- `Resampler` - Resampling and interpolation (nearest, linear, cubic, sinc)
+- `Resampler` - Resampling and interpolation (nearest, linear, cubic, Lanczos)
 
 ### Statistical Operations
 
@@ -245,6 +257,12 @@ npm test
 
 # Run specific tests
 npm run test:specific -- src/path/to/test
+
+# NIfTI conformance against nibabel-generated fixtures
+npm run test:conformance
+
+# Browser (Playwright) tests
+npm run test:e2e
 
 # Type checking
 npm run test:types

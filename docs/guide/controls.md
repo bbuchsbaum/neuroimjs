@@ -267,7 +267,7 @@ Custom-element names are global. Loading `neuroimjs/browser` twice (two bundles,
 
 ## Overlay review: SubjectOverlayViewer + OverlayReviewPanel
 
-For quality control of first-level maps across subjects: browse one subject's map over a template, compare it with a group summary (mean, t, effect size, or the proportion of subjects exceeding a cutoff), and hold the current subject out of that summary to spot outliers. `examples/overlay-review-demo.html` in the repository is a complete page.
+For quality control of first-level maps across subjects: browse one subject's map over a template, compare it with a group summary (mean, t, effect size, or the proportion of subjects exceeding a cutoff), and hold the current subject out of that summary to spot outliers. `examples/overlay-review-demo.html` in the repository is a complete page, with synthetic data; `npm run demo:overlay-review` opens it.
 
 `SubjectOverlayViewer` wraps a `SimpleOrthogonalViewer` with three layers — `'template'`, `'active-subject'` and (on demand) `'summary'` — driven by an `OverlayReviewDataset`. All maps of a contrast are packed into one 4-D vector with `createReviewVecFromVolumes`, and must share the template's geometry.
 
