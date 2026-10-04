@@ -209,6 +209,11 @@ See [Composable Views Guide](docs/COMPOSABLE_VIEWS.md) for detailed documentatio
 - `VolStack` - Multi-layer volume management
 - `readHeader` - Read NIfTI headers without loading data
 
+For Node processes that should not load the viewer stack (pixi.js, mobx,
+lit), such as an Electron main process, import from the viewer-free
+subpaths `neuroimjs/io`, `neuroimjs/slices` and `neuroimjs/geometry`. See
+[Viewer-free imports](https://bbuchsbaum.github.io/neuroimjs/guide/io#viewer-free-imports).
+
 ### Spatial Processing
 
 - `SpatialFilter` - Filtering operations (Gaussian, bilateral, median, morphology)

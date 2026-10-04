@@ -85,6 +85,42 @@ info.voxOffset // 352 — byte offset of the image data
 
 `readHeader` takes a file path and is Node-only. It still reads and, for `.nii.gz`, decompresses the whole file. The returned `HeaderInfo` also has `origin`, `bitpix`, `description`, `qformCode`, `sformCode` and `sclInter`. `info.spacing` holds the three spatial voxel sizes. The TR is not included.
 
+## Viewer-free imports (`neuroimjs/io`, `neuroimjs/slices`, `neuroimjs/geometry`) {#viewer-free-imports}
+
+Importing the root `neuroimjs` entry also loads the viewer stack: pixi.js, mobx and lit. In a Node service, a CLI or an Electron main process you usually want only I/O and geometry. Three subpath exports provide those without loading any display code:
+
+| Subpath | Exports |
+|---|---|
+| `neuroimjs/io` | `readVol`, `writeVol`, `readHeader`, `readVolList`, `readVec`, `writeVec`, `read_vol`, `write_vol`, `FileFormat`, `NIFTIFormat`, `NIFTIDualFormat`, `AFNIFormat`, `findDescriptor`, `getFormat`, `DenseNeuroVol`, `FloatNeuroVol`, `Float64NeuroVol`, `Int8NeuroVol`, `Int16NeuroVol`, `Int32NeuroVol`, `UInt8NeuroVol`, `UInt16NeuroVol`, `NeuroimError`, `NeuroimTypeError`, `isNeuroimError`, `NEUROIM_ERROR_CODES`; types `ReadVolOptions`, `WriteVolOptions`, `HeaderInfo`, `NeuroVol`, `NeuroVec`, `NeuroimErrorCode`, `NeuroimErrorOptions` |
+| `neuroimjs/slices` | `extractOrthogonalSlices`, `extractAxialSlice`, `extractSagittalSlice`, `extractCoronalSlice`, `getSliceOrientation`, `getWorldBoundsForSlice`, `extractSliceForView`, `getSliceAxisIndex`, `getMaxSliceIndex`, `isValidSliceIndex`, `getSliceAxisName`, `getCenterSliceIndex`, `getSafeSliceIndicesForSpaces`, `NeuroSlice`; type `NeuroVol` |
+| `neuroimjs/geometry` | `NeuroSpace`, `NamedAxis`, `AxisSet`, `AxisSet1D`, `AxisSet2D`, `AxisSet3D`, `AXIAL_LPI`, `CORONAL_LIP`, `SAGITTAL_AIL`, `getVolumeGeometry`, `assertSameVolumeGeometry`, `NeuroimError`, `NeuroimTypeError`, `isNeuroimError`, `NEUROIM_ERROR_CODES`; types `VolumeGeometry`, `NeuroimErrorCode`, `NeuroimErrorOptions` |
+
+At runtime each subpath works with both `import` (ES module build) and `require` (CommonJS build). Every symbol is also exported from the root entry, so you can switch an import between the two without other changes.
+
+The type declarations are ES-module `.d.ts` files in a `"type": "module"` package. They resolve under these TypeScript settings:
+
+- `moduleResolution: "NodeNext"` (or `"Node16"`) in ES-module code, and `"Bundler"`.
+- CommonJS code under `module: "NodeNext"` with TypeScript 5.8 or later, which allows `require` of ES-module types. Under `module: "Node16"` or older TypeScript, `import x = require('neuroimjs/io')` reports TS1471. The root entry behaves the same way.
+- Legacy `moduleResolution: "node"` / `"node10"`, through the package's `typesVersions` map.
+
+::: warning Pick one module system
+CommonJS and ES-module builds are separate copies of the code. If one part of a process uses `require('neuroimjs/io')` and another uses `import 'neuroimjs/geometry'`, the same class has two identities: a `NeuroSpace` from one fails `instanceof NeuroSpace` against the other. Use either `import` or `require` throughout. `isNeuroimError` is the exception: it recognises errors from either copy.
+:::
+
+```ts
+// Electron main process: build a thumbnail without loading pixi.js
+import { readVol } from 'neuroimjs/io'
+import { extractOrthogonalSlices } from 'neuroimjs/slices'
+
+const vol = await readVol('sub-01_T1w.nii.gz')
+const centre = vol.space.gridToCoord(vol.dim.slice(0, 3).map((d) => (d - 1) / 2))
+const { axial, sagittal, coronal } = extractOrthogonalSlices(vol, centre)
+```
+
+`readNiftiArrayBuffer` is not in `neuroimjs/io`. It statically imports the ESM-only `nifti-reader-js`, which would break `require('neuroimjs/io')`. In Node, pass the bytes to `readVol` instead, which also accepts an `ArrayBuffer`. In the browser, `readNiftiArrayBuffer` is available from `neuroimjs/browser`. It stays synchronous and browser-only for now; loading `nifti-reader-js` lazily would make it asynchronous, which would change its API.
+
+`npm run test:package` checks the compiled import graph of each subpath, then imports it from the packed tarball in plain Node (ESM and CommonJS). It fails if the graph reaches a display module or any package other than Node built-ins, `ml-matrix`, `pako`, `nifti-reader-js` and `buffer`, or if pixi.js, `@pixi/*`, mobx or lit is resolved at run time. It also type-checks the subpaths under NodeNext, Bundler and node10. These subpaths are an interim measure. A later release is planned to split the package into separate core and viewer entries; the intent is to keep these subpaths working after that split.
+
 ## Browser: `readNiftiArrayBuffer`
 
 The browser entry has no file system and does not export `readVol`. Fetch or read the bytes yourself, then decode them synchronously:
