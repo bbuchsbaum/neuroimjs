@@ -1,3 +1,4 @@
+import { NeuroimError } from '../errors';
 import type { NeuroVol } from '../volume/NeuroVol';
 
 /** Serializable spatial metadata used to validate volumes before display. */
@@ -55,12 +56,12 @@ export function assertSameVolumeGeometry(
   tolerance = 1e-6
 ): void {
   if (!Number.isFinite(tolerance) || tolerance < 0) {
-    throw new Error('Geometry tolerance must be a finite non-negative number.');
+    throw new NeuroimError('INVALID_ARGUMENT', 'Geometry tolerance must be a finite non-negative number.');
   }
   const expected = getVolumeGeometry(reference);
   const actual = getVolumeGeometry(candidate);
   const mismatch = (field: string, detail: string): never => {
-    throw new Error(`Volume geometry mismatch in ${field}: ${detail}`);
+    throw new NeuroimError('GEOMETRY_MISMATCH', `Volume geometry mismatch in ${field}: ${detail}`);
   };
 
   expected.dimensions.forEach((value, index) => {
