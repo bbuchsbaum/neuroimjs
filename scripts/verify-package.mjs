@@ -1,51 +1,13 @@
-import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { createPackedConsumer, repositoryRoot } from './lib/packed-consumer.mjs';
 
-const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const temporaryRoot = mkdtempSync(join(tmpdir(), 'neuroimjs-package-'));
-const npmCache = join(temporaryRoot, 'npm-cache');
-const environment = { ...process.env, npm_config_cache: npmCache };
-
-function run(command, args, cwd = repositoryRoot) {
-  return execFileSync(command, args, {
-    cwd,
-    env: environment,
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-}
+const { consumerRoot, tarballName, run, cleanup } = createPackedConsumer({
+  prefix: 'neuroimjs-package-',
+  name: 'neuroimjs-package-smoke',
+});
 
 try {
-  const packResult = JSON.parse(run('npm', [
-    'pack',
-    '--json',
-    '--ignore-scripts',
-    '--pack-destination',
-    temporaryRoot,
-  ]));
-  const tarball = join(temporaryRoot, packResult[0].filename);
-  const consumerRoot = join(temporaryRoot, 'consumer');
-
-  writeFileSync(join(temporaryRoot, 'package.json'), JSON.stringify({ private: true }));
-  mkdirSync(consumerRoot);
-  writeFileSync(join(consumerRoot, 'package.json'), JSON.stringify({
-    name: 'neuroimjs-package-smoke',
-    private: true,
-    type: 'module',
-  }));
-
-  run('npm', [
-    'install',
-    tarball,
-    '--ignore-scripts',
-    '--omit=optional',
-    '--no-audit',
-    '--no-fund',
-  ], consumerRoot);
-
   run('node', [
     '-e',
     "const pkg=require('neuroimjs'); const s=new pkg.NeuroSpace([2,2,2]); if(s.size!==8) process.exit(1)",
@@ -114,10 +76,10 @@ void readVol;
     throw new Error('Browser export does not point to browser-specific declarations');
   }
 
-  console.log(`Package smoke test passed: ${packResult[0].filename}`);
+  console.log(`Package smoke test passed: ${tarballName}`);
 } catch (error) {
   if (error?.stderr) process.stderr.write(String(error.stderr));
   throw error;
 } finally {
-  rmSync(temporaryRoot, { recursive: true, force: true });
+  cleanup();
 }

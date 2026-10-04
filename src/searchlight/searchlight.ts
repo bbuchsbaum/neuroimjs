@@ -14,6 +14,7 @@ import { ROIVolWindow } from '../roi/ROI_improved';
 import { sphericalROI } from '../roi/ROI_factories';
 import { LazyList } from '../utils/LazyList';
 import { SearchlightWorkerPool } from './WorkerPool';
+import { randomIndex, resolveRng, type RandomOptions } from '../utils/rng';
 
 /**
  * Options for searchlight analysis
@@ -28,6 +29,16 @@ export interface SearchlightOptions {
   /** Progress callback */
   onProgress?: (progress: number) => void;
 }
+
+/**
+ * Options for searchlights with randomly chosen centers
+ * ({@link randomSearchlight}, {@link bootstrapSearchlight}).
+ *
+ * `seed` makes the centers reproducible; `rng` supplies a custom generator
+ * returning numbers in [0, 1) and takes precedence over `seed`. With neither,
+ * a fresh seed is drawn on every call.
+ */
+export type RandomSearchlightOptions = RandomOptions;
 
 function validateSearchlightArguments(radius: number, cores = 0): void {
   if (!Number.isFinite(radius) || radius < 0) {
@@ -237,15 +248,22 @@ export async function searchlightCoords(
  * in a brain mask. The algorithm randomly selects centers and removes
  * all voxels within the searchlight from future consideration.
  * 
+ * Centers are drawn from a seedable generator: pass `options.seed` (or
+ * `options.rng`) for a reproducible set of searchlights. Without either, each
+ * call draws a fresh seed, so successive calls give different searchlights.
+ *
  * @param mask - A NeuroVol object representing the brain mask
  * @param radius - The radius of the searchlight sphere (in mm)
+ * @param options - Randomness control: `seed` or `rng`
  * @returns Array of ROIVolWindow objects
  */
 export function randomSearchlight(
   mask: NeuroVol | LogicalNeuroVol,
-  radius: number
+  radius: number,
+  options: RandomSearchlightOptions = {}
 ): ROIVolWindow[] {
   validateSearchlightArguments(radius);
+  const rng = resolveRng(options);
   // Convert to LogicalNeuroVol if needed
   const logicalMask = ensureLogicalMask(mask);
 
@@ -263,7 +281,7 @@ export function randomSearchlight(
   while (availableIndices.size > 0) {
     // Randomly select a center from available indices
     const indicesArray = Array.from(availableIndices);
-    const randomIdx = Math.floor(Math.random() * indicesArray.length);
+    const randomIdx = randomIndex(rng, indicesArray.length);
     const centerIdx = indicesArray[randomIdx];
 
     // Get grid coordinates of center
@@ -367,17 +385,21 @@ export function clusteredSearchlight(
  * @param mask - A NeuroVol object representing the brain mask
  * @param radius - The radius of the searchlight sphere in mm (default: 8)
  * @param iter - Number of bootstrap iterations (default: 100)
+ * @param options - Randomness control: `seed` or `rng`. Without either, each
+ *   call draws a fresh seed, so successive calls give different samples.
  * @returns Array of ROIVolWindow objects
  */
 export function bootstrapSearchlight(
   mask: NeuroVol | LogicalNeuroVol,
   radius: number = 8,
-  iter: number = 100
+  iter: number = 100,
+  options: RandomSearchlightOptions = {}
 ): ROIVolWindow[] {
   validateSearchlightArguments(radius);
   if (!Number.isSafeInteger(iter) || iter < 0) {
     throw new RangeError('iter must be a non-negative integer');
   }
+  const rng = resolveRng(options);
   // Convert to LogicalNeuroVol if needed
   const logicalMask = ensureLogicalMask(mask);
 
@@ -399,7 +421,7 @@ export function bootstrapSearchlight(
   // Sample with replacement
   for (let i = 0; i < iter; i++) {
     // Randomly select a center
-    const randomIdx = Math.floor(Math.random() * maskIndices.length);
+    const randomIdx = randomIndex(rng, maskIndices.length);
     const centerIdx = maskIndices[randomIdx];
 
     // Get grid coordinates of center

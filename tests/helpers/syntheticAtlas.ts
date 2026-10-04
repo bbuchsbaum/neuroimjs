@@ -49,12 +49,50 @@ export function fslMni152Grid(resolution: 1 | 2): {
   };
 }
 
+/**
+ * NIfTI datatype codes a synthetic label volume can be stored as:
+ * 2 uint8, 4 int16, 8 int32, 16 float32, 64 float64, 256 int8, 512 uint16.
+ */
+export type NiftiLabelDatatype = 2 | 4 | 8 | 16 | 64 | 256 | 512;
+
+const DATATYPE_BYTES: Record<NiftiLabelDatatype, number> = {
+  2: 1, 4: 2, 8: 4, 16: 4, 64: 8, 256: 1, 512: 2,
+};
+
+/** Optional storage details for {@link buildLabelVolume}. */
+export interface LabelVolumeOptions {
+  /** scl_slope written to the header (default 0, i.e. no scaling). */
+  sclSlope?: number;
+  /** scl_inter written to the header (default 0). */
+  sclInter?: number;
+  /** Map a label to the raw value stored for it (default: identity). */
+  stored?: (label: number) => number;
+}
+
+function writeVoxel(
+  view: DataView,
+  offset: number,
+  datatype: NiftiLabelDatatype,
+  value: number
+): void {
+  const le = true;
+  switch (datatype) {
+    case 2: view.setUint8(offset, value); break;
+    case 4: view.setInt16(offset, value, le); break;
+    case 8: view.setInt32(offset, value, le); break;
+    case 16: view.setFloat32(offset, value, le); break;
+    case 64: view.setFloat64(offset, value, le); break;
+    case 256: view.setInt8(offset, value); break;
+    case 512: view.setUint16(offset, value, le); break;
+  }
+}
+
 /** Geometry and storage of a synthetic label volume, mirroring a published file. */
 export interface LabelVolumeSpec {
   dims: [number, number, number];
   spacing: [number, number, number];
   /** NIfTI datatype: 16 = float32 (Schaefer), 64 = float64 (Glasser360). */
-  datatype: 16 | 64;
+  datatype: NiftiLabelDatatype;
   /** sform rows (sform_code 1, qform_code 1 with the same affine), or ... */
   srow?: number[][];
   /** ... a qform-only header (identity quaternion) with this offset. */
@@ -78,11 +116,16 @@ export function schaeferSpec(resolution: 1 | 2): LabelVolumeSpec {
 /**
  * Build a gzip-compressed single-file NIfTI-1 label volume. Voxels in the
  * central box get labels cycling through 1..nLabels so every label is
- * present; the rim is background (0).
+ * present; the rim is background (0). `options` changes how labels are
+ * stored (raw values, scl_slope/scl_inter) for datatype tests.
  */
-export function buildLabelVolume(spec: LabelVolumeSpec, nLabels: number): ArrayBuffer {
+export function buildLabelVolume(
+  spec: LabelVolumeSpec,
+  nLabels: number,
+  options: LabelVolumeOptions = {}
+): ArrayBuffer {
   const [nx, ny, nz] = spec.dims;
-  const bytes = spec.datatype === 64 ? 8 : 4;
+  const bytes = DATATYPE_BYTES[spec.datatype];
   const voxOffset = 352;
   const n = nx * ny * nz;
   const buf = new ArrayBuffer(voxOffset + n * bytes);
@@ -100,6 +143,8 @@ export function buildLabelVolume(spec: LabelVolumeSpec, nLabels: number): ArrayB
   view.setFloat32(76, 1, le); // qfac
   for (let a = 0; a < 3; a++) view.setFloat32(80 + a * 4, spec.spacing[a], le);
   view.setFloat32(108, voxOffset, le);
+  view.setFloat32(112, options.sclSlope ?? 0, le); // scl_slope
+  view.setFloat32(116, options.sclInter ?? 0, le); // scl_inter
   if (spec.srow) {
     view.setInt16(252, 1, le); // qform_code
     view.setInt16(254, 1, le); // sform_code
@@ -129,13 +174,13 @@ export function buildLabelVolume(spec: LabelVolumeSpec, nLabels: number): ArrayB
       for (let x = lo[0]; x < hi[0]; x++) {
         const offset = voxOffset + (x + nx * (y + ny * z)) * bytes;
         const label = 1 + (next++ % nLabels);
-        if (bytes === 8) view.setFloat64(offset, label, le);
-        else view.setFloat32(offset, label, le);
+        writeVoxel(view, offset, spec.datatype, options.stored ? options.stored(label) : label);
       }
     }
   }
 
-  const gz = pako.gzip(new Uint8Array(buf));
+  // Fastest compression: the fixtures only need to be valid gzip.
+  const gz = pako.gzip(new Uint8Array(buf), { level: 1 });
   return gz.buffer.slice(gz.byteOffset, gz.byteOffset + gz.byteLength) as ArrayBuffer;
 }
 
@@ -159,19 +204,51 @@ const NETWORK_NAMES: Record<7 | 17, string[]> = {
 export function schaeferLut(parcels: number, networks: 7 | 17): string {
   const names = NETWORK_NAMES[networks];
   const rows: string[] = [];
+  // As in the published LUTs, <k> counts parcels within each hemisphere and
+  // network, so the same `<Net>_<k>` occurs in both hemispheres.
+  const counts = new Map<string, number>();
   for (let id = 1; id <= parcels; id++) {
     const hemi = id <= parcels / 2 ? 'LH' : 'RH';
     const net = names[(id - 1) % names.length];
+    const k = (counts.get(`${hemi}_${net}`) ?? 0) + 1;
+    counts.set(`${hemi}_${net}`, k);
     const rgb = [(id * 37) % 256, (id * 91) % 256, (id * 151) % 256];
-    rows.push(`${id}\t${networks}Networks_${hemi}_${net}_${id}\t${rgb.join('\t')}\t0`);
+    rows.push(`${id}\t${networks}Networks_${hemi}_${net}_${k}\t${rgb.join('\t')}\t0`);
   }
   return rows.join('\n') + '\n';
 }
 
-export async function syntheticAtlasBuffer(url: string): Promise<ArrayBuffer> {
-  if (GLASSER_VOLUME.test(url)) return buildLabelVolume(GLASSER_SPEC, 360);
+/**
+ * Grid for synthetic atlas volumes: `'published'` mirrors the real files'
+ * geometry (~1M voxels for Glasser360, 7.2M for Schaefer 1 mm); `'small'`
+ * keeps each file's datatype, spacing and affine but uses a grid of a few
+ * thousand voxels (odd voxel count), large enough for 1000 parcels. Use
+ * `'small'` where only labels, not geometry, matter.
+ */
+export type SyntheticGrid = 'published' | 'small';
+
+/** {@link GLASSER_SPEC} on a small 23x27x21 grid (odd voxel count). */
+export const SMALL_GLASSER_SPEC: LabelVolumeSpec = { ...GLASSER_SPEC, dims: [23, 27, 21] };
+
+/** {@link schaeferSpec} on a small grid (odd voxel count, room for 1000 parcels). */
+export function smallSchaeferSpec(resolution: 1 | 2): LabelVolumeSpec {
+  const dims: [number, number, number] = resolution === 1 ? [25, 29, 23] : [21, 25, 19];
+  return { ...schaeferSpec(resolution), dims };
+}
+
+export async function syntheticAtlasBuffer(
+  url: string,
+  grid: SyntheticGrid = 'published'
+): Promise<ArrayBuffer> {
+  const small = grid === 'small';
+  if (GLASSER_VOLUME.test(url)) {
+    return buildLabelVolume(small ? SMALL_GLASSER_SPEC : GLASSER_SPEC, 360);
+  }
   const m = SCHAEFER_VOLUME.exec(url);
-  if (m) return buildLabelVolume(schaeferSpec(Number(m[3]) as 1 | 2), Number(m[1]));
+  if (m) {
+    const res = Number(m[3]) as 1 | 2;
+    return buildLabelVolume(small ? smallSchaeferSpec(res) : schaeferSpec(res), Number(m[1]));
+  }
   throw new Error(`syntheticAtlasBuffer: no offline fixture for ${url}`);
 }
 
@@ -186,10 +263,17 @@ export async function syntheticAtlasText(url: string): Promise<string> {
  * Route atlas downloads to the synthetic fixtures unless
  * NEUROIMJS_NETWORK_TESTS=1. Call from a `beforeAll`; the spies are restored
  * by `vi.restoreAllMocks()` or the returned function.
+ *
+ * @param options.grid - `'published'` (default) or `'small'`; see {@link SyntheticGrid}.
  */
-export function useSyntheticAtlasDownloads(): () => void {
+export function useSyntheticAtlasDownloads(
+  options: { grid?: SyntheticGrid } = {}
+): () => void {
   if (NETWORK_TESTS) return () => undefined;
-  const buffer = vi.spyOn(Downloader, 'downloadBuffer').mockImplementation(syntheticAtlasBuffer);
+  const grid = options.grid ?? 'published';
+  const buffer = vi
+    .spyOn(Downloader, 'downloadBuffer')
+    .mockImplementation(url => syntheticAtlasBuffer(url, grid));
   const text = vi.spyOn(Downloader, 'downloadText').mockImplementation(syntheticAtlasText);
   return () => {
     buffer.mockRestore();

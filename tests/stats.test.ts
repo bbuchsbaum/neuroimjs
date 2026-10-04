@@ -409,6 +409,14 @@ describe('Statistical Operations', () => {
       expect(nonZeroLabels.length).toBeGreaterThan(0);
     });
 
+    it('rejects a non-finite seed', () => {
+      const data = new Float32Array(1000);
+      for (let i = 0; i < 1000; i++) data[i] = 1 + (i % 3);
+      const vol = new FloatNeuroVol(space3d, data);
+      expect(() => partition(vol, 3, 'kmeans', undefined, Number.NaN)).toThrow(RangeError);
+      expect(() => partition(vol, 3, 'kmeans', undefined, Infinity)).toThrow(RangeError);
+    });
+
     it('partitions deterministically and separates distinct regions (seeded k-means++)', () => {
       // Three clearly separated value regions.
       const data = new Float32Array(1000);
