@@ -34,7 +34,7 @@ counts.getData().constructor.name // 'Int16Array'
 - `createNeuroVol(type, space, data?)` picks the class from a type string: `'float32'`, `'float64'`, `'int8'`, `'uint8'`, `'int16'` or `'int32'`.
 
 ::: warning `uint16` volumes
-`createNeuroVol` has no `'uint16'` case, and `getSlice()` on a `UInt16NeuroVol` throws `Unsupported TypedArray type: uint16`. A `UInt16NeuroVol` therefore cannot be displayed or sliced. `readVol` cannot load a NIfTI file stored as `UINT16` or `UINT32` without intensity scaling (it throws `Unsupported TypedArray type`). `readNiftiArrayBuffer` loads `UINT16` as a `UInt16NeuroVol` (and promotes `UINT32` to `Float64NeuroVol`), so convert before slicing or display: `new FloatNeuroVol(vol.space, Float32Array.from(vol.getData()))`.
+`createNeuroSlice` has no `'uint16'` case, so `getSlice()` on a `UInt16NeuroVol` throws `Unsupported TypedArray type: uint16`. A `UInt16NeuroVol` therefore cannot be displayed or sliced. Both `readVol` and `readNiftiArrayBuffer` load an unscaled `UINT16` NIfTI file as a `UInt16NeuroVol`. An unscaled `UINT32` file throws in `readVol` (`Unsupported TypedArray type: uint32`) and is promoted to `Float64NeuroVol` by `readNiftiArrayBuffer`. Convert a `UInt16NeuroVol` before slicing or display: `new FloatNeuroVol(vol.space, Float32Array.from(vol.getData()))`.
 :::
 
 ## Masks: `LogicalNeuroVol`

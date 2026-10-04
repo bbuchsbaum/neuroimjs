@@ -1,6 +1,6 @@
 # Statistics & Searchlight
 
-neuroimjs includes analysis primitives for lightweight Node pipelines. Everything on this page is imported from the main `neuroimjs` entry. The searchlight functions are also exported from `neuroimjs/browser`; connected components, `StatFunctions`, partitioning and the 4D helpers are not. They are plain TypeScript, so a browser bundle that imports the main entry can run them, but don't mix the two entries in one app ([Getting Started](/guide/getting-started#install)). For region extraction see [ROIs](/guide/roi); for voxelwise group maps (mean, t, Welch, paired, consistency) see [Group Statistics](/guide/group-stats).
+neuroimjs includes analysis primitives for lightweight Node pipelines. Everything on this page is imported from the main `neuroimjs` entry. From this page, `neuroimjs/browser` exports only the searchlight functions (and, for [ROIs](/guide/roi), the classes `ROICoords`, `ROIVol` and `ROIVec`, but not the factories such as `sphericalROI`); connected components, `StatFunctions`, partitioning and the 4D helpers are not in it. They are plain TypeScript, so a browser bundle that imports the main entry can run them, but don't mix the two entries in one app ([Getting Started](/guide/getting-started#install)). For region extraction see [ROIs](/guide/roi); for voxelwise group maps (mean, t, Welch, paired, consistency) see [Group Statistics](/guide/group-stats).
 
 ## Searchlight
 

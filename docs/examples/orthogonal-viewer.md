@@ -51,7 +51,7 @@ viewer.setWorldCoord([0, -18, 20])
 ## Notes
 
 - **Give the container a size.** The viewer fits itself to its container and follows later resizes, but a zero-height container renders nothing.
-- **Layouts** — `'top-bottom'`, `'left-tall'`, or `'ortho'` (2×2 grid with a legend cell); see [Viewers](/guide/viewers).
+- **Layouts** — `'top-bottom'` (default), `'left-tall'`, or `'ortho'` (2×2 grid with a legend cell); see [Viewers](/guide/viewers).
 - **Overlays** — `viewer.addLayer(new VolLayer('stat', statVol, ColorMapFactory.createHot(), [3, 8]))`. For thresholds, colormaps and the interactive panel, see [Colormaps & Layers](/guide/colormaps) and the **[Full Viewer with Controls](/examples/viewer-workbench)**.
 
 → Prefer custom layouts? See **[Single Slice View](/examples/single-view)** and the [Composable Views](/guide/composable-views) guide.

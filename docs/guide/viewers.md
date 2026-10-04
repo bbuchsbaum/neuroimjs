@@ -178,7 +178,7 @@ viewer.updateLayerVolume('z-stat', nextZ, { range: [-6, 6], threshold: [-3.1, 3.
 
 `updateLayerVolume` throws if the new volume's geometry (dimensions, spacing, origin, affine) differs from the old one. Omitted options keep the layer's current range, threshold, opacity and colormap.
 
-`setAlignmentStrategy(strategy)` and `setAlignmentOptions(partial)` change how off-grid layers are placed after creation.
+`setAlignmentStrategy(strategy)` and `setAlignmentOptions(partial)` change how off-grid layers are placed after creation; see [Multi-Layer Alignment](/guide/alignment).
 
 ### Zoom, pan and fit
 

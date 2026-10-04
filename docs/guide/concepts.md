@@ -57,19 +57,19 @@ A `NeuroVec` is a stack of 3D volumes on one grid, the natural shape for an fMRI
 
 - dense typed vecs (`Float32NeuroVec`, …) built on a 4D space,
 - `EnhancedFloat32NeuroVec`, which adds `detrend`, `temporalFilter` and temporal statistics,
-- `FileBackedNeuroVec` and `MappedNeuroVec` for runs you don't want to convert up front,
+- `FileBackedNeuroVec` (volumes fetched on demand through a callback you supply, with an LRU cache) and `MappedNeuroVec` (a `DataView` over an `ArrayBuffer` you supply) for runs you don't want to convert up front; neither opens or memory-maps files itself,
 - `SparseNeuroVec`,
 - `BigNeuroVec`, which is what `readVec` returns.
 
 ::: warning Two axis orders
-For most vec classes `space.dim` is `[X, Y, Z, T]`. `BigNeuroVec`, which `readVec` returns, uses `[T, X, Y, Z]`. On all of them, `vec.length` is the total element count, not the number of time points.
+For most vec classes `space.dim` is `[X, Y, Z, T]`. `BigNeuroVec`, which `readVec` returns, uses `[T, X, Y, Z]`, so its `space` does not describe the image grid; its 3D geometry, including the affine, is on `vec.volumeSpace` ([details](/guide/io#_4d-time-series-readvec)). On all of them, `vec.length` is the total element count, not the number of time points.
 :::
 
 **[Time Series](/guide/time-series)** has verified examples of each class, the preprocessing operations, and how to load large runs.
 
 ## Hypervectors: 5D and beyond
 
-`createNeuroHyperVec(space, dimensions)` returns a `DenseNeuroHyperVec`: a 3D grid plus any number of named axes (subject, condition, session, …). It supports sub-volume extraction, reductions (`ReductionOp`), concatenation, splitting and permutation. Several advanced operations are not implemented yet. **[Time Series → Hypervectors](/guide/time-series#hypervectors-5d-and-beyond)** lists what works and what throws.
+`createNeuroHyperVec(space, dimensions)` returns a `DenseNeuroHyperVec`: a 3D grid plus any number of named axes (subject, condition, session, …). It supports sub-volume extraction, reductions (`ReductionOp`), concatenation, splitting and permutation. Several advanced operations (`glm`, `extractFeatures`, `save`) throw "not yet implemented". **[Time Series → Hypervectors](/guide/time-series#hypervectors-5d-and-beyond)** lists what works and what throws.
 
 ## Display building blocks
 
