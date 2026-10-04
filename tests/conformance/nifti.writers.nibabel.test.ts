@@ -106,6 +106,12 @@ describe.skipIf(!enabled)('NIfTI writers checked by nibabel (opt-in: NIJ_NIBABEL
   let dir: string;
   let views: Record<string, NibabelView>;
   const affine = obliqueAffine();
+  const shearedAffine = [
+    [2, 0.5, 0, -10],
+    [0, 2, 0, 20],
+    [0, 0, 2, 5],
+    [0, 0, 0, 1],
+  ];
   const files: Record<string, string> = {};
 
   beforeAll(async () => {
@@ -115,6 +121,7 @@ describe.skipIf(!enabled)('NIfTI writers checked by nibabel (opt-in: NIJ_NIBABEL
     files.dense = join(dir, 'dense.nii.gz');
     files.denseInt16 = join(dir, 'dense_int16.nii');
     files.big = join(dir, 'big.nii');
+    files.sheared = join(dir, 'sheared.nii.gz');
 
     const space3 = new NeuroSpace([X, Y, Z], undefined, undefined, undefined, affine);
     const volData = new Float32Array(expectedData(1));
@@ -136,6 +143,10 @@ describe.skipIf(!enabled)('NIfTI writers checked by nibabel (opt-in: NIJ_NIBABEL
     );
     fillVec(big);
     await writeVec(big, files.big);
+
+    const sheared = new Float32NeuroVec(new NeuroSpace([X, Y, Z, T], undefined, undefined, undefined, shearedAffine));
+    fillVec(sheared);
+    await writeVec(sheared, files.sheared);
 
     views = nibabelInspect(Object.values(files));
   }, 300_000);
@@ -164,9 +175,22 @@ describe.skipIf(!enabled)('NIfTI writers checked by nibabel (opt-in: NIJ_NIBABEL
     expect(view.data).toEqual(expectedData(nt));
   });
 
-  it('writes the time spacing as the fourth zoom', () => {
+  it('writes the time spacing as the fourth zoom, with seconds only when it is known', () => {
     expect(views[files.denseInt16].zooms[3]).toBeCloseTo(2.5, 6);
+    expect(views[files.denseInt16].units).toEqual(['mm', 'sec']);
     expect(views[files.dense].zooms[3]).toBe(1);
+    expect(views[files.dense].units).toEqual(['mm', 'unknown']);
+    // A BigNeuroVec always has a time spacing (here 1).
     expect(views[files.big].zooms[3]).toBe(1);
+    expect(views[files.big].units).toEqual(['mm', 'sec']);
+  });
+
+  it('writes a sheared affine as sform only, which nibabel reads exactly', () => {
+    const view = views[files.sheared];
+    expect(view.qform_code).toBe(0);
+    expect(view.sform_code).toBe(1);
+    expectAffineClose(view.sform, shearedAffine);
+    expectAffineClose(view.affine, shearedAffine);
+    expect(view.data).toEqual(expectedData(T));
   });
 });

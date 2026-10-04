@@ -10,7 +10,9 @@ in the pull request that makes the change.
 Upgrading: `readVol` now takes `space.spacing` from the affine rather than
 from `pixdim`. Callers that need the raw `pixdim[1..3]` should use
 `readHeader().spacing`. See Changed. The `TypeError` export is removed; import
-`NeuroimTypeError` instead. See Removed.
+`NeuroimTypeError` instead. See Removed. `writeVol`/`writeVec` now reject
+`compress`/`format` options that contradict a `.nii` or `.nii.gz` path, for
+example `{ compress: true }` with a `.nii` path. See Changed.
 
 ### Added
 
@@ -66,6 +68,16 @@ from `pixdim`. Callers that need the raw `pixdim[1..3]` should use
 
 ### Changed
 
+- **Breaking:** `writeVol`, `writeVec` and `write_vol` throw a `NeuroimError`
+  with code `INVALID_ARGUMENT`, and write nothing, when `compress` or
+  `format` contradicts a NIfTI extension: `{ compress: true }` or
+  `format: 'NIFTI_GZ'` with a `.nii` path, or `{ compress: false }` with a
+  `.nii.gz` path. Previously `{ compress: true }` with a `.nii` path wrote
+  gzip bytes that `readVol` could not open. Rename the file or drop the
+  option.
+- `readVec` sets the time spacing of its 4D `space` (`space.spacing[0]`) to
+  the header's `pixdim[4]` when that is finite and positive, instead of
+  always 1, so `writeVec(await readVec(path), out)` keeps the TR.
 - `readVol` sets `space.spacing` to the voxel sizes of the selected transform,
   that is, the column norms of `space.trans`, instead of `pixdim[1..3]`. These
   are the values nibabel returns from `nibabel.affines.voxel_sizes(img.affine)`
@@ -137,11 +149,17 @@ from `pixdim`. Callers that need the raw `pixdim[1..3]` should use
     `SparseNeuroVec` are time-last with geometry from their 4D `space`. Any
     other `NeuroVec` throws `INVALID_ARGUMENT`. The full affine is written as
     qform and sform, as `writeVol` does, the datatype follows the data, and
-    `pixdim[4]` is the time spacing if the space has one, else 1.
+    `pixdim[4]` is the time spacing if the space has one (units mm and
+    seconds), else 1 (units mm).
 - `writeVol` sets `pixdim[1..3]` to the voxel sizes implied by the affine
   (its column norms), which the qform needs to reproduce the affine.
   Previously it wrote `space.spacing`, which can disagree with the affine.
   The datatype code now always matches the bytes written.
+- `writeVol` and `writeVec` no longer write an approximate qform for a
+  sheared affine, which a qform cannot represent (nibabel read
+  `[[2, .5, 0], [0, 2, 0], [0, 0, 2]]` back as a 7° rotation). They set
+  `qform_code` to 0 and keep the exact sform. Dimensions above 32767, the
+  NIfTI-1 limit, throw `INVALID_ARGUMENT` instead of wrapping.
 - `readVol` and `readNiftiArrayBuffer` no longer add `scl_inter` when
   `scl_slope` is 0 or non-finite. Such a slope means "no scaling" (NIfTI-1
   spec, nibabel), so voxel values are now returned exactly as stored.

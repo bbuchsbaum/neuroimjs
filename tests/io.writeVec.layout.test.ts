@@ -170,6 +170,7 @@ describe('writeVec: time-last DenseNeuroVec', () => {
 
     const bytes = await niftiBytes(file);
     expect(rawHeader(bytes).pixdim4).toBeCloseTo(2.5, 6);
+    expect(rawHeader(bytes).units).toBe(10); // NIFTI_UNITS_MM | NIFTI_UNITS_SEC
     expect((await readHeader(file)).datatype).toBe('INT16');
     await verifyFile(file, affine);
   });
@@ -181,7 +182,7 @@ describe('writeVec: time-last DenseNeuroVec', () => {
     await writeVec(vec, file);
     const bytes = await niftiBytes(file);
     expect(rawHeader(bytes).pixdim4).toBe(1);
-    expect(rawHeader(bytes).units & 0x07).toBe(2); // NIFTI_UNITS_MM
+    expect(rawHeader(bytes).units).toBe(2); // NIFTI_UNITS_MM, time unit unspecified
   });
 
   it('round-trips readVol({ index }) for every frame against getVolume(t)', async () => {
@@ -231,6 +232,73 @@ describe('writeVec: time-first BigNeuroVec', () => {
     const second = path.join(dir, 'roundtrip-2.nii');
     await writeVec(big, second);
     await verifyFile(second, affine);
+  });
+});
+
+describe('writeVec: TR round trip', () => {
+  it('readVec takes the time spacing from pixdim[4], so readVec -> writeVec keeps the TR', async () => {
+    const affine = obliqueAffine();
+    const vec = new Float32NeuroVec(new NeuroSpace([X, Y, Z, T], [2, 3, 4, 2.5], undefined, undefined, affine));
+    fill(vec);
+    const first = path.join(dir, 'tr-1.nii');
+    await writeVec(vec, first);
+
+    const big = await readVec(first);
+    expect(big.space.spacing[0]).toBeCloseTo(2.5, 6);
+    const second = path.join(dir, 'tr-2.nii.gz');
+    await writeVec(big, second);
+    const raw = rawHeader(await niftiBytes(second));
+    expect(raw.pixdim4).toBeCloseTo(2.5, 6);
+    expect(raw.units).toBe(10);
+    await verifyFile(second, affine);
+  });
+});
+
+describe('writeVec / writeVol: sheared affines', () => {
+  const sheared = [
+    [2, 0.5, 0, -10],
+    [0, 2, 0, 20],
+    [0, 0, 2, 5],
+    [0, 0, 0, 1],
+  ];
+
+  it('omits the qform (code 0) and keeps the exact sform', async () => {
+    const vec = new Float32NeuroVec(new NeuroSpace([X, Y, Z, T], undefined, undefined, undefined, sheared));
+    fill(vec);
+    const file = path.join(dir, 'sheared.nii');
+    await writeVec(vec, file);
+
+    const raw = rawHeader(await niftiBytes(file));
+    expect(raw.codes).toEqual([0, 1]);
+    expectAffineClose((await readHeader(file)).affine, sheared);
+    const vol = await readVol(file, { index: 2 });
+    expectAffineClose(vol.space.trans.to2DArray(), sheared);
+    expect(vol.getAt(1, 2, 3)).toBe(tag(1, 2, 3, 2));
+    const bytes = await niftiBytes(file);
+    const ab = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+    expectAffineClose(readNiftiArrayBuffer(ab).space.trans.to2DArray(), sheared);
+  });
+
+  it('still writes a qform for an oblique affine without shear', async () => {
+    const vec = new Float32NeuroVec(new NeuroSpace([X, Y, Z, T], undefined, undefined, undefined, obliqueAffine()));
+    const file = path.join(dir, 'not-sheared.nii');
+    await writeVec(vec, file);
+    expect(rawHeader(await niftiBytes(file)).codes).toEqual([1, 1]);
+  });
+});
+
+describe('writeVec: dimension limits', () => {
+  it('rejects a dimension above the NIfTI-1 int16 limit with INVALID_ARGUMENT', async () => {
+    const vec = new SparseNeuroVec(new NeuroSpace([1, 1, 1, 40000]), new Map());
+    const file = path.join(dir, 'too-long.nii');
+    let error: unknown;
+    try {
+      await writeVec(vec, file);
+    } catch (e) {
+      error = e;
+    }
+    expect(isNeuroimError(error, 'INVALID_ARGUMENT')).toBe(true);
+    await expect(fs.stat(file)).rejects.toThrow();
   });
 });
 

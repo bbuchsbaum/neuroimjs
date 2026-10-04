@@ -218,12 +218,12 @@ pair.cleanup()
 Things to know before relying on `BigNeuroVec` for large data:
 
 - **It is held fully in memory.** `readVec` reads and decompresses the file once and copies every frame into one `Float32Array`; nothing is written to disk and nothing is memory-mapped. For runs too large for memory, use `FileBackedNeuroVec` or `MappedNeuroVec` (above).
-- **`vec.space` is not the image geometry.** Because the shape is time-first, `NeuroSpace` treats `[T, X, Y]` as the spatial axes. The file's 3D space, including the full affine, is `volumeSpace`, and `getVolume(t)` returns volumes on it (`bigNeuroVecSeq` takes `volumeSpace` from the first input volume). The TR is not read: the time axis gets spacing 1.
+- **`vec.space` is not the image geometry.** Because the shape is time-first, `NeuroSpace` treats `[T, X, Y]` as the spatial axes. The file's 3D space, including the full affine, is `volumeSpace`, and `getVolume(t)` returns volumes on it (`bigNeuroVecSeq` takes `volumeSpace` from the first input volume). The time axis gets the header's `pixdim[4]` (the TR) as its spacing when that is positive, else 1.
 - **`mask` is ignored**, and `useBigVec` no longer changes anything.
 
 ### Writing 4D data
 
-`writeVec` writes either layout. It reads the layout from the class: a `BigNeuroVec` is time-first and takes its geometry from `volumeSpace`, while a `DenseNeuroVec` (`Float32NeuroVec`, `Int16NeuroVec`, …) or `SparseNeuroVec` is time-last and takes it from its 4D `space`. The file is always NIfTI `[X, Y, Z, T]`, with the full affine stored as both qform and sform. Other `NeuroVec` implementations are rejected with `INVALID_ARGUMENT`.
+`writeVec` writes either layout. It reads the layout from the class: a `BigNeuroVec` is time-first and takes its geometry from `volumeSpace`, while a `DenseNeuroVec` (`Float32NeuroVec`, `Int16NeuroVec`, …) or `SparseNeuroVec` is time-last and takes it from its 4D `space`. The file is always NIfTI `[X, Y, Z, T]`, with the full affine stored as both qform and sform (sform only if the affine is sheared, which a qform cannot represent). Other `NeuroVec` implementations are rejected with `INVALID_ARGUMENT`.
 
 ```ts
 import { NeuroSpace, Float32NeuroVec, writeVec, readHeader, readVol } from 'neuroimjs'
@@ -239,7 +239,7 @@ hdr.dim // [4, 3, 4, 5, 6, 1, 1, 1]
 const frame = await readVol('bold_out.nii.gz', { index: 5 }) // same affine as bold.getVolume(5)
 ```
 
-`pixdim[4]` is the vec's time spacing when its space has one (`spacing[3]` here; `spacing[0]` for a `BigNeuroVec`), otherwise 1. `readVec` does not read it back.
+`pixdim[4]` is the vec's time spacing when its space has one (`spacing[3]` here; `spacing[0]` for a `BigNeuroVec`), otherwise 1; the time unit is seconds when the spacing is known. `readVec` reads it back as `space.spacing[0]`.
 
 ## Hypervectors (5D and beyond)
 

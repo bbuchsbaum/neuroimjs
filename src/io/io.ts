@@ -420,6 +420,9 @@ export async function readVolList(
  * (`dim = [T, X, Y, Z]`, `getAt(i, j, k, t)`); its spatial geometry, including
  * the full affine, is available as `volumeSpace` and on every `getVolume(t)`.
  *
+ * The time axis of `space` gets `pixdim[4]` (the TR) as its spacing when the
+ * header has a finite positive value, else 1.
+ *
  * `useBigVec` is accepted for compatibility and no longer changes behaviour.
  * `mask` is currently ignored.
  */
@@ -463,9 +466,11 @@ export async function readVec(
 
   // Legacy time-first 4D space: NeuroSpace treats the leading three dims as
   // spatial, so this space does not describe world geometry. volumeSpace does.
+  // The time axis gets pixdim[4] (the TR) when the header has a usable one.
+  const tr = Number(header.pixDims?.[4]);
   const space4d = new NeuroSpace(
     [volIndices.length, ...volumeSpace!.dim],
-    [1, ...volumeSpace!.spacing],
+    [Number.isFinite(tr) && tr > 0 ? tr : 1, ...volumeSpace!.spacing],
     [0, ...volumeSpace!.origin]
   );
   return new BigNeuroVec(data!, space4d, { storage: 'memory', volumeSpace, shareData: true });
@@ -483,9 +488,10 @@ export async function readVec(
  * throws `INVALID_ARGUMENT`.
  *
  * The header carries the full spatial affine as both qform and sform (codes
- * 1), as {@link writeVol} does. `pixdim[4]` is the vec's time spacing when its
- * space has one (`spacing[3]` time-last, `spacing[0]` time-first), else 1;
- * spatial units are mm and the time unit is left unspecified. The datatype
+ * 1), as {@link writeVol} does; a sheared affine is written as sform only.
+ * When the vec's space has a time spacing (`spacing[3]` time-last,
+ * `spacing[0]` time-first) it becomes `pixdim[4]` and the units are mm and
+ * seconds; otherwise `pixdim[4]` is 1 and the units are mm only. The datatype
  * follows the data (`SparseNeuroVec` writes FLOAT32) unless `dataType` is
  * given. Compression follows the extension, as for {@link writeVol}.
  */
@@ -525,7 +531,7 @@ function niftiVecLayout(vec: NeuroVec): {
   dims: number[];
   affine: number[][];
   data: TypedArray;
-  timeStep: number;
+  timeStep: number | undefined;
 } {
   if (vec instanceof BigNeuroVec) {
     const [nt, nx, ny, nz] = vec.dim;
@@ -534,7 +540,7 @@ function niftiVecLayout(vec: NeuroVec): {
       dims: [nx, ny, nz, nt],
       affine: vec.volumeSpace.trans.to2DArray(),
       data: vec.getData(),
-      timeStep: spacing.length === 4 ? spacing[0] : 1,
+      timeStep: spacing.length === 4 ? spacing[0] : undefined,
     };
   }
   if (vec instanceof DenseNeuroVec || vec instanceof SparseNeuroVec) {
@@ -553,7 +559,7 @@ function niftiVecLayout(vec: NeuroVec): {
       dims: [nx, ny, nz, nt],
       affine: vec.space.trans.to2DArray(),
       data,
-      timeStep: spacing.length === 4 ? spacing[3] : 1,
+      timeStep: spacing.length === 4 ? spacing[3] : undefined,
     };
   }
   throw new ValueError(
@@ -686,7 +692,11 @@ async function createNiftiBuffer(vol: NeuroVol, dataType?: string): Promise<Arra
  * `dims` is `[X, Y, Z]` or `[X, Y, Z, T]` and `data` is in NIfTI order
  * (x fastest). `affine` is the 4x4 voxel-to-world matrix; it is stored as both
  * qform and sform, and `pixdim[1..3]` are its column norms so the qform
- * reproduces it. `timeStep` becomes `pixdim[4]` for 4D images. The datatype
+ * reproduces it; if the affine has shear, which a qform cannot represent, the
+ * qform is omitted (`qform_code` 0) and only the exact sform is written.
+ * `timeStep`, when known (finite and positive), becomes `pixdim[4]` of a 4D
+ * image and sets the time unit to seconds; otherwise `pixdim[4]` is 1 and the
+ * time unit is left unspecified. The datatype
  * follows `data` unless `dataType` is given; either way the header and the
  * bytes agree.
  */
@@ -695,7 +705,7 @@ function encodeNifti1(
   affine: number[][],
   data: TypedArray,
   dataType?: string,
-  timeStep = 1
+  timeStep?: number
 ): ArrayBuffer {
   if (dims.length !== 3 && dims.length !== 4) {
     throw new ValueError(`Cannot write a ${dims.length}D image as NIfTI; expected 3D or 4D`, {
@@ -703,7 +713,18 @@ function encodeNifti1(
       details: { dim: [...dims] },
     });
   }
+  if (dims.some((d) => !Number.isInteger(d) || d < 1 || d > 32767)) {
+    throw new ValueError(`NIfTI-1 dimensions must be integers in 1..32767, got [${dims.join(', ')}]`, {
+      code: 'INVALID_ARGUMENT',
+      details: { dim: [...dims] },
+    });
+  }
   const q = matToQuatern(affine);
+  // A qform is a rotation times per-axis scales, so it cannot express shear.
+  // Rather than writing an approximate qform (as a non-polar quaternion fit
+  // would), omit it and let readers use the exact sform.
+  const writeQform = isRotationTimesScale(affine);
+  const timeKnown = dims.length === 4 && timeStep !== undefined && Number.isFinite(timeStep) && timeStep > 0;
   const { datatypeCode, bitpix } = getDataTypeInfo(dataType ?? data.constructor.name);
   // Convert to the exact type named in the header (also covers inputs such as
   // Uint8ClampedArray that have no NIfTI code and default to FLOAT32).
@@ -770,7 +791,7 @@ function encodeNifti1(
   
   // Set pixdim: qfac (handedness), the voxel sizes implied by the affine,
   // then the time step.
-  const pixdim4 = dims.length === 4 && Number.isFinite(timeStep) && timeStep > 0 ? timeStep : 1;
+  const pixdim4 = timeKnown ? (timeStep as number) : 1;
   headerView.setFloat32(76, q.qfac, true); // pixdim[0]
   headerView.setFloat32(80, q.pixdim[0], true); // pixdim[1]
   headerView.setFloat32(84, q.pixdim[1], true); // pixdim[2]
@@ -793,8 +814,9 @@ function encodeNifti1(
   // Set slice_code
   headerView.setUint8(122, 0);
   
-  // Set xyzt_units (spatial units = mm, time units = unknown)
-  headerView.setUint8(123, 2); // NIFTI_UNITS_MM
+  // Set xyzt_units: NIFTI_UNITS_MM (2), plus NIFTI_UNITS_SEC (8) when the
+  // time step is known.
+  headerView.setUint8(123, timeKnown ? 2 | 8 : 2);
   
   // Set cal_max and cal_min
   headerView.setFloat32(124, 0.0, true);
@@ -830,16 +852,16 @@ function encodeNifti1(
   // only sform — as the previous implementation did — loses the orientation for
   // those readers.
 
-  // Set qform_code = 1 (NIFTI_XFORM_SCANNER_ANAT)
-  headerView.setInt16(252, 1, true);
+  // Set qform_code = 1 (NIFTI_XFORM_SCANNER_ANAT), or 0 for a sheared affine
+  headerView.setInt16(252, writeQform ? 1 : 0, true);
 
   // Set sform_code = 1
   headerView.setInt16(254, 1, true);
 
-  // Set quatern_b, quatern_c, quatern_d
-  headerView.setFloat32(256, q.quatern[0], true);
-  headerView.setFloat32(260, q.quatern[1], true);
-  headerView.setFloat32(264, q.quatern[2], true);
+  // Set quatern_b, quatern_c, quatern_d (zero when the qform is omitted)
+  headerView.setFloat32(256, writeQform ? q.quatern[0] : 0, true);
+  headerView.setFloat32(260, writeQform ? q.quatern[1] : 0, true);
+  headerView.setFloat32(264, writeQform ? q.quatern[2] : 0, true);
 
   // Set qoffset_x, qoffset_y, qoffset_z
   headerView.setFloat32(268, q.qoffset[0], true);
@@ -972,6 +994,27 @@ function roundClampToInt<T extends TypedArray>(
     out[i] = v;
   }
   return out;
+}
+
+/**
+ * True when the affine's 3x3 part is a rotation (possibly improper) times
+ * per-axis scales, i.e. its column-normalised matrix R satisfies RᵀR = I
+ * within 1e-4. Only such affines can be stored exactly as a qform.
+ */
+function isRotationTimesScale(affine: number[][]): boolean {
+  const cols = [0, 1, 2].map((c) => [affine[0][c], affine[1][c], affine[2][c]]);
+  const unit = cols.map((col) => {
+    const n = Math.hypot(col[0], col[1], col[2]);
+    return n > 0 ? col.map((v) => v / n) : null;
+  });
+  if (unit.some((u) => u === null)) return false;
+  for (let i = 0; i < 3; i++) {
+    for (let j = 0; j < 3; j++) {
+      const dot = unit[i]![0] * unit[j]![0] + unit[i]![1] * unit[j]![1] + unit[i]![2] * unit[j]![2];
+      if (Math.abs(dot - (i === j ? 1 : 0)) > 1e-4) return false;
+    }
+  }
+  return true;
 }
 
 /**
