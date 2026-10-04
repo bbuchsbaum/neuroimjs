@@ -16,8 +16,8 @@ const hot  = ColorMapFactory.createHot({ range: [3, 8] })
 // Diverging — (negative, neutral, positive, steps?, config?) — for signed stats
 const div = ColorMapFactory.createDiverging('#2166ac', '#ffffff', '#b2182b', 256, { range: [-5, 5] })
 
-// From a named preset
-const viridis = ColorMapFactory.fromPreset('viridis', { range: [0, 1] })
+// From a named preset (names are case-sensitive)
+const viridis = ColorMapFactory.fromPreset('Viridis', { range: [0, 1] })
 
 // Custom — from a list of colors…
 const custom = ColorMapFactory.fromColors(['#000', '#7c5cff', '#22d3ee'], { range: [0, 1] })
@@ -33,7 +33,7 @@ const banded = ColorMapFactory.createMultiStop(
 List everything available:
 
 ```ts
-ColorMapFactory.getAvailablePresets()   // ['grayscale', 'hot', 'viridis', …]
+ColorMapFactory.getAvailablePresets()   // ['OrRd', 'PuBu', …, 'Viridis', 'RdBu', …, 'Inferno', 'Grayscale']
 ```
 
 ::: tip NaN voxels
@@ -58,13 +58,15 @@ const stack = new VolStack(base, overlay)
 
 ### Thresholding & opacity
 
-Each `VolLayer` exposes observable rendering parameters — `range` (the display window `[min, max]`), `threshold` (`[low, high]` mask), and `opacity` — so you can show only suprathreshold voxels of an overlay above an anatomical underlay.
+Each `VolLayer` has a display window (`range`), a threshold and an opacity. Change them with the setters, which also update the colormap and invalidate the layer's slice cache:
 
 ```ts
-overlay.range = [3, 8]            // display window
-overlay.threshold = [3.1, 8]     // voxels outside this range become transparent
-overlay.opacity = 0.8            // blend over the layer beneath
+overlay.setRange([-8, 8])          // display window [min, max]
+overlay.setThreshold([-3.1, 3.1])  // values strictly between -3.1 and 3.1 become transparent
+overlay.setOpacity(0.8)            // blend over the layer beneath
 ```
+
+The threshold `[low, high]` hides values *inside* the interval and leaves values outside it visible, so a symmetric `[-t, t]` keeps both tails of a signed statistic. `[0, 0]` (the default), or any pair with `low >= high`, disables thresholding. Assigning the observable fields directly (`overlay.threshold = …`) does not update the colormap; use the setters.
 
 Then feed the stack to any viewer:
 
@@ -80,4 +82,4 @@ await SimpleOrthogonalViewer.create(container, stack, { showCrosshair: true })
 | Positive stats (z, t, F) | `createHot` |
 | Signed contrasts | `createDiverging` |
 | Labels / parcellations | `createCategorical` |
-| Continuous, perceptual | `fromPreset('viridis')` |
+| Continuous, perceptual | `fromPreset('Viridis')` |

@@ -24,7 +24,7 @@ features:
     linkText: Data structures
   - icon: 💾
     title: NIfTI I/O
-    details: Read and write NIfTI in Node or the browser, with gzip support and affine-aware spatial metadata.
+    details: Read NIfTI-1/2 in the browser or Node and write NIfTI-1 from Node, with gzip, intensity scaling and affine-aware spatial metadata.
     link: /guide/io
     linkText: Reading & writing
   - icon: 🎨
@@ -56,18 +56,20 @@ Everything below is a real `neuroimjs` viewer rendering a real MNI152 brain — 
 <BrainViewer mode="ortho" :height="520" caption="SimpleOrthogonalViewer — axial · coronal · sagittal, synchronized." />
 
 ```ts
-import { SimpleOrthogonalViewer } from 'neuroimjs'
-import { loadNiftiVolume } from './load' // the small helper shown in Getting Started
+import {
+  readNiftiArrayBuffer, VolLayer, VolStack, ColorMapFactory, SimpleOrthogonalViewer,
+} from 'neuroimjs/browser'
 
-const { vol, range } = await loadNiftiVolume('/data/mni152_t1.nii.gz')
-const stack = makeStack(vol, range)
+const vol = readNiftiArrayBuffer(await (await fetch('/data/mni152_t1.nii.gz')).arrayBuffer())
+const range = vol.getRange()
+const stack = new VolStack(new VolLayer('t1', vol, ColorMapFactory.createGrayscale({ range }), range))
 
-await SimpleOrthogonalViewer.create(document.getElementById('viewer'), stack, {
+await SimpleOrthogonalViewer.create(document.getElementById('viewer')!, stack, {
   layout: 'top-bottom',
   showCrosshair: true,
 })
 ```
 
-::: tip Pre-1.0 — and actively hardening
-neuroimjs is at `0.1.0`. The viewer stack, core data structures, NIfTI I/O, geometry, processing, and analysis primitives are covered by a fully green test suite. Remaining pre-1.0 work is structural consolidation — merging a few duplicate implementations behind the existing APIs. The **[Stability matrix](/guide/stability)** lists the verified, up-to-date status of every feature.
+::: tip Pre-1.0
+neuroimjs is in the 0.5 series. The viewers, core data structures, geometry, NIfTI reading, processing and analysis primitives are tested and safe to build on; minor releases can still change the API, and the [changelog](https://github.com/bbuchsbaum/neuroimjs/blob/main/CHANGELOG.md) records every change. The **[Stability matrix](/guide/stability)** gives the status of each module, including the parts that are experimental or missing.
 :::

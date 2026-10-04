@@ -61,8 +61,9 @@ screen pixel
 In practice the viewers do this for you and hand you the result:
 
 ```ts
-viewer.onPointerMove(({ worldCoord, imageCoord }) => {
-  // worldCoord: [x, y, z] in mm, or null when outside the brain
+// axial is a SingleSliceViewer
+axial.onPointerMove(({ worldCoord, imageCoord }) => {
+  // worldCoord: [x, y, z] in mm, or null when outside the image
 })
 ```
 
@@ -71,7 +72,7 @@ viewer.onPointerMove(({ worldCoord, imageCoord }) => {
 1. **Show world (mm) to users**, not voxel indices.
 2. **Name variables for their space** — `worldCoord`, `voxelCoord`, `sliceCoord`.
 3. **Don't assume axis directions** — the affine may include flips or rotations; read it from the header.
-4. **Account for spacing** — anisotropic voxels affect every transform and every radius (this is the root of a known [searchlight caveat](/guide/stability)).
+4. **Account for spacing** — anisotropic voxels affect every transform and every radius. Searchlight and ROI radii are in mm and spacing-aware; `SpatialFilter` sigmas and morphology radii are in voxels.
 
 ## Common pitfalls
 
