@@ -2,6 +2,8 @@
 
 Novel visualization features that leverage PIXI.js's GPU-accelerated rendering, custom shaders, particle systems, and real-time interactivity.
 
+> **Status.** This is an ideas document, not a plan or a description of the library. Only idea 5 exists: depth-enhanced slice viewing is implemented as `DepthEnhancedLayer` (blur and parallax, without the shadow/ambient-occlusion part) and enabled with `SingleSliceViewer`'s `enableDepthEnhancement` option; see [Composable Views](../guide/composable-views.md#depth-cues). Everything else here is unimplemented.
+
 ## 1. Particle-Based Connectivity Flow
 
 Animate particles flowing along white matter tracts or functional connectivity paths.
