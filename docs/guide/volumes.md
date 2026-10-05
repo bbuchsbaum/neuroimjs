@@ -31,10 +31,10 @@ counts.getData().constructor.name // 'Int16Array'
 - The memory layout is x-fastest, as in NIfTI: `index = i + j·nx + k·nx·ny`.
 - `getAt`/`setAt` throw a `RangeError` for out-of-bounds or non-integer indices.
 - `setData(array)` copies new values into the existing buffer.
-- `createNeuroVol(type, space, data?)` picks the class from a type string: `'float32'`, `'float64'`, `'int8'`, `'uint8'`, `'int16'` or `'int32'`.
+- `createNeuroVol(type, space, data?)` picks the class from a type string: `'float32'`, `'float64'`, `'int8'`, `'uint8'`, `'int16'`, `'uint16'` or `'int32'`. `'uint32'` throws a `NeuroimError` with code `UNSUPPORTED_DATATYPE`.
 
-::: warning `uint16` volumes
-`createNeuroSlice` has no `'uint16'` case, so `getSlice()` on a `UInt16NeuroVol` throws `Unsupported TypedArray type: uint16`. A `UInt16NeuroVol` therefore cannot be displayed or sliced. Both `readVol` and `readNiftiArrayBuffer` load an unscaled `UINT16` NIfTI file as a `UInt16NeuroVol`. An unscaled `UINT32` file throws in `readVol` (`Unsupported TypedArray type: uint32`) and is promoted to `Float64NeuroVol` by `readNiftiArrayBuffer`. Convert a `UInt16NeuroVol` before slicing or display: `new FloatNeuroVol(vol.space, Float32Array.from(vol.getData()))`.
+::: warning `uint32` volumes
+There is no `UInt32NeuroVol`. An unscaled `UINT32` NIfTI file throws `UNSUPPORTED_DATATYPE` in `readVol` and is promoted to `Float64NeuroVol` by `readNiftiArrayBuffer`. `SparseNeuroVol` rejects `dataType: 'uint32'` when constructed.
 :::
 
 ## Masks: `LogicalNeuroVol`

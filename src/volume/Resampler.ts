@@ -2,6 +2,7 @@ import { NeuroVol } from './NeuroVol';
 import { NeuroSpace } from '../geometry/NeuroSpace';
 import { AxisSet3D } from '../geometry/Axis';
 import { TypedArray } from '../types';
+import { NeuroimError } from '../errors';
 import { Matrix, inverse } from 'ml-matrix';
 import {
   FloatNeuroVol,
@@ -190,7 +191,10 @@ export class Resampler {
     } else if (data instanceof Uint16Array) {
       return new UInt16NeuroVol(space, data as Uint16Array);
     } else {
-      throw new Error('Unsupported data type for NeuroVol creation.');
+      throw new NeuroimError(
+        'UNSUPPORTED_DATATYPE',
+        `Unsupported data type for NeuroVol creation: ${data.constructor.name}`
+      );
     }
   }
 }

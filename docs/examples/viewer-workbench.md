@@ -11,7 +11,7 @@ The complete interactive viewer: three synchronized planes, a thresholded statis
 - *Jump to* moves to a named peak in MNI coordinates; *PNG* saves the axial view.
 
 ::: info About the data
-The anatomy is the MNI152 2009a asymmetric T1w template (TemplateFlow `tpl-MNI152NLin2009aAsym`) at 1 mm. The overlay is a **synthetic** z-map generated in the browser (Gaussian clusters at motor and default-mode coordinates) so the page has no extra download; any NIfTI statistical map on the same or a different grid works the same way (see [Getting Started](/guide/getting-started) for the `UINT16` caveat).
+The anatomy is the MNI152 2009a asymmetric T1w template (TemplateFlow `tpl-MNI152NLin2009aAsym`) at 1 mm. The overlay is a **synthetic** z-map generated in the browser (Gaussian clusters at motor and default-mode coordinates) so the page has no extra download; any NIfTI statistical map on the same or a different grid works the same way.
 :::
 
 ## What it's made of

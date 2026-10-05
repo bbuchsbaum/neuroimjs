@@ -66,7 +66,7 @@ Mismatches with nibabel are recorded in the `KNOWN` table in
 `nifti.conformance.test.ts`. Each entry has a human-readable `reason` and a
 `match` pattern for the error the check throws while the bug exists. For a
 wrong value this is the check's own mismatch assertion; for a crash it is the
-thrown error, such as `Unsupported TypedArray type: uint16`. The test passes
+thrown error, such as `Unsupported TypedArray type: uint32`. The test passes
 only if the check fails with a matching message. It fails in two other cases:
 
 - **The check passes.** The bug is fixed and the entry must be removed.
