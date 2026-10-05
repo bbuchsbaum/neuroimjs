@@ -10,10 +10,15 @@ in the pull request that makes the change.
 Upgrading: `readVol` now takes `space.spacing` from the affine rather than
 from `pixdim`. Callers that need the raw `pixdim[1..3]` should use
 `readHeader().spacing`. See Changed. The `TypeError` export is removed; import
-`NeuroimTypeError` instead. See Removed.
+`NeuroimTypeError` instead. See Removed. `writeVol`/`writeVec` now reject
+`compress`/`format` options that contradict a `.nii` or `.nii.gz` path, for
+example `{ compress: true }` with a `.nii` path. See Changed.
 
 ### Added
 
+- `npm run conformance:writers` (opt-in, needs uv) loads files written by
+  `writeVol` and `writeVec` with nibabel and checks shape, datatype, qform,
+  sform, zooms and voxel values.
 - `toInt32Labels()` converts a label volume (or its voxel data) to an
   `Int32Array` by value, for every typed-array datatype. It rejects
   non-finite, non-integer and out-of-range values with an error naming the
@@ -63,10 +68,22 @@ from `pixdim`. Callers that need the raw `pixdim[1..3]` should use
 
 ### Changed
 
+- **Breaking:** `writeVol`, `writeVec` and `write_vol` throw a `NeuroimError`
+  with code `INVALID_ARGUMENT`, and write nothing, when `compress` or
+  `format` contradicts a NIfTI extension: `{ compress: true }` or
+  `format: 'NIFTI_GZ'` with a `.nii` path, or `{ compress: false }` with a
+  `.nii.gz` path. Previously `{ compress: true }` with a `.nii` path wrote
+  gzip bytes that `readVol` could not open. Rename the file or drop the
+  option.
+- `readVec` sets the time spacing of its 4D `space` (`space.spacing[0]`) to
+  the header's `pixdim[4]` when that is finite and positive, instead of
+  always 1, so `writeVec(await readVec(path), out)` keeps the TR.
+
 - The `SparseNeuroVol` constructor rejects `dataType: 'uint32'` up front with
   a `NeuroimError` (code `UNSUPPORTED_DATATYPE`). Previously construction
   succeeded and `getAt`/`setAt` worked, but slicing or densifying failed later
   with a plain `Error`.
+
 - `readVol` sets `space.spacing` to the voxel sizes of the selected transform,
   that is, the column norms of `space.trans`, instead of `pixdim[1..3]`. These
   are the values nibabel returns from `nibabel.affines.voxel_sizes(img.affine)`
@@ -117,6 +134,39 @@ from `pixdim`. Callers that need the raw `pixdim[1..3]` should use
 
 ### Fixed
 
+- `writeVol`, `writeVec` and `write_vol` gzip a path ending in `.nii.gz`.
+  Previously they gzipped only with `{ compress: true }` or
+  `format: 'NIFTI_GZ'`, so `writeVol(vol, 'x.nii.gz')` wrote uncompressed
+  bytes that `readVol` then failed to read ("incorrect header check").
+  Compression now follows the extension (`.nii.gz` gzipped, `.nii` not), and
+  a `compress` or `format` option that contradicts a NIfTI extension throws a
+  `NeuroimError` with code `INVALID_ARGUMENT` before anything is written. For
+  other extensions the options decide as before.
+- `writeVec` writes time-last vecs and oblique geometry correctly.
+  - **Affected:** it assumed the time-first `[T, X, Y, Z]` layout of
+    `BigNeuroVec`, so a time-last `Float32NeuroVec` (or any `DenseNeuroVec`)
+    was written with header dims `[Y, Z, T, X]` over unchanged bytes. It wrote
+    only an axis-aligned sform built from spacing and origin, dropping
+    rotations and flips, and no qform. Without `dataType` the header always
+    said FLOAT32 whatever the bytes were, so an `Int16NeuroVec` could not be
+    read back. A `SparseNeuroVec` could not be written at all.
+  - **Now:** the layout comes from the class: `BigNeuroVec` is time-first
+    with geometry from `volumeSpace`; `DenseNeuroVec` subclasses and
+    `SparseNeuroVec` are time-last with geometry from their 4D `space`. Any
+    other `NeuroVec` throws `INVALID_ARGUMENT`. The full affine is written as
+    qform and sform, as `writeVol` does, the datatype follows the data, and
+    `pixdim[4]` is the time spacing if the space has one (units mm and
+    seconds), else 1 (units mm).
+- `writeVol` sets `pixdim[1..3]` to the voxel sizes implied by the affine
+  (its column norms), which the qform needs to reproduce the affine.
+  Previously it wrote `space.spacing`, which can disagree with the affine.
+  The datatype code now always matches the bytes written.
+- `writeVol` and `writeVec` no longer write an approximate qform for a
+  sheared affine, which a qform cannot represent (nibabel read
+  `[[2, .5, 0], [0, 2, 0], [0, 0, 2]]` back as a 7° rotation). They set
+  `qform_code` to 0 and keep the exact sform. Dimensions above 32767, the
+  NIfTI-1 limit, throw `INVALID_ARGUMENT` instead of wrapping.
+
 - uint16 volumes can be sliced and displayed. `createNeuroVol` accepted
   `'uint16'` but `createNeuroSlice` did not, so a UINT16 NIfTI loaded through
   `readVol` or `readNiftiArrayBuffer` threw `Unsupported TypedArray type:
@@ -132,6 +182,7 @@ from `pixdim`. Callers that need the raw `pixdim[1..3]` should use
 - `ColorMap.getColorArray()` accepts every numeric TypedArray, as
   `fillImageData()` already did. It used to reject anything but `number[]`
   and `Float32Array`, including the slices of integer volumes.
+
 - `readVol` and `readNiftiArrayBuffer` no longer add `scl_inter` when
   `scl_slope` is 0 or non-finite. Such a slope means "no scaling" (NIfTI-1
   spec, nibabel), so voxel values are now returned exactly as stored.

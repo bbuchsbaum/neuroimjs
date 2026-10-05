@@ -23,7 +23,9 @@ export async function read_vol(input: string | ArrayBuffer): Promise<NeuroVol> {
 /**
  * Write a NeuroVol to a NIfTI file.
  *
- * Thin wrapper over {@link writeVol}; see `io.ts` for the implementation.
+ * Thin wrapper over {@link writeVol} with default options; see `io.ts` for
+ * the implementation. Compression follows the extension: a `.nii.gz` path is
+ * gzipped and a `.nii` path is not.
  *
  * @param vol - The volume to write.
  * @param filePath - Destination path.
