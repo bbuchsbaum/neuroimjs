@@ -37,6 +37,14 @@ describe('VolumeGeometry', () => {
     expect(() => layer.replaceVolume(volume([0, 0, 0], 5))).not.toThrow();
     expect(() => layer.replaceVolume(volume([0, 3, 0]))).toThrow(/^replaceVolume: Volume geometry mismatch/);
   });
+
+  it('invalidates both render and texture versions when replacing a compatible volume', () => {
+    const layer = new VolLayer('overlay', volume(), ColorMap.fromPreset('Viridis'));
+    const previous = { version: layer.version, textureVersion: layer.textureVersion };
+    layer.replaceVolume(volume([0, 0, 0], 5));
+    expect(layer.version).toBe(previous.version + 1);
+    expect(layer.textureVersion).toBe(previous.textureVersion + 1);
+  });
 });
 
 describe('report colormap presets', () => {

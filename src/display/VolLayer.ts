@@ -310,8 +310,8 @@ export class VolLayer {
     this.colorMap.setRange(this.range);
     this.colorMap.setThreshold(this.threshold);
 
-    // Invalidate cached slices
-    this.sliceCache.clear();
+    // Notify mounted views as well as discarding cached pixels/textures.
+    this.invalidateCache();
   }
 
   /**

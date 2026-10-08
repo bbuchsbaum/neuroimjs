@@ -13,6 +13,7 @@ import { IntensityReadout } from './IntensityReadout';
 import type { CrossHairOptions } from './CrossHair';
 import type { ViewerTheme } from './ViewerTheme';
 import { OrientationLabelOptions } from './OrientationLabelLayer';
+import { PointMarkerLayer, PointMarker, PointMarkerOptions } from './PointMarkerLayer';
 
 /**
  * Event types for SingleSliceViewer
@@ -187,6 +188,7 @@ export class SingleSliceViewer {
    * Reference to the image layer for depth enhancement
    */
   private imageLayer: ImageLayer | null = null;
+  private markerLayer: PointMarkerLayer | null = null;
 
   /**
    * Private constructor. Use static factory methods to create instances.
@@ -442,6 +444,30 @@ export class SingleSliceViewer {
    */
   public setCoord(coord: number[]): void {
     this.viewer.setPosition(coord);
+  }
+
+  /** Draw world-coordinate point markers with a constant screen-pixel size. */
+  public setMarkers(markers: PointMarker[], options: PointMarkerOptions = {}): void {
+    if (!this.markerLayer) {
+      const layer = new PointMarkerLayer(this.imageLayer!.neuroSpace, this.orientation);
+      layer.setMarkers(markers, options);
+      this.markerLayer = layer;
+      this.viewer.view.addLayer!('point-markers', layer);
+    } else {
+      this.markerLayer.setMarkers(markers, options);
+      this.viewer.view.renderSlice?.();
+    }
+  }
+
+  /** IDs of markers actually drawn in the current slice and viewport. */
+  public markersOnSlice(): string[] {
+    return this.markerLayer?.markersOnSlice() ?? [];
+  }
+
+  /** Slice index selected by the same rounding rule as the viewer model. */
+  public worldToSliceIndex(xyz: [number, number, number]): number {
+    const space = this.imageLayer!.neuroSpace;
+    return Math.round(space.coordToGrid(xyz)[space.whichDim(this.orientation.k)]);
   }
 
   /**

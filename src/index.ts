@@ -86,6 +86,7 @@ export { LazyList } from './utils/LazyList';
 
 // Composable view components (NEW)
 export { SingleSliceViewer } from './display/SingleSliceViewer';
+export type { PointMarker, PointMarkerOptions } from './display/PointMarkerLayer';
 export { ViewSynchronizer } from './display/ViewSynchronizer';
 export type { SingleSliceViewerOptions, SingleSliceViewerEvents } from './display/SingleSliceViewer';
 export type { ViewSynchronizerOptions } from './display/ViewSynchronizer';

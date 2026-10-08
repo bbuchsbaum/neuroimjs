@@ -10,6 +10,7 @@ export type {
 } from './display/OrthogonalImageViewer';
 export { SliceViewer } from './display/SliceViewer';
 export { SingleSliceViewer } from './display/SingleSliceViewer';
+export type { PointMarker, PointMarkerOptions } from './display/PointMarkerLayer';
 export { ViewSynchronizer } from './display/ViewSynchronizer';
 export type { ViewSynchronizerOptions } from './display/ViewSynchronizer';
 
