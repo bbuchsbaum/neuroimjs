@@ -15,6 +15,8 @@ export interface PresetConfig {
   range?: [number, number];
   threshold?: [number, number];
   alpha?: number | number[];
+  /** Interpolation space for createDiverging; defaults to RGB. */
+  mode?: 'rgb' | 'lab' | 'lch' | 'oklab';
 }
 
 /**
@@ -270,7 +272,7 @@ export class ColorMapFactory {
     const pos = typeof positiveColor === 'string' ? positiveColor : tupleToHex(positiveColor);
     
     const colors: Color[] = chroma.scale([neg, neu, pos])
-      .mode('lch')
+      .mode(config?.mode ?? 'rgb')
       .colors(steps)
       .map(hex => {
         const rgb = chroma(hex).rgb();

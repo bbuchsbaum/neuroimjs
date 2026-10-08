@@ -233,6 +233,56 @@ export class ColorMap {
     return this.colors;
   }
 
+  /** Sample the current lookup table across its data range for a legend. */
+  toStops(n: number = 9): { value: number; color: string }[] {
+    if (!Number.isInteger(n) || n < 2) {
+      throw new RangeError('Legend stop count must be an integer of at least 2');
+    }
+    const [min, max] = this.range;
+    return Array.from({ length: n }, (_, i) => {
+      const value = min + (max - min) * i / (n - 1);
+      return { value, color: this.legendColor(value) };
+    });
+  }
+
+  /** CSS gradient built from every LUT entry, including the transparent threshold band. */
+  toCSSGradient(direction: string = '90deg'): string {
+    const [min, max] = this.range;
+    const [low, high] = this.threshold;
+    const stops = this.colors.map((color, i) => {
+      const pct = this.colors.length === 1 ? 0 : 100 * i / (this.colors.length - 1);
+      const value = min + (max - min) * pct / 100;
+      return { pct, color: this.formatLegendColor(color, low < high && value > low && value < high) };
+    });
+    if (low < high) {
+      for (const boundary of [low, high]) {
+        if (boundary < min || boundary > max) continue;
+        const pct = 100 * (boundary - min) / (max - min);
+        const opaque = this.legendColor(boundary, false);
+        const transparent = this.legendColor(boundary, true);
+        stops.push({ pct, color: boundary === low ? opaque : transparent });
+        stops.push({ pct, color: boundary === low ? transparent : opaque });
+      }
+      stops.sort((a, b) => a.pct - b.pct);
+    }
+    return `linear-gradient(${direction}, ${stops.map(s => `${s.color} ${s.pct}%`).join(', ')})`;
+  }
+
+  private legendColor(value: number, forceTransparent?: boolean): string {
+    const [min, max] = this.range;
+    const index = Math.max(0, Math.min(this.colors.length - 1,
+      Math.floor((value - min) / (max - min) * (this.colors.length - 1))));
+    const color = this.colors[index];
+    const [low, high] = this.threshold;
+    const transparent = forceTransparent === true || (forceTransparent !== false && low < high && value > low && value < high);
+    return this.formatLegendColor(color, transparent);
+  }
+
+  private formatLegendColor(color: Color, transparent: boolean): string {
+    const alpha = transparent ? 0 : (color[3] ?? 1);
+    return `rgba(${Math.round(color[0] * 255)}, ${Math.round(color[1] * 255)}, ${Math.round(color[2] * 255)}, ${alpha})`;
+  }
+
   /**
    * Sets the data range [min, max] for color mapping. Data below min maps
    * to the first color, data above max maps to the last color.
