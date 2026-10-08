@@ -32,6 +32,13 @@ const reds = ColorMapFactory.createGradient('#000000', '#ff0000', 256, { range: 
 const labels = ColorMapFactory.createCategorical(12)
 ```
 
+`createDiverging` interpolates in RGB by default. Its `mode` config can be
+`'rgb'`, `'lab'`, `'lch'` or `'oklab'`; use `{ mode: 'lch' }` to reproduce the
+intermediate colors from versions before this change. For a legend that follows
+the actual color table, call `div.toStops(9)` for value/color labels or use
+`div.toCSSGradient('to right')` as a CSS background. Both use the map's current
+range and transparent threshold band.
+
 `fromPreset` names are **case-sensitive** and throw on a miss: `fromPreset('viridis')` → `Error: Unknown preset: viridis`. `'hot'` is not a preset — use `createHot`. The full list:
 
 ```ts

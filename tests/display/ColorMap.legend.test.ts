@@ -12,6 +12,12 @@ describe('ColorMap legend helpers', () => {
     expect(() => map.toStops(1)).toThrow(RangeError);
     map.setRange([0, 4]);
     expect(map.toStops(2).map(stop => stop.value)).toEqual([0, 4]);
+    map.setRange([5, 5]); // invalid ranges are normalized by ColorMap
+    expect(map.getRange()).toEqual([0, 1]);
+    expect(map.toStops(2)).toEqual([
+      { value: 0, color: 'rgba(0, 0, 255, 1)' },
+      { value: 1, color: 'rgba(255, 0, 0, 1)' },
+    ]);
   });
 
   it('uses LUT colors and alpha, with a transparent threshold band', () => {

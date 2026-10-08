@@ -14,7 +14,7 @@ export interface PointMarker {
 }
 
 export interface PointMarkerOptions {
-  /** Full thickness of the visible slab in millimeters. Omit to use nearest-slice rounding. */
+  /** Full thickness in millimeters (half on each side); use 8 for a ±4 mm slab. Omit for nearest-slice rounding. */
   slabMm?: number;
   shape?: 'ring' | 'cross' | 'dot';
   sizePx?: number;
@@ -115,7 +115,8 @@ export class PointMarkerLayer implements SliceLayer {
     for (const marker of this.candidates) {
       if (marker.x < rect.x0 || marker.x > rect.x1 || marker.y < rect.y0 || marker.y > rect.y1) continue;
       const { x, y } = ctx.project(marker.x, marker.y);
-      if (x < 0 || x > ctx.width || y < 0 || y > ctx.height - ctx.insets.bottom) continue;
+      if (x < ctx.insets.left || x > ctx.width - ctx.insets.right ||
+          y < ctx.insets.top || y > ctx.height - ctx.insets.bottom) continue;
       this.drawnIds.push(marker.id);
       const outline = this.options.outline === false ? null : (this.options.outline ?? 0x000000);
       const radius = size / 2;

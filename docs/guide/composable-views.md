@@ -35,7 +35,28 @@ There are matching factories `createSagittal` and `createCoronal`, plus `create(
 | `width`, `height` | container size | Initial canvas size only; the view re-fits to its container afterwards. |
 | `enableDepthEnhancement`, `depthEnhancementOptions` | `false` | Blurred, parallax-shifted neighbouring slices as a depth cue. See [Custom Layers](/guide/custom-layers#depthenhancedlayer). |
 
-The view sets the element you pass to `width: 100%; height: 100%` and watches it with a `ResizeObserver`, so size the *parent* (a grid cell, a panel) and the view follows. No manual resize handling is needed.
+The view leaves the host element's styles alone and watches its size with a
+`ResizeObserver`. Give a grid cell or panel an explicit height when you want
+one; a host with auto height grows to the canvas's initial height. No manual
+resize handling is needed.
+
+### Point markers
+
+```ts
+axial.setMarkers([
+  { id: 'focus-1', xyz: [12, -18, 20], color: '#ffcc00' },
+], { slabMm: 8, shape: 'ring', sizePx: 9 })
+
+const visibleIds = axial.markersOnSlice()
+const focusSlice = axial.worldToSliceIndex([12, -18, 20])
+```
+
+Marker coordinates are in world millimeters. `slabMm` is the **full** slab
+thickness, so `8` includes points up to 4 mm on either side of the displayed
+plane. When omitted, selection uses the same nearest-slice rounding as
+`worldToSliceIndex`. Markers stay the same pixel size through zoom and pan;
+`markersOnSlice()` lists only IDs currently drawn inside the image and the
+viewport's usable area. `setMarkers([])` clears them.
 
 ### Events
 

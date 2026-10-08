@@ -16,6 +16,11 @@ example `{ compress: true }` with a `.nii` path. See Changed.
 
 ### Added
 
+- `SingleSliceViewer.setMarkers()` draws world-coordinate ring, cross, or dot
+  markers at a constant screen size; `markersOnSlice()` returns the IDs drawn
+  in the current viewport. `slabMm` is the full slab thickness. (#29)
+- `ColorMap.toStops()` and `toCSSGradient()` derive legends from the current
+  lookup table and transparent threshold band. (#30)
 - `npm run conformance:writers` (opt-in, needs uv) loads files written by
   `writeVol` and `writeVec` with nibabel and checks shape, datatype, qform,
   sform, zooms and voxel values.
@@ -68,6 +73,10 @@ example `{ compress: true }` with a `.nii` path. See Changed.
 
 ### Changed
 
+- `ColorMapFactory.createDiverging()` now interpolates in RGB by default,
+  avoiding a green hue between blue and a light neutral. Existing callers will
+  see different intermediate colors; pass `{ mode: 'lch' }` to retain the old
+  interpolation. `lab` and `oklab` are also available. (#27)
 - **Breaking:** `writeVol`, `writeVec` and `write_vol` throw a `NeuroimError`
   with code `INVALID_ARGUMENT`, and write nothing, when `compress` or
   `format` contradicts a NIfTI extension: `{ compress: true }` or
@@ -134,6 +143,10 @@ example `{ compress: true }` with a `.nii` path. See Changed.
 
 ### Fixed
 
+- `VolLayer.replaceVolume()` now invalidates render and texture versions, so
+  mounted slices show the replacement without moving the crosshair. (#26)
+- Viewer mounting preserves host sizing styles. Fixed-height grid cells stay
+  stable, and auto-height hosts still grow to show the canvas. (#28)
 - `writeVol`, `writeVec` and `write_vol` gzip a path ending in `.nii.gz`.
   Previously they gzipped only with `{ compress: true }` or
   `format: 'NIFTI_GZ'`, so `writeVol(vol, 'x.nii.gz')` wrote uncompressed

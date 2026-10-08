@@ -159,8 +159,6 @@ export class SliceView implements ISliceView {
     });
     this.domElement.appendChild(this.wrapper);
     this.wrapper.appendChild(this.canvas);
-    this.canvas.style.position = 'absolute';
-    this.canvas.style.inset = '0';
     this.canvas.style.width = '100%';
     this.canvas.style.height = '100%';
     this.canvas.style.display = 'block';

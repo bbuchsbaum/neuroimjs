@@ -47,4 +47,19 @@ describe('PointMarkerLayer', () => {
     expect(layer.markersOnSlice()).toEqual(['a']);
     layer.dispose();
   });
+
+  it('excludes markers under every reserved viewport edge', () => {
+    const layer = new PointMarkerLayer(space, axes);
+    layer.setMarkers([
+      { id: 'center', xyz: [3, 3, 3] },
+      { id: 'left', xyz: [0, 3, 3] },
+      { id: 'right', xyz: [6, 3, 3] },
+      { id: 'top', xyz: [3, 0, 3] },
+      { id: 'bottom', xyz: [3, 6, 3] },
+    ]);
+    layer.renderSlice(3, [3, 3, 3], axes, {} as never);
+    layer.layoutScreen({ ...ctx, insets: { top: 10, right: 40, bottom: 40, left: 10 } });
+    expect(layer.markersOnSlice()).toEqual(['center']);
+    layer.dispose();
+  });
 });
