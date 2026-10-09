@@ -1375,7 +1375,10 @@ function updateReadout(): void {
     return;
   }
   if (!hover) {
-    text.innerHTML = `<span class="muted">Click: cursor · Wheel: slice · ⌘+wheel: zoom · Shift+drag: box · Double-click: open</span>`;
+    text.innerHTML =
+      view.clientWidth < 1100
+        ? `<span class="muted">Click: cursor · Wheel: slice · ⌘+wheel: zoom · Dbl-click: open</span>`
+        : `<span class="muted">Click: cursor · Wheel: slice · ⌘+wheel: zoom · Shift+drag: box · Double-click: open</span>`;
     text.title = 'Click: cursor · Wheel or ↑↓: slice · ⌘/Ctrl+wheel: zoom all cells · Drag: pan · Shift+drag: zoom to box · 0: fit · Double-click: open in Ortho · ←→: step subjects · F: facet focus';
     return;
   }
@@ -1612,7 +1615,7 @@ export function drawSide(a: Analysis, order: number[]): void {
       <h3>Similarity <span class="sub" id="simread">${state.contrast}</span></h3>
       <canvas id="simmat"></canvas>
       <div class="cbwrap"><canvas id="simbar"></canvas></div>
-      <p class="note">Spatial correlation between subjects' raw ${st}-maps on their common support (${a.basis.support.length.toLocaleString()} of ${a.set.maskIndex.length.toLocaleString()} voxels: valid in every compared map), in display order${a.basis.excluded.length ? `; ${a.basis.excluded.length} not comparable (hatched): ${a.basis.excluded.map((e) => `${e.id} ${SV.reasonShort(e, a)}`).join(', ')}` : ''}. The same values place maps in Space.${a.k >= 2 ? (state.sort === 'similarity' ? ' Boxes: suggested subgroups (largest gap in the average-linkage tree; a heuristic, not a test).' : ' Choose “Similarity (seriated)” order to see subgroup blocks.') : ''} Click a cell or label to select a subject.</p>
+      <p class="note">Spatial correlation between subjects' raw ${st}-maps on their common support (${a.basis.support.length.toLocaleString()} of ${a.set.maskIndex.length.toLocaleString()} voxels: valid in every compared map), in display order${a.basis.excluded.length ? `; ${a.basis.excluded.length} not comparable (hatched): ${a.basis.excluded.map((e) => `${e.id} ${SV.reasonShort(e, a)}`).join(', ')}` : ''}. ${SV.spaceBasisNote(a) ?? 'The same values place maps in Space.'}${a.k >= 2 ? (state.sort === 'similarity' ? ' Boxes: suggested subgroups (largest gap in the average-linkage tree; a heuristic, not a test).' : ' Choose “Similarity (seriated)” order to see subgroup blocks.') : ''} Click a cell or label to select a subject.</p>
     </section>
     <section>
       <h3>Summary</h3>
@@ -2085,7 +2088,10 @@ async function main(): Promise<void> {
   if (state.slice !== null && (!Number.isInteger(state.slice) || state.slice < 0)) state.slice = null;
   if (state.slice !== null) {
     const axisLen = dim[AXIS[state.orient]];
-    if (state.slice >= axisLen) state.slice = null;
+    if (state.slice >= axisLen) {
+      urlNotes.push(`slice ${state.slice + 1} beyond the ${axisLen} ${state.orient} slices → cursor slice`);
+      state.slice = null;
+    }
   }
   if (wantPeak || !state.cursor) {
     const a = await getAnalysis(state.model, state.contrast, state.stat);
