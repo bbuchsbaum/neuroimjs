@@ -96,6 +96,12 @@ test.describe('Space (S4)', () => {
     expect(p.method).toBe('metric-smacof');
     expect(p.status).toBe('degenerate-fallback');
     await expect(page.locator('#side')).toContainText('Metric MDS of 1 − r');
+    // The grid note describes the data actually loaded (synthetic: anisotropic), not a hard-coded template.
+    await expect(page.locator('#side')).toContainText('Grid 36 × 44 × 30 voxels of 3 × 2.5 × 3.5 mm');
+    await expect(page.locator('#side')).not.toContainText('MNI152NLin2009cAsym');
+    // s17's leave-one-out r is undefined: the range uses the defined values and says so.
+    await expect(page.locator('#side')).not.toContainText('– to –');
+    await expect(page.locator('#side')).toContainText('undefined for 1');
     expect(p.notPlaced.sort()).toEqual(['s16', 's17']);
     expect(p.placed.map((q) => q.id).sort()).toEqual(['s01', 's02', 's03', 's04', 's05', 's06', 's07', 's08', 's09', 's10', 's11', 's12', 's13', 's14', 's15']);
     // Same pattern (r = 1) shares one anchor but keeps both IDs.

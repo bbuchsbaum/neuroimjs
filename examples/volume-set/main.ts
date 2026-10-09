@@ -1653,7 +1653,7 @@ async function drawSpace(light = false): Promise<void> {
     ctx.textBaseline = 'bottom';
     const zoomNote = state.space ? ` · layout zoom ${state.space.s.toFixed(1)}×` : '';
     const cropNote = state.zoom ? ` · anatomy crop ${state.zoom.s.toFixed(1)}× (set in Montage)` : '';
-    const stressNote = Number.isFinite(res.stress1) ? `Stress-1 ${res.stress1.toFixed(3)} · ` : '';
+    const stressNote = Number.isFinite(res.stress1) ? `${res.method === 'metric-smacof' ? 'metric ' : ''}Stress-1 ${res.stress1.toFixed(3)} · ` : '';
     ctx.fillText(`${stressNote}${m} placed${zoomNote}${cropNote}`, plot.x + plot.w, plot.y + plot.h + (stripH ? 4 : pad - 2));
   }
   drawOverlay();
@@ -1704,18 +1704,19 @@ function drawSpaceOverlay(ctx: CanvasRenderingContext2D, W: number, H: number): 
   const inStrip = g.strip.includes(m);
   if (!anchor && !inStrip) return;
   const asp = sliceAspect(a.set);
-  const w = Math.round(Math.max(150, Math.min(280, g.thumbW * 2.1)));
+  const w = Math.round(Math.max(200, Math.min(280, g.thumbW * 2.1)));
+  const capH = 34; // ID line + caveat line under the picture
   const h = Math.round(w / asp);
   const ax = anchor ? anchor.sx : W / 2;
   const ay = anchor ? anchor.sy : g.plot.y + g.plot.h - h / 2;
   const x = Math.round(Math.max(4, Math.min(W - w - 4, ax - w / 2)));
-  const y = Math.round(Math.max(4, Math.min(H - h - 24, ay - h / 2)));
+  const y = Math.round(Math.max(4, Math.min(H - h - capH - 4, ay - h / 2)));
   const v = placeCrop(cropWindow(a.set), { x, y, w, h });
   ctx.save();
   ctx.shadowColor = 'rgba(0,0,0,0.6)';
   ctx.shadowBlur = 14;
   ctx.fillStyle = '#000';
-  ctx.fillRect(v.dest.x, v.dest.y, v.dest.w, v.dest.h + 20);
+  ctx.fillRect(v.dest.x, v.dest.y, v.dest.w, v.dest.h + capH);
   ctx.restore();
   drawCellImage(ctx, underImage(a), overImage(a, m), v);
   drawMissing(ctx, a, m, v);
@@ -1725,7 +1726,7 @@ function drawSpaceOverlay(ctx: CanvasRenderingContext2D, W: number, H: number): 
   }
   ctx.strokeStyle = m === sel ? THEME.brand : THEME.lineStrong;
   ctx.lineWidth = 1.5;
-  ctx.strokeRect(v.dest.x - 0.75, v.dest.y - 0.75, v.dest.w + 1.5, v.dest.h + 21.5);
+  ctx.strokeRect(v.dest.x - 0.75, v.dest.y - 0.75, v.dest.w + 1.5, v.dest.h + capH + 1.5);
   ctx.fillStyle = THEME.text;
   ctx.font = `600 11px ${FONT.mono}`;
   ctx.textAlign = 'left';
@@ -1734,12 +1735,16 @@ function drawSpaceOverlay(ctx: CanvasRenderingContext2D, W: number, H: number): 
   ctx.font = `10.5px ${FONT.sans}`;
   ctx.fillStyle = THEME.muted;
   ctx.textAlign = 'right';
-  const grp = anchor?.group && anchor.group.length > 1 ? `same pattern (r = 1): ${anchor.group.map((q) => a.ids[q]).join(', ')}` : `${state.orient} ${sliceIndex() + 1} · not a position`;
-  ctx.fillText(truncate(ctx, grp, v.dest.w - 60), v.dest.x + v.dest.w - 6, v.dest.y + v.dest.h + 10);
+  if (anchor?.group && anchor.group.length > 1) {
+    ctx.fillText(truncate(ctx, `same pattern (r = 1): ${anchor.group.map((q) => a.ids[q]).join(', ')}`, v.dest.w - 60), v.dest.x + v.dest.w - 6, v.dest.y + v.dest.h + 10);
+  }
+  // The caveat has its own line so it is never truncated.
+  ctx.textAlign = 'left';
+  ctx.fillText(`${state.orient} slice ${sliceIndex() + 1}; placed by the whole volume`, v.dest.x + 6, v.dest.y + v.dest.h + 25);
   // Leader to the true anchor.
   if (anchor && !(ax >= v.dest.x && ax <= v.dest.x + v.dest.w && ay >= v.dest.y && ay <= v.dest.y + v.dest.h)) {
     const cx = Math.max(v.dest.x, Math.min(v.dest.x + v.dest.w, ax));
-    const cy = Math.max(v.dest.y, Math.min(v.dest.y + v.dest.h + 20, ay));
+    const cy = Math.max(v.dest.y, Math.min(v.dest.y + v.dest.h + capH, ay));
     ctx.strokeStyle = THEME.muted;
     ctx.lineWidth = 1;
     ctx.beginPath();
@@ -1757,7 +1762,7 @@ function drawSpaceOverlay(ctx: CanvasRenderingContext2D, W: number, H: number): 
     ctx.stroke();
   }
   spaceZoomHit = { view: v, outer: { x, y, w, h }, member: m, analysis: a };
-  g.zoomBox = { member: m, box: { x: v.dest.x, y: v.dest.y, w: v.dest.w, h: v.dest.h + 20 } };
+  g.zoomBox = { member: m, box: { x: v.dest.x, y: v.dest.y, w: v.dest.w, h: v.dest.h + capH } };
 }
 
 /** Keyboard: arrows move focus to the nearest placed map in that direction (not-placed maps step along their strip). */
@@ -2270,6 +2275,7 @@ function drawSide(a: Analysis, order: number[]): void {
   const k = order.length;
   const flagged = order.filter((m) => a.looZ[m] < ATYPICAL_Z).map((m) => a.set.members[m].meta.subject);
   const loo = Array.from(a.loo);
+  const looFinite = loo.filter(Number.isFinite);
   const st = STAT_LABEL[state.stat];
   const unit = state.stat === 'beta' ? ' (model units)' : '';
   const smoothNote =
@@ -2293,7 +2299,7 @@ function drawSide(a: Analysis, order: number[]): void {
       <h3>Summary</h3>
       <dl>
         <dt>Subjects</dt><dd>${k}</dd>
-        <dt>Median r</dt><dd>${fmtR(median(loo))} <span class="muted">(${fmtR(Math.min(...loo))} to ${fmtR(Math.max(...loo))})</span></dd>
+        <dt>Median r</dt><dd>${fmtR(median(loo))} <span class="muted">(${fmtR(Math.min(...looFinite))} to ${fmtR(Math.max(...looFinite))}${looFinite.length < loo.length ? `; undefined for ${loo.length - looFinite.length}` : ''})</span></dd>
         <dt>Atypical</dt><dd>${flagged.length ? flagged.join(', ') : 'none'}</dd>
         <dt>Subgroups</dt><dd class="wrap">${clusterSummary(a)}</dd>
       </dl>
@@ -2301,7 +2307,7 @@ function drawSide(a: Analysis, order: number[]): void {
     </section>
     <section>
       <h3>Orientation</h3>
-      <p class="note">Neurological: subject's left on screen left. Sagittal: anterior on the left. MNI152NLin2009cAsym, 2 mm.</p>
+      <p class="note">Neurological: subject's left on screen left. Sagittal: anterior on the left. Grid ${a.set.dim.join(' × ')} voxels of ${voxelSize(a.set)} mm${isAnisotropic(a.set) ? '; voxels are drawn square, so pictures are not to scale on this anisotropic grid' : ''}.</p>
     </section>`;
   drawColorbar(side.querySelector('#colorbar') as HTMLCanvasElement, cmap, state.range, state.thr, digits());
   drawSimMatrix(a, order);
@@ -2440,6 +2446,17 @@ function drawSimMatrix(a: Analysis, order: number[]): void {
   bctx.fillText(`r ${fmtR(lo)}`, 0, 12);
   bctx.textAlign = 'right';
   bctx.fillText(fmtR(hi), W, 12);
+}
+
+function voxelSize(set: VolumeSet): string {
+  const sp = set.space.spacing as number[];
+  const f = (x: number): string => String(+x.toFixed(2));
+  return isAnisotropic(set) ? sp.map(f).join(' × ') : f(sp[0]);
+}
+
+function isAnisotropic(set: VolumeSet): boolean {
+  const sp = set.space.spacing as number[];
+  return sp.some((x) => Math.abs(x - sp[0]) > 1e-6);
 }
 
 function median(v: number[]): number {
