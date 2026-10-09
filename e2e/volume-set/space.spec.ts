@@ -640,7 +640,7 @@ test.describe('Space v2 layers', () => {
     const p1 = await probe(page);
     expect(p1.runs).toBe(p0.runs);
     expect(p1.coords).toEqual(p0.coords);
-    await expect(page.locator('#side')).toContainText('not a confidence interval');
+    await expect(page.locator('#side')).toContainText(/not a confidence interval/i);
   });
 
   test('region layout is explicit: applied at the cursor, not refitted on cursor moves, and the whole-brain view returns from cache', async ({ page }) => {
@@ -680,13 +680,16 @@ test.describe('Space v2 layers', () => {
     await open(page, SPACE);
     const p = await probe(page);
     const box = (await page.locator('canvas.montage').boundingBox())!;
-    const target = p.placed.filter((q) => ['s08', 's09', 's10', 's11', 's12'].includes(q.id));
-    const xs = target.map((q) => q.x);
-    const ys = target.map((q) => q.y);
+    // The lasso selects what is circled: pictures (by their centres) where drawn.
+    const centre = (t: Thumb): [number, number] => [t.dest.x + t.dest.w / 2, t.dest.y + t.dest.h / 2];
+    const pics = p.thumbs.filter((t) => t.id !== 'mean' && !['s16', 's17'].includes(t.id));
+    const target = pics.filter((t) => ['s08', 's09', 's10', 's11', 's12'].includes(t.id));
+    const xs = target.map((t) => centre(t)[0]);
+    const ys = target.map((t) => centre(t)[1]);
     const [x0, x1, y0, y1] = [Math.min(...xs) - 12, Math.max(...xs) + 12, Math.min(...ys) - 12, Math.max(...ys) + 12];
-    // Only lasso if no other anchor falls inside the rectangle.
-    const others = p.placed.filter((q) => !target.includes(q) && q.x > x0 && q.x < x1 && q.y > y0 && q.y < y1);
-    expect(others.map((q) => q.id)).toEqual([]);
+    // Only lasso if no other picture centre falls inside the rectangle.
+    const others = pics.filter((t) => !target.includes(t) && centre(t)[0] > x0 && centre(t)[0] < x1 && centre(t)[1] > y0 && centre(t)[1] < y1);
+    expect(others.map((t) => t.id)).toEqual([]);
     await page.keyboard.down('Shift');
     await page.mouse.move(box.x + x0, box.y + y0);
     await page.mouse.down();
@@ -726,24 +729,25 @@ test.describe('Space v2 layers', () => {
     expect(url(page).get('cp')).toBeNull();
   });
 
-  test('contrast trajectories fit one pooled layout over subject × contrast maps', async ({ page }) => {
-    test.setTimeout(120_000);
-    await open(page, SPACE);
+  test('contrasts side by side share the current layout and report same-subject similarity', async ({ page }) => {
+    await open(page, `${SPACE}&subject=s03`);
     await toolbarReady(page);
-    const k0 = (await probe(page)).key!;
+    const p0 = await probe(page);
     await page.click('#sx-traj');
-    await page.waitForFunction((k) => {
-      const s = (window as unknown as { __vsSpace: { layout: string; key: string } }).__vsSpace;
-      return s.layout === 'ready' && s.key !== k;
-    }, k0, { timeout: 60_000 });
     await page.waitForFunction(() => new URL(location.href).searchParams.get('st') === '1', null, { timeout: 30_000 });
-    expect((await probe(page)).key).toContain('pooled=cue+delayearly+delaylate');
+    await expect(page.locator('#side')).toContainText('Across contrasts', { timeout: 60_000 });
+    await expect(page.locator('#side')).toContainText('the most similar other map is the same subject', { timeout: 60_000 });
+    // One panel per contrast, every one drawn from the same (unchanged) layout: no new fit.
+    const p1 = await probe(page);
+    expect(p1.runs).toBe(p0.runs);
+    expect(p1.key).toBe(p0.key);
+    const contrasts = new Set(p1.thumbs.filter((t) => t.id !== 'mean').map((t) => t.contrast));
+    expect([...contrasts].sort()).toEqual(['cue', 'delayearly', 'delaylate']);
     await page.click('#sx-traj');
-    await page.waitForFunction((k) => (window as unknown as { __vsSpace: { key: string } }).__vsSpace.key === k, k0);
     await page.waitForFunction(() => !new URL(location.href).searchParams.has('st'), null, { timeout: 30_000 });
   });
 
-  test('the lens magnifies but clicks still place the cursor through the drawn picture', async ({ page }) => {
+  test('the magnifier moves nothing and clicks still place the cursor', async ({ page }) => {
     await open(page, `${SPACE}&subject=s03`);
     await page.locator('canvas.montage').focus();
     await page.keyboard.press('l');
@@ -753,7 +757,10 @@ test.describe('Space v2 layers', () => {
     await page.mouse.move(box.x + a.x, box.y + a.y);
     await settle(page);
     await settle(page);
-    const t = (await probe(page)).thumbs.find((x) => x.id === 's03')!;
+    // The loupe magnifies what is drawn; no picture moves or grows.
+    const after = await probe(page);
+    expect(after.thumbs.map((x) => x.dest)).toEqual(p.thumbs.map((x) => x.dest));
+    const t = after.thumbs.find((x) => x.id === 's03')!;
     const px = t.dest.x + t.dest.w * 0.5;
     const py = t.dest.y + t.dest.h * 0.45;
     await page.mouse.click(box.x + px, box.y + py);

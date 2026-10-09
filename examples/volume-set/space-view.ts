@@ -242,8 +242,8 @@ export async function drawSpace(light = false): Promise<void> {
     `${a.set.size} ${st}-maps; not placed.`,
     '',
     ...(SX.trajectoryMode()
-      ? ['Position: one shared fit of every', 'subject × contrast map (1 − r).']
-      : ['Position: whole-volume similarity', `(1 − r, ${layout.kind === 'ready' ? methodShort(layout.out.result.method) : 'nonmetric MDS'}).`]),
+      ? [`Position: the ${a.contrast} layout,`, 'shared by every contrast panel.']
+      : [`Position: ${scopeShort(a)}`, `(1 − r, ${layout.kind === 'ready' ? methodShort(layout.out.result.method) : 'nonmetric MDS'}).`]),
     `Pictures: ${M.state.orient} slice ${M.sliceIndex() + 1}.`,
     'Axes and gaps are not results.',
   ];
@@ -456,7 +456,11 @@ export async function drawSpace(light = false): Promise<void> {
       }
       // Leaders and exact-position dots on top of every picture (with a dark halo), and only for pictures
       // that were moved: an unmoved picture is centred on its position, and a dot there would read as a cursor.
-      const movedPts = shown.filter((pt) => visible(pt) && Math.hypot((pt.tx ?? pt.sx) - pt.sx, (pt.ty ?? pt.sy) - pt.sy) > 2);
+      // A picture counts as moved only when the nudge is noticeable; a dot that would land inside another
+      // picture is not drawn (it would read as a mark on that map), and neither is its leader.
+      const boxes = shown.filter(visible).map((pt) => ({ m: pt.member, x: pt.tx ?? pt.sx, y: pt.ty ?? pt.sy }));
+      const inOther = (pt: SpacePoint): boolean => boxes.some((bx) => bx.m !== pt.member && Math.abs(pt.sx - bx.x) < thumbW / 2 + 2 && Math.abs(pt.sy - bx.y) < thumbH / 2 + 2);
+      const movedPts = shown.filter((pt) => visible(pt) && Math.hypot((pt.tx ?? pt.sx) - pt.sx, (pt.ty ?? pt.sy) - pt.sy) > Math.max(4, thumbW * 0.2) && !inOther(pt));
       for (const [width, color] of [
         [3, 'rgba(13,14,20,0.85)'],
         [1, 'rgba(200,202,220,0.8)'],
@@ -556,6 +560,12 @@ let lastScrolledSubject: string | null = null;
 
 /** Space extras on the overlay canvas: true-neighbour links and the hover/keyboard enlargement. */
 export function drawSpaceOverlay(ctx: CanvasRenderingContext2D, W: number, H: number): void {
+  spaceOverlayBody(ctx, W, H);
+  // The magnifier copies what is drawn, so it goes last.
+  SX.drawLoupe(ctx);
+}
+
+function spaceOverlayBody(ctx: CanvasRenderingContext2D, W: number, H: number): void {
   const g = spaceGeom;
   spaceZoomHit = null;
   SX.syncToolbar();
@@ -605,7 +615,7 @@ export function drawSpaceOverlay(ctx: CanvasRenderingContext2D, W: number, H: nu
   const w = dock ? dock.w : Math.round(Math.max(200, Math.min(280, g.thumbW * 2.1)));
   // The caveat wraps to the preview width so it is never cut; the caption grows to fit it.
   ctx.font = `10.5px ${FONT.sans}`;
-  const caveat = wrapText(ctx, `${M.state.orient} slice ${M.sliceIndex() + 1}; placed by whole volume`, w - 12);
+  const caveat = wrapText(ctx, `${M.state.orient} slice ${M.sliceIndex() + 1}; placed by ${basisOf(a).scope === 'subset' ? 'the region' : 'whole volume'}`, w - 12);
   const capH = 20 + 14 * caveat.length;
   const h = Math.round(w / asp);
   const ax = anchor ? anchor.sx : W / 2;
@@ -637,14 +647,14 @@ export function drawSpaceOverlay(ctx: CanvasRenderingContext2D, W: number, H: nu
   ctx.save();
   ctx.shadowColor = 'rgba(0,0,0,0.6)';
   ctx.shadowBlur = 14;
-  ctx.fillStyle = '#000';
+  ctx.fillStyle = THEME.bg;
   ctx.fillRect(v.dest.x, v.dest.y, v.dest.w, v.dest.h + capH);
   ctx.restore();
   drawCellImage(ctx, M.underSilhouette(a), M.overImage(a, m), v);
   M.drawMissing(ctx, a, m, v);
   if (M.state.cursor) {
     const [col, row] = gridToSlicePixel(a.set.dim, M.state.orient, M.state.cursor);
-    drawCrosshair(ctx, v, col, row);
+    drawCrosshair(ctx, v, col, row, 0.45);
   }
   ctx.strokeStyle = m === sel ? THEME.brand : THEME.lineStrong;
   ctx.lineWidth = 1.5;
@@ -680,8 +690,9 @@ export function drawSpaceOverlay(ctx: CanvasRenderingContext2D, W: number, H: nu
     ctx.restore();
   }
   if (anchor) {
-    ctx.strokeStyle = THEME.text;
-    ctx.fillStyle = THEME.bg;
+    // The focused map's position is marked in the focus colour; a hovered map's in white.
+    ctx.strokeStyle = m === sel ? THEME.brand : THEME.text;
+    ctx.fillStyle = m === sel ? THEME.brand : THEME.bg;
     ctx.lineWidth = 1.5;
     ctx.beginPath();
     ctx.arc(ax, ay, 3.5, 0, Math.PI * 2);
@@ -812,7 +823,7 @@ function methodName(method: string): string {
 /** One line a reader can trust at a glance: fit, how well local neighbourhoods survive, and solver robustness. */
 function trustLine(a: M.Analysis): string {
   const g = spaceGeom;
-  if (!g || g.a !== a || g.layout.kind !== 'ready' || SX.trajectoryMode()) return SX.trajectoryMode() ? 'Shared contrast layout' : 'Fitting…';
+  if (!g || g.a !== a || g.layout.kind !== 'ready') return 'Fitting…';
   const res = g.layout.out.result;
   const n = basisOf(a).eligible.length;
   if (res.method === 'exact' || res.method === 'none') return 'Placed exactly (too few maps for a fit).';
@@ -857,8 +868,7 @@ export function spaceSection(a: M.Analysis): string {
   const g = spaceGeom;
   const sel = M.selectedMember(a);
   const placedN = b.eligible.length;
-  // In contrast-trajectory mode the visible fit is pooled; the per-contrast panel then has no layout.
-  const layout = g?.a === a && !SX.trajectoryMode() ? g.layout : null;
+  const layout = g?.a === a ? g.layout : null;
   const support = `${b.support.length.toLocaleString()} of ${b.maskVoxels.toLocaleString()} mask voxels`;
   let fit = '';
   let nb = '';
@@ -907,7 +917,7 @@ export function spaceSection(a: M.Analysis): string {
         <h3>Neighbours <span class="sub">${a.ids[sel]}</span></h3>
         <table class="nb-table"><tr><th>rank</th><th>map</th><th>r</th><th>screen rank</th></tr>${rows}</table>
         ${mismatch}
-        <p class="note">Nearest by 1 − r over the whole common support (ties share a rank). Local preservation: <b>${Number.isFinite(pv) ? `${Math.round(pv * 100)}%` : 'n/a'}</b> — ${pres.definition}</p>
+        <p class="note">Nearest by 1 − r over ${basisOf(a).scope === 'subset' ? `the ${basisOf(a).support.length.toLocaleString()} voxels of the region (${basisOf(a).params.region})` : 'the whole common support'} (ties share a rank). Local preservation: <b>${Number.isFinite(pv) ? `${Math.round(pv * 100)}%` : 'n/a'}</b> — ${pres.definition}</p>
       </section>`;
     } else if (sel !== undefined) {
       const ex = b.excluded.find((e) => e.index === sel);
@@ -939,7 +949,7 @@ export function spaceSection(a: M.Analysis): string {
     <section>
       <h3>Layout <span class="sub">${placedN} of ${a.set.size} placed</span></h3>
       ${layout?.kind === 'ready' ? `<p class="trust">${trustLine(a)}</p>` : fit}
-      <p class="note">Positions summarise whole-volume similarity and stay fixed while you change slice, threshold, smoothing or cluster filter. Pictures are nudged apart to avoid overlap; dots mark exact positions. Neither axis has a meaning; for who resembles whom, use the Neighbours table.</p>
+      <p class="note">Positions summarise ${scopeLong(a)} and stay fixed while you change slice, threshold, smoothing or cluster filter. Pictures are nudged apart to avoid overlap; dots mark exact positions. Neither axis has a meaning; for who resembles whom, use the Neighbours table.</p>
       <details class="fit-details"${layout?.kind === 'ready' ? '' : ' open'}><summary>How the layout was fitted</summary>
         <dl class="fx">
           <dt>Similarity</dt><dd>signed Pearson r of raw ${M.STAT_LABEL[M.state.stat]}-maps on the common support (${support}); dissimilarity 1 − r</dd>
@@ -992,7 +1002,7 @@ export function wireSpaceSection(a: M.Analysis): void {
   if (retry) retry.onclick = () => retryLayout();
   const c = M.side.querySelector('#shepard') as HTMLCanvasElement | null;
   const g = spaceGeom;
-  if (!c || !g || g.layout.kind !== 'ready' || SX.trajectoryMode()) return;
+  if (!c || !g || g.layout.kind !== 'ready') return;
   const { pairs } = g.layout.out.result;
   const W = M.side.clientWidth;
   const H = 120;
@@ -1072,6 +1082,25 @@ function wrapText(ctx: CanvasRenderingContext2D, text: string, width: number): s
   }
   if (line) lines.push(line);
   return lines;
+}
+
+/** What the positions are computed from, in a few words (whole volume or the applied region). */
+function scopeShort(a: M.Analysis): string {
+  const b = basisOf(a);
+  return b.scope === 'subset' ? `similarity in a ${SX.opts.region?.radiusMm ?? ''} mm sphere` : 'whole-volume similarity';
+}
+
+function scopeLong(a: M.Analysis): string {
+  const b = basisOf(a);
+  return b.scope === 'subset' ? `similarity within ${b.params.region} (${b.support.length.toLocaleString()} voxels)` : 'whole-volume similarity';
+}
+
+/**
+ * Note for views outside Space that show the whole-brain basis while Space shows a regional one (the
+ * similarity matrix); null when they agree.
+ */
+export function spaceBasisNote(a: M.Analysis): string | null {
+  return M.state.mode === 'space' && basisOf(a).scope === 'subset' ? `Space currently uses similarity within ${basisOf(a).params.region}; this matrix is whole-brain.` : null;
 }
 
 /** Stress written like r elsewhere in the app (no leading zero), to three decimals. */
