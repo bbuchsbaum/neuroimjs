@@ -464,4 +464,82 @@ test.describe('Space (S4)', () => {
     expect(changed).toBe(true);
     expect((await probe(page)).runs).toBe(1);
   });
+
+  test('a failing layout worker leaves a recoverable state; Retry recovers and other views keep working', async ({ page }) => {
+    // Serve a worker that throws on its first job (no test hook in the app itself).
+    await page.route('**/embed.worker.ts*', (route) =>
+      route.fulfill({ status: 200, contentType: 'text/javascript', headers: { 'Cache-Control': 'no-store' }, body: "self.onmessage = () => { throw new Error('injected solver failure'); };" })
+    );
+    await page.goto(`/?${SPACE}`);
+    await page.waitForFunction(() => (window as unknown as { __vsReady?: boolean }).__vsReady === true, null, { timeout: 90_000 });
+    await page.waitForFunction(() => (window as unknown as { __vsSpace?: { layout: string } }).__vsSpace?.layout === 'error', null, { timeout: 60_000 });
+    await settle(page);
+    await expect(page.locator('#side')).toContainText('Layout failed');
+    await expect(page.locator('#space-retry')).toBeVisible();
+    const failed = await probe(page);
+    expect(failed.workers).toBe(0); // the crashed worker was terminated
+    // Other views stay usable while Space is in the failed state.
+    await page.click('[data-mode="montage"]');
+    await settle(page);
+    expect((await probe(page)).thumbs.filter((t) => t.id !== 'mean').length).toBe(17);
+    await page.click('[data-mode="space"]');
+    await page.waitForFunction(() => (window as unknown as { __vsSpace: { layout: string } }).__vsSpace.layout === 'error');
+    // Failures are not retried automatically: returning to Space did not start another fit.
+    expect((await probe(page)).runs).toBe(failed.runs);
+    // Restore the real worker and retry from the panel.
+    await page.unroute('**/embed.worker.ts*');
+    await settle(page);
+    await page.click('#space-retry');
+    await waitLayout(page);
+    const ok = await probe(page);
+    expect(ok.runs).toBe(failed.runs + 1);
+    expect(ok.method).toBe('metric-smacof');
+    expect(ok.placed.length).toBe(15);
+    await expect(page.locator('#side')).not.toContainText('Layout failed');
+  });
+});
+
+test.describe('Space on touch (emulated)', () => {
+  test.use({ hasTouch: true, isMobile: false, viewport: { width: 1180, height: 820 } });
+
+  test('tap places the cursor or selects; touch drag pans the layout; the list opens Ortho', async ({ page }) => {
+    await open(page, `${SPACE}&subject=s03`);
+    const box = (await page.locator('canvas.montage').boundingBox())!;
+    const p = await probe(page);
+    // Tap a picture pixel: cursor + focus, through the same cell transform as a click.
+    const t = p.thumbs.find((x) => x.id === 's03')!;
+    const px = t.dest.x + t.dest.w * 0.5;
+    const py = t.dest.y + t.dest.h * 0.4;
+    await page.touchscreen.tap(box.x + px, box.y + py);
+    await settle(page);
+    const col = Math.floor(t.crop.x + ((px - t.dest.x) / t.dest.w) * t.crop.w);
+    const row = Math.floor(t.crop.y + ((py - t.dest.y) / t.dest.h) * t.crop.h);
+    expect(url(page).get('cursor')).toBe(`${col},${44 - 1 - row},${url(page).get('slice')}`);
+    // Tap an ID label: selects without moving the cursor.
+    const cursor = url(page).get('cursor');
+    const s14 = p.placed.find((q) => q.id === 's14')!;
+    const t14 = p.thumbs.find((x) => x.id === 's14')!;
+    await page.touchscreen.tap(box.x + s14.x, box.y + t14.dest.y + t14.dest.h + 8);
+    await settle(page);
+    expect(url(page).get('subject')).toBe('s14');
+    expect(url(page).get('cursor')).toBe(cursor);
+    // One-finger drag on empty layout space pans (touch-action: none keeps the page still).
+    const cdp = await page.context().newCDPSession(page);
+    const sx = box.x + box.width * 0.55;
+    const sy = box.y + box.height * 0.08;
+    const touch = (type: string, x: number, y: number) =>
+      cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y }] });
+    await touch('touchStart', sx, sy);
+    for (let i = 1; i <= 8; i++) await touch('touchMove', sx + i * 10, sy + i * 4);
+    await touch('touchEnd', sx + 80, sy + 32);
+    await settle(page);
+    expect(url(page).get('sv')).not.toBeNull();
+    expect(url(page).get('cursor')).toBe(cursor);
+    expect((await probe(page)).runs).toBe(p.runs);
+    // Touch-sized list targets reach Ortho without a double-tap.
+    await page.locator('.space-members button:has-text("s07")').tap();
+    await page.locator('#space-open').tap();
+    await waitMode(page, 'ortho');
+    expect(url(page).get('subject')).toBe('s07');
+  });
 });

@@ -793,6 +793,33 @@ describe('nmds: degenerate cases', () => {
     }
   });
 
+  it('neighbours: an exact-pattern pair ranks together despite float roundoff', () => {
+    // Members 1 and 2 share a pattern (d12 = 0); their distances to member 0 differ by 1e-10.
+    const n = 5;
+    const d = [
+      [0, 0.29, 0.29 + 1e-10, 0.9, 0.8],
+      [0.29, 0, 0, 0.6, 0.7],
+      [0.29 + 1e-10, 0, 0, 0.6 + 2e-10, 0.7],
+      [0.9, 0.6, 0.6 + 2e-10, 0, 0.4],
+      [0.8, 0.7, 0.7, 0.4, 0],
+    ];
+    const dist = d.flat();
+    const near = sourceNeighbors(dist, n, 0, 1);
+    expect(near.map((e) => [e.index, e.rank])).toEqual([
+      [1, 1],
+      [2, 1],
+    ]);
+    // From member 3, k = 2: both members of the pair are included as a tie at rank 2.
+    expect(sourceNeighbors(dist, n, 3, 2).map((e) => [e.index, e.rank])).toEqual([
+      [4, 1],
+      [1, 2],
+      [2, 2],
+    ]);
+    // Ties never chain: 1e-9 steps beyond the block head are separate ranks.
+    const chain = [0, 0.1, 0.1 + 0.6e-9, 0.1 + 1.2e-9, 0.1, 0, 0, 0, 0.1 + 0.6e-9, 0, 0, 0, 0.1 + 1.2e-9, 0, 0, 0];
+    expect(sourceNeighbors(chain, 4, 0, 3).map((e) => e.rank)).toEqual([1, 1, 3]);
+  });
+
   it('all tied: regular polygon, no information', () => {
     const n = 6;
     const dist = new Float64Array(n * n).map((_, k) => (Math.floor(k / n) === k % n ? 0 : 0.8));

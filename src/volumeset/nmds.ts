@@ -828,11 +828,18 @@ export function metricSmacof(dist: ArrayLike<number>, ids: readonly string[], op
 // ---------------------------------------------------------------------------
 
 /** Tie-inclusive k-neighbourhood of i given a distance accessor. */
-function kNeighbourhood(n: number, i: number, k: number, get: (j: number) => number): Set<number> {
+/**
+ * Dissimilarities closer than this are ties. Maps with an identical spatial pattern
+ * (r = 1, e.g. y = 2x + 0.5 stored in float32) have correlations with third maps
+ * that differ only by float roundoff (~1e-10); they must rank together.
+ */
+export const DISSIMILARITY_TIE_TOL = 1e-9;
+
+function kNeighbourhood(n: number, i: number, k: number, get: (j: number) => number, tol = 0): Set<number> {
   const vals: number[] = [];
   for (let j = 0; j < n; j++) if (j !== i) vals.push(get(j));
   vals.sort((a, b) => a - b);
-  const thr = vals[k - 1];
+  const thr = vals[k - 1] + tol;
   const out = new Set<number>();
   for (let j = 0; j < n; j++) if (j !== i && get(j) <= thr) out.add(j);
   return out;
@@ -840,7 +847,7 @@ function kNeighbourhood(n: number, i: number, k: number, get: (j: number) => num
 
 /**
  * Neighbour preservation of a 2D embedding. For point i, N_src(i) = { j ≠ i :
- * dist_ij ≤ the k-th smallest dist_i· } (tie-inclusive), N_emb(i) likewise on the
+ * dist_ij ≤ the k-th smallest dist_i· + DISSIMILARITY_TIE_TOL } (tie-inclusive), N_emb(i) likewise on the
  * embedding's Euclidean distances (exact float comparison), and
  * perPoint_i = |N_src ∩ N_emb| / |N_src|. k defaults to min(3, n − 1). When
  * k ≥ n − 1 every neighbourhood is "everyone", so values are NaN (uninformative).
@@ -867,7 +874,7 @@ export function neighborPreservation(
   }
   let sum = 0;
   for (let i = 0; i < n; i++) {
-    const src = kNeighbourhood(n, i, kk, (j) => dist[i * n + j]);
+    const src = kNeighbourhood(n, i, kk, (j) => dist[i * n + j], DISSIMILARITY_TIE_TOL);
     const emb = kNeighbourhood(n, i, kk, (j) => Math.hypot(coords[2 * i] - coords[2 * j], coords[2 * i + 1] - coords[2 * j + 1]));
     let hit = 0;
     for (const j of src) if (emb.has(j)) hit++;
@@ -885,7 +892,8 @@ export function neighborPreservation(
 /**
  * The k nearest members to i by dissimilarity (excluding i), including every
  * member tied with the k-th, sorted by dissimilarity then index; `rank` is the
- * competition rank (1, 2, 2, 4).
+ * competition rank (1, 2, 2, 4). Dissimilarities within DISSIMILARITY_TIE_TOL of
+ * the first member of a tie block count as tied.
  */
 export function sourceNeighbors(
   dist: ArrayLike<number>,
@@ -900,10 +908,16 @@ export function sourceNeighbors(
   for (let j = 0; j < n; j++) if (j !== i) all.push({ index: j, dissimilarity: dist[i * n + j], rank: 0 });
   all.sort((a, b) => a.dissimilarity - b.dissimilarity || a.index - b.index);
   if (all.length === 0) return [];
-  const thr = all[Math.min(k, all.length) - 1].dissimilarity;
+  const thr = all[Math.min(k, all.length) - 1].dissimilarity + DISSIMILARITY_TIE_TOL;
   const out = all.filter((e) => e.dissimilarity <= thr);
+  // Ties within roundoff share a rank; compare with the first member of the tie block so ties never chain.
+  let head = 0;
   for (let r = 0; r < out.length; r++) {
-    out[r].rank = r > 0 && out[r].dissimilarity === out[r - 1].dissimilarity ? out[r - 1].rank : r + 1;
+    if (r > 0 && out[r].dissimilarity - out[head].dissimilarity <= DISSIMILARITY_TIE_TOL) out[r].rank = out[head].rank;
+    else {
+      head = r;
+      out[r].rank = r + 1;
+    }
   }
   return out;
 }

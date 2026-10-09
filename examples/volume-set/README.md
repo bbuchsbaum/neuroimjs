@@ -49,8 +49,8 @@ similar whole-volume patterns.
   the maps are placed exactly and the layout is labelled "exact placement, not MDS".
 - **Exact duplicates of pattern** (`r = 1`, for example one map equal to 2× another plus a constant)
   share one anchor marked `+n`. Every ID stays selectable. They are not reported as duplicate files.
-- **Not placed.** Some maps cannot be compared, for example because they are missing data on more
-  than 90% as many mask voxels as the median map, or because they are constant. These appear in a strip below the layout with the reason, are
+- **Not placed.** Some maps cannot be compared: a map with data on fewer than 90% as many mask voxels
+  as the median map, or a constant map. These appear in a strip below the layout with the reason, are
   excluded from the similarity matrix (hatched), and stay available in every other view.
 - **Missing coverage** inside the mask is hatched on every picture, so it never reads as
   "below threshold". Threshold, smoothing and the cluster filter change only the pictures. Positions,
