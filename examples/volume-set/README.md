@@ -89,21 +89,23 @@ Each layer is off by default, is written to the URL only while it is on, and nev
 
 | Layer | URL | What it shows |
 |---|---|---|
-| Colour: value at cursor | `sc=cursor` | each map's frame in its raw value at the cursor (grey below threshold, dashed for no data) |
-| Colour: covariate | `sc=cov:<column>` | a column of the optional `participants.tsv` beside the data (`VS_DATA_ROOT/participants.tsv`; synthetic mode provides age, site, mean FD) |
+| Mark: value at cursor | `sc=cursor` | a bar under each map in its raw value at the cursor, on its own scale up to the largest value (grey below threshold, dashed for no data) |
+| Mark: covariate | `sc=cov:<column>` | a column of the optional `participants.tsv` beside the data (`VS_DATA_ROOT/participants.tsv`; synthetic mode provides age, site, mean FD) |
 | Compare (neighbour table, or `C` over a hovered map) | `cp=<id>` | where the focused map and another agree (green) or disagree (magenta): per-voxel z_a·z_b/n on the common support, which sums exactly to r; with a per-slice profile (click to jump) |
-| Fit halos (`H`) | `sh=1` | each map's share of the layout's misfit; a large halo means the 2D picture represents that map poorly |
-| Stability | `sb=1` | 24 block-bootstrap refits (12 mm cubes resampled, warm-started, aligned): dots and a 68% ellipse per map; up to 100 maps |
+| Fit halos (`H`) | `sh=1` | each map's share of the layout's misfit (all faint, the focused map clear; its share and rank in the panel) |
+| Stability | `sb=1` | 24 block-bootstrap refits (12 mm cubes of the compared voxels resampled, warm-started, aligned): dots and a 68% ellipse per map, the focused map's spread and rank in the panel; up to 100 maps |
 | Density | `sd=on/off` | 50 / 80 / 95% contours of where maps concentrate; on by default for dense sets |
-| Lens (`L`) | not stored | a fisheye magnifier under the pointer; clicks go through the magnified pictures |
-| Region | `sr=i,j,k,mm` | similarity within a 10, 15 or 25 mm sphere at the cursor, applied explicitly (moving the cursor does not refit) |
-| Contrasts: all | `st=1` | one pooled fit over every subject × contrast map, each subject's contrasts joined by a line |
+| Magnifier (`L`) | not stored | a 2.2× loupe under the pointer; nothing moves |
+| Similarity: sphere | `sr=i,j,k,mm` | similarity within a 10, 15 or 25 mm sphere, first applied at the cursor; widening keeps the centre, moving the cursor never refits, re-centring is a panel button; the sphere is outlined on the Mean picture |
+| Contrasts side by side | `st=1` | every contrast drawn at the current layout's positions, one panel each, with same-subject r across contrasts in the panel (no new fit) |
 | Group (Shift-drag, Shift+Alt-drag removes, Esc clears) | `ss=<ids>` | the selected maps marked in the layout and on the rail, with group mean, others' mean and difference on this slice, and the medoid |
 
-When the displayed fit changes (contrast, statistic, region, pooled mode), the new layout is aligned
+When the displayed fit changes (contrast, statistic or region), the new layout is aligned
 to the old one by rotation, reflection and uniform scale only and animated (instant with reduced
 motion); reloading the URL shows the canonical pose. Agreement maps, group differences, halos and
-stability are descriptive; none is a significance test.
+stability are descriptive; none is a significance test. A pooled 2D fit over subject × contrast maps
+was tried and removed: on real data it could not place a subject's contrast maps together even
+though they are each other's most similar maps.
 
 ### Limitations
 
