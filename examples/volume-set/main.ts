@@ -28,6 +28,7 @@ import {
   type PlotRect,
   type LabelBox,
   type Lod,
+  declutter,
 } from './space';
 import { fetchManifest, loadTemplate, loadAtlas, prettyParcel, loadSet, toVolume, type VsMember, type StatName, type Template, type Atlas } from './data';
 import {
@@ -92,6 +93,14 @@ interface State {
 
 /** Space layout method and parameters (v1: one method; the id is written to the URL). */
 const LAYOUT = { id: 'nmds', opts: { restarts: 8, seed: 1, maxIter: 500, tol: 1e-7 } satisfies NmdsOptions };
+/**
+ * Random starts scale with set size: small sets get many (on 17 real maps, 8 starts stopped in a local
+ * minimum 4% above R MASS::isoMDS; 128 reach it repeatedly in ~150 ms), large sets keep fits interactive.
+ */
+function layoutOpts(n: number): NmdsOptions {
+  const restarts = n <= 50 ? 128 : n <= 100 ? 32 : 8;
+  return { ...LAYOUT.opts, restarts };
+}
 
 const SORT_LABEL: Record<SortKey, string> = {
   similarity: 'Similarity (seriated)',
@@ -146,6 +155,7 @@ function readState(): State {
     // Negative thresholds and non-positive ranges are meaningless: fall back to defaults.
     thr: num('thr', d.thr) >= 0 ? num('thr', d.thr) : d.thr,
     range: num('range', d.range) > 0 ? num('range', d.range) : d.range,
+    // (thr >= range is corrected after parsing: see below)
     subject: q.get('subject'),
     smooth: parseSmooth(q.get('smooth')),
     zoom: z && z.length === 3 && z.every(Number.isFinite) ? { s: z[0], cx: z[1], cy: z[2] } : null,
@@ -157,6 +167,7 @@ function readState(): State {
 }
 
 const state = readState();
+if (state.thr >= state.range) state.thr = Math.max(0, +(state.range * 0.5).toPrecision(2));
 const wantPeak = !state.cursor;
 
 function writeState(): void {
@@ -702,6 +713,18 @@ function underImage(a: Analysis): HTMLCanvasElement {
   return c;
 }
 
+/** Underlay with a transparent background outside the head (Space thumbnails sit on the page, not on black tiles). */
+function underSilhouette(a: Analysis): HTMLCanvasElement {
+  const key = `under-sil|${state.orient}|${sliceIndex()}`;
+  let c = imgCache.get(key);
+  if (!c) {
+    const under = underlaySlice(a.set.dim, template.t1Data, state.orient, sliceIndex());
+    c = toCanvas(compose(under, template.range, null, cmap, template.range[0] * 0.25));
+    imgCache.set(key, c);
+  }
+  return c;
+}
+
 /** Colour-mapped overlay (transparent below threshold) for one member, cached as a canvas. */
 function overImage(a: Analysis, member: number | 'mean'): HTMLCanvasElement {
   const ready = state.smooth === 'off' || a.smoothed.has(`${state.smooth}|${member}`);
@@ -1049,17 +1072,21 @@ function drawCell(
   member: number | 'mean',
   outer: Rect,
   label: { left: string; right?: string; flag?: boolean } | null,
-  letters: boolean
+  letters: boolean,
+  /** Space thumbnails: head silhouette without a black tile, and no crosshair at small sizes. */
+  opts: { silhouette?: boolean; crosshair?: boolean } = {}
 ): void {
   const LH = label ? 18 : 0;
   const imgRect = { x: outer.x, y: outer.y + LH, w: outer.w, h: outer.h - LH };
   const crop = cropWindow(a.set);
   const v = placeCrop(crop, imgRect);
-  ctx.fillStyle = '#000';
-  ctx.fillRect(v.dest.x, v.dest.y, v.dest.w, v.dest.h);
-  drawCellImage(ctx, underImage(a), overImage(a, member), v);
+  if (!opts.silhouette) {
+    ctx.fillStyle = '#000';
+    ctx.fillRect(v.dest.x, v.dest.y, v.dest.w, v.dest.h);
+  }
+  drawCellImage(ctx, opts.silhouette ? underSilhouette(a) : underImage(a), overImage(a, member), v);
   drawMissing(ctx, a, member, v);
-  if (state.cursor) {
+  if (state.cursor && opts.crosshair !== false) {
     const [col, row] = gridToSlicePixel(a.set.dim, state.orient, state.cursor);
     drawCrosshair(ctx, v, col, row);
   }
@@ -1301,7 +1328,7 @@ let jobs: EmbeddingJobs<EmbedInput, EmbedOutput> | null = null;
 let embedRunner: EmbedWorkerRunner | null = null;
 
 function layoutKey(a: Analysis): string {
-  return `${a.basis.key}|${LAYOUT.id}|${JSON.stringify(LAYOUT.opts)}|${NMDS_SOLVER.name}@${NMDS_SOLVER.version}`;
+  return `${a.basis.key}|${LAYOUT.id}|${JSON.stringify(layoutOpts(a.basis.eligible.length))}|${NMDS_SOLVER.name}@${NMDS_SOLVER.version}`;
 }
 
 type LayoutState = { kind: 'ready'; out: EmbedOutput } | { kind: 'pending' } | { kind: 'error'; message: string } | { kind: 'none'; message: string };
@@ -1326,7 +1353,7 @@ function layoutFor(a: Analysis): LayoutState {
   const failed = jobs.failure(key);
   if (failed) return { kind: 'error', message: failed.message };
   const cached = jobs.peek(key);
-  const p = jobs.request(key, () => ({ dist: a.basis.dist, ids: a.basis.eligible.map((i) => a.ids[i]), opts: LAYOUT.opts }));
+  const p = jobs.request(key, () => ({ dist: a.basis.dist, ids: a.basis.eligible.map((i) => a.ids[i]), opts: layoutOpts(a.basis.eligible.length) }));
   if (cached) return { kind: 'ready', out: cached };
   setStatus(`Fitting layout (${a.basis.eligible.length} maps)…`);
   p.then(
@@ -1351,7 +1378,7 @@ function retryLayout(): void {
   if (!jobs || !lastRail) return;
   const a = lastRail.a;
   // request() clears the recorded failure and runs again.
-  jobs.request(layoutKey(a), () => ({ dist: a.basis.dist, ids: a.basis.eligible.map((i) => a.ids[i]), opts: LAYOUT.opts })).then(
+  jobs.request(layoutKey(a), () => ({ dist: a.basis.dist, ids: a.basis.eligible.map((i) => a.ids[i]), opts: layoutOpts(a.basis.eligible.length) })).then(
     () => scheduleDraw(),
     () => scheduleDraw()
   );
@@ -1367,6 +1394,9 @@ interface SpacePoint {
   sy: number;
   /** Members sharing this exact pattern (r = 1), including this one; null when unique. */
   group: number[] | null;
+  /** Where the picture is drawn when nudged off its exact position (thumbnail mode only). */
+  tx?: number;
+  ty?: number;
 }
 
 interface SpaceGeom {
@@ -1585,6 +1615,20 @@ async function drawSpace(light = false): Promise<void> {
     ctx.beginPath();
     ctx.rect(plot.x - 4, plot.y - 4, plot.w + 8, plot.h + 8);
     ctx.clip();
+    if (lod === 'thumbs') {
+      // Pictures are nudged apart so none hides another; each keeps a dot at its exact position and a
+      // leader when moved. Positions (dots, links, keyboard steps) remain the fitted configuration.
+      const placed = declutter(
+        shown.map((pt) => ({ x: pt.sx, y: pt.sy })),
+        thumbW + 6,
+        thumbH + 4,
+        plot
+      );
+      shown.forEach((pt, i) => {
+        pt.tx = placed[i].x;
+        pt.ty = placed[i].y;
+      });
+    }
     const labelBoxes: LabelBox[] = [];
     const labelText: string[] = [];
     ctx.font = `10.5px ${FONT.mono}`;
@@ -1595,15 +1639,44 @@ async function drawSpace(light = false): Promise<void> {
       const tw = ctx.measureText(text).width + 6;
       labelBoxes.push(
         lod === 'thumbs'
-          ? { x: pt.sx - tw / 2, y: pt.sy + thumbH / 2 - 15, w: tw, h: 14 }
+          ? { x: (pt.tx ?? pt.sx) - tw / 2, y: (pt.ty ?? pt.sy) + thumbH / 2 - 15, w: tw, h: 14 }
           : { x: pt.sx + 7, y: pt.sy - 7, w: tw, h: 14 }
       );
     }
     if (lod === 'thumbs') {
       for (const pt of shown) {
         if (!visible(pt)) continue;
-        drawCell(ctx, a, pt.member, { x: pt.sx - thumbW / 2, y: pt.sy - thumbH / 2, w: thumbW, h: thumbH - 16 }, null, false);
-        geom.marks.push({ member: pt.member, box: { x: pt.sx - thumbW / 2, y: pt.sy - thumbH / 2, w: thumbW, h: thumbH }, kind: 'thumb' });
+        const moved = Math.hypot((pt.tx ?? pt.sx) - pt.sx, (pt.ty ?? pt.sy) - pt.sy) > 2;
+        if (moved) {
+          ctx.strokeStyle = 'rgba(138,140,163,0.55)';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(pt.sx, pt.sy);
+          ctx.lineTo(pt.tx!, pt.ty!);
+          ctx.stroke();
+        }
+      }
+      for (const pt of shown) {
+        if (!visible(pt)) continue;
+        const tx = pt.tx ?? pt.sx;
+        const ty = pt.ty ?? pt.sy;
+        drawCell(ctx, a, pt.member, { x: tx - thumbW / 2, y: ty - thumbH / 2, w: thumbW, h: thumbH - 16 }, null, false, {
+          silhouette: true,
+          crosshair: thumbW >= 120,
+        });
+        geom.marks.push({ member: pt.member, box: { x: tx - thumbW / 2, y: ty - thumbH / 2, w: thumbW, h: thumbH }, kind: 'thumb' });
+      }
+      // Exact positions on top: small dots, so the geometry stays readable even where pictures moved.
+      for (const pt of shown) {
+        if (!visible(pt)) continue;
+        const isSel = pt.member === sel;
+        ctx.fillStyle = isSel ? THEME.brand : spaceNeighborIds.has(a.ids[pt.member]) ? THEME.accent : THEME.text;
+        ctx.strokeStyle = THEME.bg;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(pt.sx, pt.sy, isSel ? 4 : 2.75, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
       }
     } else {
       for (const pt of shown) {
@@ -1709,8 +1782,29 @@ function drawSpaceOverlay(ctx: CanvasRenderingContext2D, W: number, H: number): 
   const h = Math.round(w / asp);
   const ax = anchor ? anchor.sx : W / 2;
   const ay = anchor ? anchor.sy : g.plot.y + g.plot.h - h / 2;
-  const x = Math.round(Math.max(4, Math.min(W - w - 4, ax - w / 2)));
-  const y = Math.round(Math.max(4, Math.min(H - h - capH - 4, ay - h / 2)));
+  // Put the enlargement beside its dot, on the side that covers the fewest other pictures, so the map's
+  // own neighbours (and their links) stay visible.
+  const fit = (cx: number, cy: number): { x: number; y: number } => ({
+    x: Math.round(Math.max(4, Math.min(W - w - 4, cx))),
+    y: Math.round(Math.max(4, Math.min(H - h - capH - 4, cy))),
+  });
+  const gap = 14;
+  const candidates = anchor
+    ? [fit(ax + gap, ay - (h + capH) / 2), fit(ax - w - gap, ay - (h + capH) / 2), fit(ax - w / 2, ay - h - capH - gap), fit(ax - w / 2, ay + gap)]
+    : [fit(ax - w / 2, ay - h / 2)];
+  const covered = (c: { x: number; y: number }): number => {
+    let area = 0;
+    for (const mk of g.marks) {
+      if (mk.member === m || mk.kind !== 'thumb') continue;
+      const ox = Math.min(c.x + w, mk.box.x + mk.box.w) - Math.max(c.x, mk.box.x);
+      const oy = Math.min(c.y + h + capH, mk.box.y + mk.box.h) - Math.max(c.y, mk.box.y);
+      if (ox > 0 && oy > 0) area += ox * oy * (spaceNeighborIds.has(a.ids[mk.member]) ? 3 : 1);
+    }
+    return area;
+  };
+  const best = candidates.reduce((p, c) => (covered(c) < covered(p) ? c : p));
+  const x = best.x;
+  const y = best.y;
   const v = placeCrop(cropWindow(a.set), { x, y, w, h });
   ctx.save();
   ctx.shadowColor = 'rgba(0,0,0,0.6)';
@@ -1740,7 +1834,7 @@ function drawSpaceOverlay(ctx: CanvasRenderingContext2D, W: number, H: number): 
   }
   // The caveat has its own line so it is never truncated.
   ctx.textAlign = 'left';
-  ctx.fillText(`${state.orient} slice ${sliceIndex() + 1}; placed by the whole volume`, v.dest.x + 6, v.dest.y + v.dest.h + 25);
+  ctx.fillText(truncate(ctx, `${state.orient} slice ${sliceIndex() + 1} · placed by whole-volume similarity`, v.dest.w - 12), v.dest.x + 6, v.dest.y + v.dest.h + 25);
   // Leader to the true anchor.
   if (anchor && !(ax >= v.dest.x && ax <= v.dest.x + v.dest.w && ay >= v.dest.y && ay <= v.dest.y + v.dest.h)) {
     const cx = Math.max(v.dest.x, Math.min(v.dest.x + v.dest.w, ax));
@@ -1879,6 +1973,30 @@ function methodName(method: string): string {
 }
 
 /** Side-panel section for Space: neighbours, fit diagnostics, provenance and the member list. */
+/** One line a reader can trust at a glance: fit, how well local neighbourhoods survive, and solver robustness. */
+function trustLine(a: Analysis): string {
+  const g = spaceGeom;
+  if (!g || g.a !== a || g.layout.kind !== 'ready') return 'Fitting…';
+  const res = g.layout.out.result;
+  const n = a.basis.eligible.length;
+  if (res.method === 'exact' || res.method === 'none') return 'Placed exactly (too few maps for a fit).';
+  const pres = neighborPreservation(a.basis.dist, res.coords, n);
+  const parts = [
+    `Stress-1 <b>${res.stress1.toFixed(3)}</b>`,
+    `neighbours kept on screen <b>${Number.isFinite(pres.mean) ? `${Math.round(pres.mean * 100)}%` : 'n/a'}</b>`,
+    `r ${fmtR(Math.min(...rRange(a)))} to ${fmtR(Math.max(...rRange(a)))}`,
+    `best of ${res.starts.length} starts (${res.bestHits} reached it)`,
+  ];
+  return parts.join(' · ');
+}
+
+function rRange(a: Analysis): number[] {
+  const n = a.basis.eligible.length;
+  const out: number[] = [];
+  for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) out.push(1 - a.basis.dist[i * n + j]);
+  return out.length ? out : [NaN];
+}
+
 function spaceSection(a: Analysis): string {
   const b = a.basis;
   const g = spaceGeom;
@@ -1958,18 +2076,21 @@ function spaceSection(a: Analysis): string {
     .join('');
   return `${nb}
     <section>
-      <h3>Layout <span class="sub">${placedN} of ${a.set.size} placed</span></h3>
-      <dl class="fx">
-        <dt>Similarity</dt><dd>signed Pearson r of raw ${STAT_LABEL[state.stat]}-maps on the common support (${support}); dissimilarity 1 − r</dd>
-        ${notPlaced}
-      </dl>
-      ${fit}
-      <p class="note">Positions summarise whole-volume similarity and stay fixed while you change slice, threshold, smoothing or cluster filter; the pictures show one ${state.orient} slice. Neither axis has a meaning.</p>
-    </section>
-    <section>
-      <h3>Maps <span class="sub">Enter opens</span></h3>
+      <h3>Maps <span class="sub">Enter on the focused map opens it</span></h3>
       <ul class="space-members" aria-label="All maps; select to focus">${list}</ul>
       <div id="space-actions"><button class="ghost" id="space-open"${sel === undefined ? ' disabled' : ''}>Open ${sel !== undefined ? a.ids[sel] : ''} in Ortho</button></div>
+    </section>
+    <section>
+      <h3>Layout <span class="sub">${placedN} of ${a.set.size} placed</span></h3>
+      ${layout?.kind === 'ready' ? `<p class="trust">${trustLine(a)}</p>` : fit}
+      <p class="note">Positions summarise whole-volume similarity and stay fixed while you change slice, threshold, smoothing or cluster filter. Pictures are nudged apart to avoid overlap; dots mark exact positions. Neither axis has a meaning; for who resembles whom, use the Neighbours table.</p>
+      <details class="fit-details"${layout?.kind === 'ready' ? '' : ' open'}><summary>How the layout was fitted</summary>
+        <dl class="fx">
+          <dt>Similarity</dt><dd>signed Pearson r of raw ${STAT_LABEL[state.stat]}-maps on the common support (${support}); dissimilarity 1 − r</dd>
+          ${notPlaced}
+        </dl>
+        ${layout?.kind === 'ready' ? fit : ''}
+      </details>
     </section>`;
 }
 
@@ -1980,8 +2101,21 @@ function wireSpaceSection(a: Analysis): void {
       state.subject = btn.dataset.pick!;
       spaceEnlarged = state.subject;
       scheduleDraw();
-      // Keep keyboard focus on the same list item after the panel is rebuilt.
-      requestAnimationFrame(() => requestAnimationFrame(() => (side.querySelector(`.space-members [data-pick="${CSS.escape(state.subject!)}"]`) as HTMLButtonElement | null)?.focus()));
+      // After the rebuild: bring the new Neighbours table into view and keep keyboard focus on the item.
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => {
+          (side.querySelector('.nb-table') as HTMLElement | null)?.closest('section')?.scrollIntoView({ block: 'nearest' });
+          (side.querySelector(`.space-members [data-pick="${CSS.escape(state.subject!)}"]`) as HTMLButtonElement | null)?.focus({ preventScroll: true });
+        })
+      );
+    };
+    btn.onkeydown = (e) => {
+      // Enter on the already-focused map opens it (the first Enter/click selects it).
+      if (e.key === 'Enter' && btn.dataset.pick === state.subject) {
+        e.preventDefault();
+        const m = selectedMember(a);
+        if (m !== undefined) openOrtho(a, m);
+      }
     };
     btn.onmouseenter = () => {
       railHover = btn.dataset.pick!;
@@ -2034,9 +2168,18 @@ function wireSpaceSection(a: Analysis): void {
   ctx.font = `10px ${FONT.mono}`;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'bottom';
-  ctx.fillText(`1 − r ${fmt(xmin, 2)}`, L, H - 2);
+  ctx.fillText(`1 − r ${fmtR(xmin)}`, L, H - 2);
   ctx.textAlign = 'right';
-  ctx.fillText(fmt(xmax, 2), W - 4, H - 2);
+  ctx.fillText(fmtR(xmax), W - 4, H - 2);
+  const s1 = g.layout.out.result.stress1;
+  if (Number.isFinite(s1)) {
+    ctx.save();
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = THEME.muted;
+    ctx.fillText(`Stress-1 ${s1.toFixed(3)}`, L + 4, 4);
+    ctx.restore();
+  }
   ctx.save();
   ctx.translate(10, H - B);
   ctx.rotate(-Math.PI / 2);
@@ -2055,10 +2198,12 @@ function updateReadout(): void {
   }
   if (!hover && state.mode === 'space') {
     text.innerHTML = `<span class="muted">Click map: cursor · Click ID: select · Double-click/Enter: open · Wheel: slice · ⌘/Ctrl+wheel: zoom layout · Drag: pan · Arrows: move between maps · PgUp/PgDn: slice · 0: fit</span>`;
+    text.title = text.textContent ?? '';
     return;
   }
   if (!hover) {
     text.innerHTML = `<span class="muted">Click: cursor · Wheel: slice · ⌘/Ctrl+wheel: zoom · Drag: pan · Shift+drag: zoom box · 0: fit · Double-click: open subject</span>`;
+    text.title = text.textContent ?? '';
     return;
   }
   const { a, member, ijk } = hover;
@@ -2265,7 +2410,7 @@ function effectBlock(a: Analysis): string {
   const facetNote = state.mode === 'facet' ? ' (selected row)' : '';
   return `<dl class="fx" title="Medians over subjects. Peak: each subject's top-1% |raw| voxels, smoothed/raw (sign-aware). Coloured voxels: count at or above the threshold after vs before smoothing. Disagree: coloured voxels whose raw value is below threshold or of opposite sign.">
       <dt>Peak signal kept</dt><dd><b>${pct(e.peakKept)}</b> median; lowest ${who(e.peakKeptWorst)} <span class="nb">${pct(e.peakKeptMin)}</span></dd>
-      <dt>Coloured voxels hidden</dt><dd><b>${pct(1 - e.extentKept)}</b> median; most ${who(e.extentKeptWorst)} <span class="nb">${pct(1 - e.extentKeptRange[0])}</span></dd>
+      <dt>Coloured voxels hidden by smoothing</dt><dd><b>${pct(1 - e.extentKept)}</b> median; most ${who(e.extentKeptWorst)} <span class="nb">${pct(1 - e.extentKeptRange[0])}</span></dd>
       <dt>Shown but not suprathreshold in raw</dt><dd><b>${pct(e.disagree)}</b> of coloured voxels</dd>
     </dl>
     <p class="note">${a.set.size} ${a.contrast} maps${facetNote}, |${STAT_LABEL[state.stat]}| ≥ ${state.thr}. Hover for definitions.</p>`;
@@ -2282,13 +2427,14 @@ function drawSide(a: Analysis, order: number[]): void {
     state.smooth === 'off'
       ? ''
       : `<p class="note smooth-note"${lastSmoothMs ? ` title="Smoothed in ${Math.round(lastSmoothMs)} ms"` : ''}><b>Smoothed display</b>: colours use smoothed values; the rail, r, ordering and Copy values stay raw (the hover readout shows both). ${SMOOTH_NOTE[state.smooth]}.</p>${effectBlock(a)}`;
-  side.innerHTML = `${state.mode === 'space' ? spaceSection(a) : ''}
+  side.innerHTML = `
     <section>
       <h3>Colour <span class="sub">${state.smooth === 'off' ? st : `${st}, smoothed`}${unit}</span></h3>
       <div class="cbwrap"><canvas id="colorbar"></canvas></div>
       <p class="note">|${st}| &lt; ${state.thr} hidden${state.minc > 1 ? `; clusters smaller than ${state.minc} voxels hidden (26-connected, same sign, formed on the ${state.smooth === 'off' ? 'raw' : 'smoothed'} values; display only)` : ''}; one scale for every cell.${state.mode === 'ortho' ? '' : ` Mean cell: average of the subject ${st}-maps (not a group statistic).`}</p>${filterEffectNote(a)}
       ${smoothNote}
     </section>
+    ${state.mode === 'space' ? spaceSection(a) : ''}
     <section>
       <h3>Similarity <span class="sub" id="simread">${state.contrast}</span></h3>
       <canvas id="simmat"></canvas>
@@ -2757,6 +2903,10 @@ async function main(): Promise<void> {
   const dim = template.t1.space.dim as number[];
   if (state.cursor && state.cursor.some((v, i) => v >= dim[i])) state.cursor = null;
   if (state.slice !== null && (!Number.isInteger(state.slice) || state.slice < 0)) state.slice = null;
+  if (state.slice !== null) {
+    const axisLen = dim[AXIS[state.orient]];
+    if (state.slice >= axisLen) state.slice = null;
+  }
   if (wantPeak || !state.cursor) {
     const a = await getAnalysis(state.model, state.contrast, state.stat);
     let best = -Infinity;

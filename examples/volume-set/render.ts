@@ -52,7 +52,14 @@ export function thresholdedDiverging(range: number, thr: number): ColorMap {
 }
 
 /** Composite a grayscale underlay slice and a colour-mapped overlay slice into RGBA. */
-export function compose(under: SliceGrid, underRange: [number, number], over: SliceGrid | null, cmap: ColorMap): ImageData {
+export function compose(
+  under: SliceGrid,
+  underRange: [number, number],
+  over: SliceGrid | null,
+  cmap: ColorMap,
+  /** Underlay values at or below this are transparent (head silhouette on the page background). */
+  transparentBelow = -Infinity
+): ImageData {
   const { width, height } = under;
   const img = new ImageData(width, height);
   const px = img.data;
@@ -64,7 +71,7 @@ export function compose(under: SliceGrid, underRange: [number, number], over: Sl
     px[p * 4] = g;
     px[p * 4 + 1] = g;
     px[p * 4 + 2] = g;
-    px[p * 4 + 3] = 255;
+    px[p * 4 + 3] = Number.isFinite(u) && u > transparentBelow ? 255 : 0;
   }
   if (over) {
     const o = cmap.fillImageData(new ImageData(width, height), over.data).data;

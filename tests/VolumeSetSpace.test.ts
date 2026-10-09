@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
+  declutter,
+  maxOverlap,
   spaceTransform,
   zoomAbout,
   panBy,
@@ -121,5 +123,55 @@ describe('Space helpers', () => {
 
   it('ranks screen distances with shared ranks for ties', () => {
     expect(screenRanks([[0, 0], [1, 0], [0, 1], [3, 0]], 0)).toEqual([0, 1, 1, 3]);
+  });
+});
+
+describe('declutter', () => {
+  const rect = { x: 0, y: 0, w: 1000, h: 700 };
+
+  it('removes all overlap for a dense core with room around it', () => {
+    // 13 pictures piled near one point (like the real cue core) plus 4 isolates.
+    const pts = [
+      ...Array.from({ length: 13 }, (_, i) => ({ x: 500 + 8 * Math.cos(i), y: 350 + 8 * Math.sin(i * 1.7) })),
+      { x: 60, y: 60 },
+      { x: 940, y: 80 },
+      { x: 900, y: 640 },
+      { x: 90, y: 620 },
+    ];
+    expect(maxOverlap(pts, 90, 110)).toBeGreaterThan(0);
+    const out = declutter(pts, 90, 110, rect);
+    expect(maxOverlap(out, 90, 110)).toBe(0);
+    // Stays inside the plot.
+    for (const p of out) {
+      expect(p.x).toBeGreaterThanOrEqual(45);
+      expect(p.x).toBeLessThanOrEqual(955);
+      expect(p.y).toBeGreaterThanOrEqual(55);
+      expect(p.y).toBeLessThanOrEqual(645);
+    }
+    // Isolates barely move.
+    for (let i = 13; i < 17; i++) expect(Math.hypot(out[i].x - pts[i].x, out[i].y - pts[i].y)).toBeLessThan(5);
+  });
+
+  it('is deterministic, leaves non-overlapping boxes alone and does not mutate its input', () => {
+    const pts = [
+      { x: 100, y: 100 },
+      { x: 300, y: 100 },
+      { x: 100, y: 101 },
+    ];
+    const copy = pts.map((p) => ({ ...p }));
+    const a = declutter(pts, 50, 50, rect);
+    const b = declutter(pts, 50, 50, rect);
+    expect(a).toEqual(b);
+    expect(pts).toEqual(copy);
+    expect(Math.hypot(a[1].x - 300, a[1].y - 100)).toBeLessThan(1e-9);
+    expect(maxOverlap(a, 50, 50)).toBe(0);
+  });
+
+  it('separates identical positions', () => {
+    const pts = [
+      { x: 500, y: 300 },
+      { x: 500, y: 300 },
+    ];
+    expect(maxOverlap(declutter(pts, 40, 40, rect), 40, 40)).toBe(0);
   });
 });

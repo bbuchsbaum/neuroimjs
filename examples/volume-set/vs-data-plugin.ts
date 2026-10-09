@@ -162,8 +162,21 @@ export function vsDataPlugin(): Plugin {
           res.end(JSON.stringify({ error: dataRoot ? `VS_DATA_ROOT not found: ${dataRoot}` : 'Set VS_DATA_ROOT to the folder with your <model>/sub-*/ contrast maps (or run demo:volume-set:synthetic).' }));
           return;
         }
+        const members = buildManifest(dataRoot);
+        if (members.length === 0) {
+          // Most often VS_DATA_ROOT points one level too deep or too shallow.
+          const below = fs.readdirSync(dataRoot).filter((d) => fs.statSync(path.join(dataRoot, d)).isDirectory()).slice(0, 6);
+          res.statusCode = 404;
+          res.setHeader('Content-Type', 'application/json');
+          res.end(
+            JSON.stringify({
+              error: `No maps found under ${dataRoot}. Expected <model>/sub-*/…_contrast-<name>_….nii.gz (e.g. memory_glm4_results/sub-1001/…). Folders here: ${below.join(', ') || 'none'}.`,
+            })
+          );
+          return;
+        }
         res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify({ members: buildManifest(dataRoot) }));
+        res.end(JSON.stringify({ members }));
         return;
       }
       if (url.startsWith('/vs/template/')) {

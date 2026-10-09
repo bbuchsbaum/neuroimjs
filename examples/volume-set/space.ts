@@ -189,3 +189,75 @@ export function screenRanks(points: readonly [number, number][], i: number): num
   const d = points.map(([x, y]) => Math.hypot(x - points[i][0], y - points[i][1]));
   return d.map((v, j) => (j === i ? 0 : 1 + d.filter((w, k) => k !== i && k !== j && w < v - 1e-9).length));
 }
+
+/**
+ * Nudge equally sized boxes (centres `pts`, size w × h) apart until none overlap, staying close to their
+ * anchors and inside `rect` (centres kept at least half a box from its edges). Deterministic: a fixed
+ * number of separation passes, each pushing overlapping pairs apart along their axis of least overlap,
+ * then a weak pull back toward the anchor. Returns new centres; anchors are not modified.
+ */
+export function declutter(pts: readonly { x: number; y: number }[], w: number, h: number, rect: PlotRect, iterations = 300): { x: number; y: number }[] {
+  const n = pts.length;
+  const out = pts.map((p) => ({ x: p.x, y: p.y }));
+  const clamp = (p: { x: number; y: number }): void => {
+    p.x = Math.max(rect.x + w / 2, Math.min(rect.x + rect.w - w / 2, p.x));
+    p.y = Math.max(rect.y + h / 2, Math.min(rect.y + rect.h - h / 2, p.y));
+  };
+  out.forEach(clamp);
+  const separate = (): boolean => {
+    let moved = false;
+    for (let i = 0; i < n; i++) {
+      for (let j = i + 1; j < n; j++) {
+        const a = out[i];
+        const b = out[j];
+        let dx = b.x - a.x;
+        let dy = b.y - a.y;
+        const ox = w - Math.abs(dx);
+        const oy = h - Math.abs(dy);
+        if (ox <= 0 || oy <= 0) continue;
+        moved = true;
+        // Identical centres: separate deterministically by index.
+        if (dx === 0 && dy === 0) {
+          dx = j - i;
+          dy = 0;
+        }
+        if (ox / w < oy / h) {
+          const s = (ox / 2 + 0.01) * Math.sign(dx || 1);
+          a.x -= s;
+          b.x += s;
+        } else {
+          const s = (oy / 2 + 0.01) * Math.sign(dy || 1);
+          a.y -= s;
+          b.y += s;
+        }
+      }
+    }
+    for (let i = 0; i < n; i++) clamp(out[i]);
+    return moved;
+  };
+  for (let it = 0; it < iterations; it++) {
+    const moved = separate();
+    // Gentle pull toward the anchor keeps pictures near their exact positions.
+    for (let i = 0; i < n; i++) {
+      out[i].x += (pts[i].x - out[i].x) * 0.02;
+      out[i].y += (pts[i].y - out[i].y) * 0.02;
+      clamp(out[i]);
+    }
+    if (!moved && it > 10) break;
+  }
+  // Finish with separation only, so the result has no overlaps whenever the rect has room.
+  for (let it = 0; it < 200 && separate(); it++);
+  return out;
+}
+
+/** Largest pairwise overlap area between equal boxes centred at `pts` (0 means no overlap). */
+export function maxOverlap(pts: readonly { x: number; y: number }[], w: number, h: number): number {
+  let worst = 0;
+  for (let i = 0; i < pts.length; i++)
+    for (let j = i + 1; j < pts.length; j++) {
+      const ox = w - Math.abs(pts[j].x - pts[i].x);
+      const oy = h - Math.abs(pts[j].y - pts[i].y);
+      if (ox > 0 && oy > 0) worst = Math.max(worst, ox * oy);
+    }
+  return worst;
+}
