@@ -4,6 +4,8 @@
  *
  *   VS_DATA_ROOT     directory containing <model>/sub-*\/*.nii.gz
  *   VS_TEMPLATE_DIR  directory containing the TemplateFlow res-02 T1w + brain mask
+ *   VS_SYNTHETIC=1   ignore the two above and serve a deterministic synthetic set
+ *                    generated in memory (see synthetic.ts); no atlas in this mode
  *
  * Endpoints:
  *   GET /vs/manifest.json         set members parsed from BIDS-style names
@@ -13,6 +15,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Plugin, Connect } from 'vite';
+import { parseSyntheticFile, syntheticManifest, syntheticMemberFile, syntheticTemplateFile } from './synthetic';
 
 export interface VsMember {
   model: string;
@@ -73,11 +76,55 @@ function sendFile(res: Parameters<Connect.NextHandleFunction>[1], file: string):
   fs.createReadStream(file).pipe(res);
 }
 
+function sendBuffer(res: Parameters<Connect.NextHandleFunction>[1], buf: Buffer): void {
+  res.setHeader('Content-Type', 'application/octet-stream');
+  res.setHeader('Content-Length', String(buf.length));
+  res.setHeader('Cache-Control', 'max-age=3600');
+  res.end(buf);
+}
+
+/** Synthetic mode: same endpoints, data generated deterministically in memory. */
+const syntheticHandler: Connect.NextHandleFunction = (req, res, next) => {
+  const url = decodeURIComponent((req.url ?? '').split('?')[0]);
+  if (!url.startsWith('/vs/')) return next();
+  try {
+    if (url === '/vs/manifest.json') {
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ members: syntheticManifest() }));
+      return;
+    }
+    if (url.startsWith('/vs/template/')) {
+      const buf = syntheticTemplateFile(url.slice('/vs/template/'.length));
+      if (!buf) {
+        res.statusCode = 404;
+        res.end('template not found (synthetic mode has no atlas)');
+        return;
+      }
+      return sendBuffer(res, buf);
+    }
+    if (url.startsWith('/vs/files/')) {
+      const member = parseSyntheticFile(url.slice('/vs/files/'.length));
+      if (!member) {
+        res.statusCode = 404;
+        res.end('not found');
+        return;
+      }
+      return sendBuffer(res, syntheticMemberFile(member.model, member.subject, member.contrast));
+    }
+    res.statusCode = 404;
+    res.end('not found');
+  } catch (err) {
+    res.statusCode = 500;
+    res.end(String(err));
+  }
+};
+
 export function vsDataPlugin(): Plugin {
   const dataRoot = process.env.VS_DATA_ROOT ?? '';
   const templateDir = process.env.VS_TEMPLATE_DIR ?? '';
+  const synthetic = process.env.VS_SYNTHETIC === '1';
 
-  const handler: Connect.NextHandleFunction = (req, res, next) => {
+  const fileHandler: Connect.NextHandleFunction = (req, res, next) => {
     const url = decodeURIComponent((req.url ?? '').split('?')[0]);
     if (!url.startsWith('/vs/')) return next();
     try {
@@ -113,6 +160,8 @@ export function vsDataPlugin(): Plugin {
       res.end(String(err));
     }
   };
+
+  const handler = synthetic ? syntheticHandler : fileHandler;
 
   return {
     name: 'vs-data',

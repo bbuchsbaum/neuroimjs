@@ -105,12 +105,29 @@
       .ortho-head .flag { color: var(--warn); font-size: 11px; border: 1px solid var(--warn); border-radius: 10px; padding: 0 7px; }
       .ortho-head .hint { margin-left: auto; color: var(--muted); font-size: 11px; }
       .ortho-host { flex: 1; min-height: 0; position: relative; }
+      #slice-ctl { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+      #slice-ctl[hidden] { display: none; }
+      #slice { width: 150px; accent-color: var(--brand); }
+      #slice-label { color: var(--muted); font-size: 11px; min-width: 150px; white-space: nowrap; }
+      .space-members { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0 0; padding: 0; list-style: none; }
+      .space-members button { background: transparent; color: var(--muted); border: 1px solid var(--line); border-radius: 5px; padding: 3px 7px; min-height: 26px; font: 11px var(--mono); cursor: pointer; }
+      .space-members button[aria-current='true'] { color: var(--text); border-color: var(--brand); background: var(--brand-soft); }
+      .space-members button.out { border-style: dashed; }
+      .space-members button.hov { color: var(--text); }
+      .nb-table { width: 100%; border-collapse: collapse; font-size: 11.5px; margin: 4px 0; }
+      .nb-table td, .nb-table th { padding: 1px 4px 1px 0; text-align: left; font-weight: 400; }
+      .nb-table th { color: var(--muted); font-size: 10.5px; }
+      .nb-table td.num { font-family: var(--mono); text-align: right; }
+      .nb-table td.id { font-family: var(--mono); }
+      .nb-table button { background: none; border: 0; color: var(--text); font: inherit; padding: 0; cursor: pointer; text-decoration: underline dotted var(--line-strong); }
+      .warnline { color: var(--warn); }
+      #space-actions { display: flex; gap: 6px; margin-top: 6px; }
     </style>
   </head>
   <body>
     <header>
       <div class="brand">neuroimjs <small>volume set</small></div>
-      <div class="seg" role="group" aria-label="View"><button data-mode="montage">Montage</button><button data-mode="ortho">Ortho</button><button data-mode="facet">Facet</button></div>
+      <div class="seg" role="group" aria-label="View"><button data-mode="montage">Montage</button><button data-mode="ortho">Ortho</button><button data-mode="facet">Facet</button><button data-mode="space" title="Maps placed by whole-volume similarity (nonmetric MDS)">Space</button></div>
       <div class="seg" role="group" aria-label="Plane" id="orient-group"><button data-orient="axial">Axial</button><button data-orient="coronal">Coronal</button><button data-orient="sagittal">Sagittal</button></div>
       <span class="sep"></span>
       <label class="group"><span>Model</span><select id="model"></select></label>
@@ -121,7 +138,7 @@
     <main>
       <div id="view-wrap">
         <div id="view"></div>
-        <div id="readout"><span id="readout-text"></span><span id="status" role="status"></span><input id="goto" type="text" placeholder="go to x, y, z (mm)" aria-label="Go to MNI coordinate in millimetres" /><button id="focus" class="ghost toggle" aria-pressed="false" title="Facet focus: enlarge the selected subject and its neighbours (F)">Focus</button><button id="zoom-reset" class="ghost" title="Reset zoom (0)">Fit</button></div>
+        <div id="readout"><label id="slice-ctl" title="Shared slice: every map shows this plane (PageUp/PageDown, wheel)"><span id="slice-label" class="mono"></span><input id="slice" type="range" min="0" max="0" step="1" aria-describedby="slice-label" /></label><span id="readout-text"></span><span id="status" role="status"></span><input id="goto" type="text" placeholder="go to x, y, z (mm)" aria-label="Go to MNI coordinate in millimetres" /><button id="focus" class="ghost toggle" aria-pressed="false" title="Facet focus: enlarge the selected subject and its neighbours (F)">Focus</button><button id="zoom-reset" class="ghost" title="Reset zoom (0)">Fit</button></div>
       </div>
       <aside id="side">
         <section class="display-controls" aria-label="Display">

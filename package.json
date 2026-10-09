@@ -68,6 +68,8 @@
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:update": "playwright test --update-snapshots",
+    "test:e2e:volume-set": "playwright test -c playwright.volume-set.config.ts",
+    "demo:volume-set": "VS_SYNTHETIC=1 vite --config examples/volume-set/vite.config.ts",
     "test:package": "node scripts/verify-package.mjs",
     "check:bundle-size": "node scripts/check-bundle-size.mjs",
     "audit:prod": "npm audit --omit=dev --audit-level=high",
