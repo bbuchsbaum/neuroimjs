@@ -390,6 +390,33 @@ export function syntheticManifest(): SyntheticMember[] {
 }
 
 /**
+ * BIDS-style participants.tsv for every synthetic subject (all models). Synthetic covariates chosen so
+ * colouring reveals planted structure: age differs between groups A and B, the outlier (s13) has high
+ * head motion, and `site` is a two-level factor unrelated to the planted patterns. "n/a" marks missing
+ * values (one per covariate) so the missing-value legend is exercised.
+ */
+export function syntheticParticipantsTsv(): string {
+  const rows = ['participant_id\tage\tsite\tmean_fd'];
+  const r = rng('participants');
+  const d = SYNTHETIC_DESCRIPTION;
+  for (const subject of SYNTH_SUBJECTS) {
+    const inA = (d.groupA as readonly string[]).includes(subject);
+    const inB = (d.groupB as readonly string[]).includes(subject);
+    const age = subject === 's09' ? 'n/a' : (inA ? 24 + 6 * r() : inB ? 62 + 8 * r() : 30 + 30 * r()).toFixed(1);
+    const site = subject === 's05' ? 'n/a' : r() < 0.5 ? 'north' : 'south';
+    const fd = (subject === d.outlier ? 0.62 + 0.1 * r() : 0.08 + 0.12 * r()).toFixed(3);
+    rows.push(`sub-${subject}\t${age}\t${site}\t${subject === 's02' ? 'n/a' : fd}`);
+  }
+  for (const model of ['synth50', 'synth200'] as const) {
+    for (const subject of MODELS[model].subjects) {
+      const g = (Number(subject.slice(1)) - 1) % 4;
+      rows.push(`sub-${subject}\t${(25 + 12 * g + 6 * r()).toFixed(1)}\t${r() < 0.5 ? 'north' : 'south'}\t${(0.08 + 0.12 * r()).toFixed(3)}`);
+    }
+  }
+  return `${rows.join('\n')}\n`;
+}
+
+/**
  * Resolve the part of a member URL after `/vs/files/` (already URI-decoded)
  * to a known member, or null.
  */

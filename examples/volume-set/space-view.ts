@@ -119,7 +119,12 @@ interface SpaceGeom {
   strip: number[];
   /** The enlarged preview's box (keeps the enlargement while the pointer is over it). */
   zoomBox: { member: number; box: LabelBox } | null;
+  /** Fixed place for the enlarged preview in the reference column, so it never covers a map; null if no room. */
+  dock: PlotRect | null;
 }
+
+/** Nudged picture centres, computed once per layout and screen geometry in a stable order (not per selection). */
+let declutterCache: { key: string; placed: Map<number, { x: number; y: number }> } | null = null;
 
 export let spaceGeom: SpaceGeom | null = null;
 let viewportKey: string | null = null;
@@ -221,6 +226,7 @@ export async function drawSpace(light = false): Promise<void> {
     'Axes and gaps are not results.',
   ];
   legend.forEach((line, i) => ctx.fillText(line, pad, meanRect.y + meanRect.h + 10 + i * 15));
+  const dockY = meanRect.y + meanRect.h + 10 + legend.length * 15 + 14;
 
   // Members the basis excludes: a strip below the layout, outside its coordinates.
   const strip = [...b.excluded].sort((x, y) => a.ids[x.index].localeCompare(a.ids[y.index]));
@@ -276,7 +282,13 @@ export async function drawSpace(light = false): Promise<void> {
     lod === 'thumbs'
       ? { x: plot.x + thumbW / 2, y: plot.y + thumbH / 2, w: Math.max(1, plot.w - thumbW), h: Math.max(1, plot.h - thumbH) }
       : { x: plot.x + 40, y: plot.y + 16, w: Math.max(1, plot.w - 80), h: Math.max(1, plot.h - 32) };
-  const geom: SpaceGeom = { a, key: b.key, t: null, inner, plot, lod, thumbW, thumbH, points: [], marks: [], layout, strip: strip.map((e) => e.index), zoomBox: null };
+  const geom: SpaceGeom = { a, key: b.key, t: null, inner, plot, lod, thumbW, thumbH, points: [], marks: [], layout, strip: strip.map((e) => e.index), zoomBox: null, dock: null };
+  {
+    // The preview docks under the legend when the column has room for a picture plus its caption.
+    const room = plot.y + plot.h + (stripH ? stripH : 0) - dockY - 62; // caption: ID + up to three caveat lines
+    const dw = Math.floor(Math.min(colW, room * asp));
+    if (dw >= 110) geom.dock = { x: pad + Math.round((colW - dw) / 2), y: dockY, w: dw, h: Math.round(dw / asp) + 62 };
+  }
   spaceGeom = geom;
   const sel = M.selectedMember(a);
   spaceNeighborIds = new Set();
@@ -319,18 +331,33 @@ export async function drawSpace(light = false): Promise<void> {
     ctx.rect(plot.x - 4, plot.y - 4, plot.w + 8, plot.h + 8);
     ctx.clip();
     if (lod === 'thumbs') {
-      // Pictures are nudged apart so none hides another; each keeps a dot at its exact position and a
-      // leader when moved. Positions (dots, links, keyboard steps) remain the fitted configuration.
-      const placed = declutter(
-        shown.map((pt) => ({ x: pt.sx, y: pt.sy })),
-        thumbW + 6,
-        thumbH + 4,
-        plot
-      );
-      shown.forEach((pt, i) => {
-        pt.tx = placed[i].x;
-        pt.ty = placed[i].y;
-      });
+      // Pictures are nudged apart so none hides another or another map's exact position; each moved
+      // picture keeps a dot at its exact position and a leader. Positions (dots, links, keyboard steps)
+      // remain the fitted configuration. Computed in eligible order and cached, so selecting or hovering
+      // a map never reshuffles the pictures.
+      const vp = M.state.space;
+      const dkey = `${layoutKey(a)}|${vp ? `${vp.s},${vp.cx},${vp.cy}` : 'fit'}|${thumbW}x${thumbH}|${plot.x},${plot.y},${plot.w},${plot.h}`;
+      if (!declutterCache || declutterCache.key !== dkey) {
+        const reps = all.filter((pt) => !pt.group || pt.member === pt.group[0]).sort((x, y) => x.pos - y.pos);
+        const placed = declutter(
+          reps.map((pt) => ({ x: pt.sx, y: pt.sy })),
+          thumbW + 6,
+          thumbH + 4,
+          plot,
+          300,
+          5
+        );
+        // Keyed by exact position (r = 1 group members share it), so a group's representative can change.
+        declutterCache = { key: dkey, placed: new Map(reps.map((pt, i) => [pt.pos, placed[i]])) };
+        for (const pt of all) if (pt.group) declutterCache.placed.set(pt.pos, placed[reps.findIndex((r) => r.group === pt.group || r.member === pt.group![0])]);
+      }
+      for (const pt of shown) {
+        const q = declutterCache.placed.get(pt.pos);
+        if (q) {
+          pt.tx = q.x;
+          pt.ty = q.y;
+        }
+      }
     }
     const labelBoxes: LabelBox[] = [];
     const labelText: string[] = [];
@@ -349,18 +376,6 @@ export async function drawSpace(light = false): Promise<void> {
     if (lod === 'thumbs') {
       for (const pt of shown) {
         if (!visible(pt)) continue;
-        const moved = Math.hypot((pt.tx ?? pt.sx) - pt.sx, (pt.ty ?? pt.sy) - pt.sy) > 2;
-        if (moved) {
-          ctx.strokeStyle = 'rgba(138,140,163,0.55)';
-          ctx.lineWidth = 1;
-          ctx.beginPath();
-          ctx.moveTo(pt.sx, pt.sy);
-          ctx.lineTo(pt.tx!, pt.ty!);
-          ctx.stroke();
-        }
-      }
-      for (const pt of shown) {
-        if (!visible(pt)) continue;
         const tx = pt.tx ?? pt.sx;
         const ty = pt.ty ?? pt.sy;
         M.drawCell(ctx, a, pt.member, { x: tx - thumbW / 2, y: ty - thumbH / 2, w: thumbW, h: thumbH - 16 }, null, false, {
@@ -369,9 +384,26 @@ export async function drawSpace(light = false): Promise<void> {
         });
         geom.marks.push({ member: pt.member, box: { x: tx - thumbW / 2, y: ty - thumbH / 2, w: thumbW, h: thumbH }, kind: 'thumb' });
       }
-      // Exact positions on top: small dots, so the geometry stays readable even where pictures moved.
-      for (const pt of shown) {
-        if (!visible(pt)) continue;
+      // Leaders and exact-position dots on top of every picture (with a dark halo), and only for pictures
+      // that were moved: an unmoved picture is centred on its position, and a dot there would read as a cursor.
+      const movedPts = shown.filter((pt) => visible(pt) && Math.hypot((pt.tx ?? pt.sx) - pt.sx, (pt.ty ?? pt.sy) - pt.sy) > 2);
+      for (const [width, color] of [
+        [3, 'rgba(13,14,20,0.85)'],
+        [1, 'rgba(200,202,220,0.8)'],
+      ] as const) {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = width;
+        ctx.beginPath();
+        for (const pt of movedPts) {
+          // From the dot to the nearest edge of its picture.
+          const cx = Math.max(pt.tx! - thumbW / 2, Math.min(pt.tx! + thumbW / 2, pt.sx));
+          const cy = Math.max(pt.ty! - thumbH / 2, Math.min(pt.ty! + thumbH / 2 - 16, pt.sy));
+          ctx.moveTo(pt.sx, pt.sy);
+          ctx.lineTo(cx, cy);
+        }
+        ctx.stroke();
+      }
+      for (const pt of movedPts) {
         const isSel = pt.member === sel;
         ctx.fillStyle = isSel ? THEME.brand : spaceNeighborIds.has(a.ids[pt.member]) ? THEME.accent : THEME.text;
         ctx.strokeStyle = THEME.bg;
@@ -429,7 +461,7 @@ export async function drawSpace(light = false): Promise<void> {
     ctx.textBaseline = 'bottom';
     const zoomNote = M.state.space ? ` · layout zoom ${M.state.space.s.toFixed(1)}×` : '';
     const cropNote = M.state.zoom ? ` · anatomy crop ${M.state.zoom.s.toFixed(1)}× (set in Montage)` : '';
-    const stressNote = Number.isFinite(res.stress1) ? `${res.method === 'metric-smacof' ? 'metric ' : ''}Stress-1 ${res.stress1.toFixed(3)} · ` : '';
+    const stressNote = Number.isFinite(res.stress1) ? `${res.method === 'metric-smacof' ? 'metric ' : ''}Stress-1 ${fmtStress(res.stress1)} · ` : '';
     ctx.fillText(`${stressNote}${m} placed${zoomNote}${cropNote}`, plot.x + plot.w, plot.y + plot.h + (stripH ? 4 : pad - 2));
   }
   M.drawOverlay();
@@ -474,18 +506,23 @@ export function drawSpaceOverlay(ctx: CanvasRenderingContext2D, W: number, H: nu
       ctx.stroke();
     }
   }
-  const m = spaceEnlarged === null ? -1 : a.ids.indexOf(spaceEnlarged);
+  // The docked preview shows the hovered (or keyboard-focused) map, else the focused map.
+  const shownId = spaceEnlarged ?? (g.dock ? M.state.subject : null);
+  const m = shownId === null ? -1 : a.ids.indexOf(shownId);
   if (m < 0) return;
   const anchor = byMember.get(m);
   const inStrip = g.strip.includes(m);
   if (!anchor && !inStrip) return;
   const asp = M.sliceAspect(a.set);
-  const w = Math.round(Math.max(200, Math.min(280, g.thumbW * 2.1)));
-  const capH = 34; // ID line + caveat line under the picture
+  const w = g.dock ? g.dock.w : Math.round(Math.max(200, Math.min(280, g.thumbW * 2.1)));
+  // The caveat wraps to the preview width so it is never cut; the caption grows to fit it.
+  ctx.font = `10.5px ${FONT.sans}`;
+  const caveat = wrapText(ctx, `${M.state.orient} slice ${M.sliceIndex() + 1}; placed by whole volume`, w - 12);
+  const capH = 20 + 14 * caveat.length;
   const h = Math.round(w / asp);
   const ax = anchor ? anchor.sx : W / 2;
   const ay = anchor ? anchor.sy : g.plot.y + g.plot.h - h / 2;
-  // Put the enlargement beside its dot, on the M.side that covers the fewest other pictures, so the map's
+  // Put the enlargement beside its dot, on the side that covers the fewest other pictures, so the map's
   // own neighbours (and their links) stay visible.
   const fit = (cx: number, cy: number): { x: number; y: number } => ({
     x: Math.round(Math.max(4, Math.min(W - w - 4, cx))),
@@ -505,7 +542,7 @@ export function drawSpaceOverlay(ctx: CanvasRenderingContext2D, W: number, H: nu
     }
     return area;
   };
-  const best = candidates.reduce((p, c) => (covered(c) < covered(p) ? c : p));
+  const best = g.dock ? { x: g.dock.x, y: g.dock.y } : candidates.reduce((p, c) => (covered(c) < covered(p) ? c : p));
   const x = best.x;
   const y = best.y;
   const v = placeCrop(M.cropWindow(a.set), { x, y, w, h });
@@ -515,7 +552,7 @@ export function drawSpaceOverlay(ctx: CanvasRenderingContext2D, W: number, H: nu
   ctx.fillStyle = '#000';
   ctx.fillRect(v.dest.x, v.dest.y, v.dest.w, v.dest.h + capH);
   ctx.restore();
-  drawCellImage(ctx, M.underImage(a), M.overImage(a, m), v);
+  drawCellImage(ctx, M.underSilhouette(a), M.overImage(a, m), v);
   M.drawMissing(ctx, a, m, v);
   if (M.state.cursor) {
     const [col, row] = gridToSlicePixel(a.set.dim, M.state.orient, M.state.cursor);
@@ -528,7 +565,7 @@ export function drawSpaceOverlay(ctx: CanvasRenderingContext2D, W: number, H: nu
   ctx.font = `600 11px ${FONT.mono}`;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
-  ctx.fillText(a.ids[m], v.dest.x + 6, v.dest.y + v.dest.h + 10);
+  ctx.fillText(spaceEnlarged === null ? `${a.ids[m]} · focused` : a.ids[m], v.dest.x + 6, v.dest.y + v.dest.h + 10);
   ctx.font = `10.5px ${FONT.sans}`;
   ctx.fillStyle = THEME.muted;
   ctx.textAlign = 'right';
@@ -537,17 +574,22 @@ export function drawSpaceOverlay(ctx: CanvasRenderingContext2D, W: number, H: nu
   }
   // The caveat has its own line so it is never truncated.
   ctx.textAlign = 'left';
-  ctx.fillText(M.truncate(ctx, `${M.state.orient} slice ${M.sliceIndex() + 1} · placed by whole-volume similarity`, v.dest.w - 12), v.dest.x + 6, v.dest.y + v.dest.h + 25);
+  ctx.font = `10.5px ${FONT.sans}`;
+  caveat.forEach((line, i) => ctx.fillText(line, v.dest.x + 6, v.dest.y + v.dest.h + 25 + 14 * i));
   // Leader to the true anchor.
-  if (anchor && !(ax >= v.dest.x && ax <= v.dest.x + v.dest.w && ay >= v.dest.y && ay <= v.dest.y + v.dest.h)) {
+  if (anchor && spaceEnlarged !== null && !(ax >= v.dest.x && ax <= v.dest.x + v.dest.w && ay >= v.dest.y && ay <= v.dest.y + v.dest.h)) {
+    // Leader only while previewing a hovered map; the focused map is already marked in the layout.
     const cx = Math.max(v.dest.x, Math.min(v.dest.x + v.dest.w, ax));
     const cy = Math.max(v.dest.y, Math.min(v.dest.y + v.dest.h + capH, ay));
-    ctx.strokeStyle = THEME.muted;
+    ctx.save();
+    ctx.setLineDash([3, 3]);
+    ctx.strokeStyle = 'rgba(200,202,220,0.55)';
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(cx, cy);
     ctx.lineTo(ax, ay);
     ctx.stroke();
+    ctx.restore();
   }
   if (anchor) {
     ctx.strokeStyle = THEME.text;
@@ -685,7 +727,7 @@ function trustLine(a: M.Analysis): string {
   if (res.method === 'exact' || res.method === 'none') return 'Placed exactly (too few maps for a fit).';
   const pres = neighborPreservation(a.basis.dist, res.coords, n);
   const parts = [
-    `Stress-1 <b>${res.stress1.toFixed(3)}</b>`,
+    `Stress-1 <b>${fmtStress(res.stress1)}</b>`,
     `neighbours kept on screen <b>${Number.isFinite(pres.mean) ? `${Math.round(pres.mean * 100)}%` : 'n/a'}</b>`,
     `r ${M.fmtR(Math.min(...rRange(a)))} to ${M.fmtR(Math.max(...rRange(a)))}`,
     `best of ${res.starts.length} starts (${res.bestHits} reached it)`,
@@ -724,7 +766,7 @@ export function spaceSection(a: M.Analysis): string {
     const metric = res.method === 'metric-smacof';
     fit = `<dl class="fx">
         <dt>Fit</dt><dd>${methodName(res.method)}; ${status}.</dd>
-        <dt>Stress-1 (Kruskal)</dt><dd><b>${Number.isFinite(res.stress1) ? res.stress1.toFixed(3) : '–'}</b> — √(Σ(d − d̂)² / Σd²), d̂ ${metric ? 'the best-fitting multiple b·(1 − r) (metric)' : 'the monotone fit'}. No universal good/bad cutoff.${metric && res.nmdsStress1 !== null ? ` Nonmetric fit: ${res.nmdsStress1.toExponential(1)} (collapsed).` : ''}</dd>
+        <dt>Stress-1 (Kruskal)</dt><dd><b>${fmtStress(res.stress1)}</b> — √(Σ(d − d̂)² / Σd²), d̂ ${metric ? 'the best-fitting multiple b·(1 − r) (metric)' : 'the monotone fit'}. No universal good/bad cutoff.${metric && res.nmdsStress1 !== null ? ` Nonmetric fit: ${res.nmdsStress1.toExponential(1)} (collapsed).` : ''}</dd>
         ${res.method !== 'exact' && res.method !== 'none' ? `<dt>Starts</dt><dd>best of ${res.starts.length} (classical + ${res.starts.length - 1} seeded random); ${res.bestHits} reached it</dd>` : ''}
         <dt>Solver</dt><dd>${res.solver.name} ${res.solver.version}, seed ${res.params.seed}, ${Math.round(ms)} ms</dd>
       </dl>
@@ -779,9 +821,9 @@ export function spaceSection(a: M.Analysis): string {
     .join('');
   return `${nb}
     <section>
-      <h3>Maps <span class="sub">Enter on the focused map opens it</span></h3>
+      <h3>Maps</h3>
       <ul class="space-members" aria-label="All maps; select to focus">${list}</ul>
-      <div id="space-actions"><button class="ghost" id="space-open"${sel === undefined ? ' disabled' : ''}>Open ${sel !== undefined ? a.ids[sel] : ''} in Ortho</button></div>
+      ${sel !== undefined ? `<div id="space-actions"><button class="ghost" id="space-open">Open ${a.ids[sel]} in Ortho</button><span class="note">or press Enter on the focused map</span></div>` : '<p class="note">Select a map to open it in Ortho (Enter).</p>'}
     </section>
     <section>
       <h3>Layout <span class="sub">${placedN} of ${a.set.size} placed</span></h3>
@@ -855,10 +897,22 @@ export function wireSpaceSection(a: M.Analysis): void {
     xmax = Math.max(xmax, pairs.dissimilarity[i]);
     xmin = Math.min(xmin, pairs.dissimilarity[i]);
   }
-  const L = 30;
+  const L = 44;
   const B = 18;
   const X = (v: number): number => L + ((v - xmin) / (xmax - xmin || 1)) * (W - L - 6);
   const Y = (v: number): number => H - B - (v / (dmax || 1)) * (H - B - 6);
+  // Frame and y ticks (layout distance is in normalised layout units).
+  ctx.strokeStyle = THEME.line;
+  ctx.lineWidth = 1;
+  ctx.strokeRect(L + 0.5, 6.5, W - L - 6, H - B - 6);
+  ctx.fillStyle = THEME.muted;
+  ctx.font = `10px ${FONT.mono}`;
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+  for (const v of [0, dmax / 2, dmax]) {
+    ctx.fillRect(L - 3, Math.round(Y(v)), 3, 1);
+    ctx.fillText(v.toFixed(1), L - 5, Y(v));
+  }
   ctx.fillStyle = 'rgba(230,230,239,0.45)';
   for (let i = 0; i < n; i++) ctx.fillRect(X(pairs.dissimilarity[i]) - 1, Y(pairs.distance[i]) - 1, 2, 2);
   const idx = [...Array(n).keys()].sort((p, q) => pairs.dissimilarity[p] - pairs.dissimilarity[q] || pairs.disparity[p] - pairs.disparity[q]);
@@ -880,11 +934,11 @@ export function wireSpaceSection(a: M.Analysis): void {
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
     ctx.fillStyle = THEME.muted;
-    ctx.fillText(`Stress-1 ${s1.toFixed(3)}`, L + 4, 4);
+    ctx.fillText(`Stress-1 ${fmtStress(s1)}`, L + 4, 4);
     ctx.restore();
   }
   ctx.save();
-  ctx.translate(10, H - B);
+  ctx.translate(14, H - B);
   ctx.rotate(-Math.PI / 2);
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
@@ -892,6 +946,26 @@ export function wireSpaceSection(a: M.Analysis): void {
   ctx.restore();
 }
 
+
+/** Greedy word wrap to a pixel width (a word longer than the width gets its own line). */
+function wrapText(ctx: CanvasRenderingContext2D, text: string, width: number): string[] {
+  const lines: string[] = [];
+  let line = '';
+  for (const word of text.split(' ')) {
+    const next = line ? `${line} ${word}` : word;
+    if (line && ctx.measureText(next).width > width) {
+      lines.push(line);
+      line = word;
+    } else line = next;
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+
+/** Stress written like r elsewhere in the app (no leading zero), to three decimals. */
+function fmtStress(v: number): string {
+  return Number.isFinite(v) ? v.toFixed(3).replace(/^0\./, '.') : '–';
+}
 
 export function setSpaceEnlarged(id: string | null): void {
   spaceEnlarged = id;
@@ -902,4 +976,37 @@ export function disposeSpaceJobs(): void {
   jobs?.dispose();
   jobs = null;
   embedRunner = null;
+}
+
+// ---------------------------------------------------------------------------
+// Space v2 hooks called from main.ts. Each is a strict no-op unless a v2 option or gesture is active.
+
+/** Space v2 options and their URL keys; defaults are never written to the URL. */
+export const spaceOpts = {
+  /** Colour channel: '' (none), 'cursor' (value at cursor) or 'cov:<field>'. URL `sc`. */
+  colour: '',
+};
+
+export function readSpaceParams(q: URLSearchParams): void {
+  const c = q.get('sc');
+  spaceOpts.colour = c === 'cursor' || (c !== null && /^cov:[\w.-]{1,40}$/.test(c)) ? c : '';
+}
+
+export function writeSpaceParams(q: URLSearchParams): void {
+  if (spaceOpts.colour) q.set('sc', spaceOpts.colour);
+}
+
+/** Returns true when a Space v2 gesture consumed the event. */
+export function onPointer(_type: 'wheel' | 'pointerdown' | 'pointermove' | 'pointerup' | 'pointerleave' | 'dblclick', _e: MouseEvent): boolean {
+  return false;
+}
+
+/** Returns true when a Space v2 key binding consumed the event. */
+export function onKey(_e: KeyboardEvent): boolean {
+  return false;
+}
+
+/** Rail accent for a subject (lasso subsets); null at defaults so the rail is unchanged. */
+export function railAccent(_subject: string): string | null {
+  return null;
 }

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   declutter,
+  coveredAnchors,
   maxOverlap,
   spaceTransform,
   zoomAbout,
@@ -165,6 +166,22 @@ describe('declutter', () => {
     expect(pts).toEqual(copy);
     expect(Math.hypot(a[1].x - 300, a[1].y - 100)).toBeLessThan(1e-9);
     expect(maxOverlap(a, 50, 50)).toBe(0);
+  });
+
+  it('with anchor clearance, no picture covers another map\'s exact position (when there is room)', () => {
+    const pts = [
+      ...Array.from({ length: 13 }, (_, i) => ({ x: 500 + 8 * Math.cos(i), y: 350 + 8 * Math.sin(i * 1.7) })),
+      { x: 60, y: 60 },
+      { x: 940, y: 80 },
+      { x: 900, y: 640 },
+      { x: 90, y: 620 },
+    ];
+    const plain = declutter(pts, 90, 110, rect);
+    expect(coveredAnchors(pts, plain, 90, 110, 4)).toBeGreaterThan(0);
+    const out = declutter(pts, 90, 110, rect, 300, 4);
+    expect(coveredAnchors(pts, out, 90, 110, 4)).toBe(0);
+    expect(maxOverlap(out, 90, 110)).toBe(0);
+    expect(declutter(pts, 90, 110, rect, 300, 4)).toEqual(out);
   });
 
   it('separates identical positions', () => {

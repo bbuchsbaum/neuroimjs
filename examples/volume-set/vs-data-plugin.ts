@@ -13,11 +13,12 @@
  *   GET /vs/manifest.json         set members parsed from BIDS-style names
  *   GET /vs/files/<model>/<sub>/<file>.nii.gz
  *   GET /vs/template/T1w.nii.gz | /vs/template/mask.nii.gz
+ *   GET /vs/participants.tsv      optional BIDS covariates from VS_DATA_ROOT (204 when absent)
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Plugin, Connect } from 'vite';
-import { parseSyntheticFile, syntheticManifest, syntheticMemberFile, syntheticTemplateFile } from './synthetic';
+import { parseSyntheticFile, syntheticManifest, syntheticMemberFile, syntheticTemplateFile, syntheticParticipantsTsv } from './synthetic';
 
 export interface VsMember {
   model: string;
@@ -119,6 +120,11 @@ const syntheticHandler: Connect.NextHandleFunction = (req, res, next) => {
       res.end(JSON.stringify({ members: syntheticManifest() }));
       return;
     }
+    if (url === '/vs/participants.tsv') {
+      res.setHeader('Content-Type', 'text/tab-separated-values');
+      res.end(syntheticParticipantsTsv());
+      return;
+    }
     if (url.startsWith('/vs/template/')) {
       const buf = syntheticTemplateFile(url.slice('/vs/template/'.length));
       if (!buf) {
@@ -196,6 +202,18 @@ export function vsDataPlugin(): Plugin {
             res.end(String(err));
           });
         return;
+      }
+      if (url === '/vs/participants.tsv') {
+        // Optional BIDS covariates, read in place from VS_DATA_ROOT. Absent is normal: 204, not 404,
+        // so the browser logs no error.
+        const file = dataRoot ? path.join(dataRoot, 'participants.tsv') : '';
+        if (!file || !fs.existsSync(file)) {
+          res.statusCode = 204;
+          res.end();
+          return;
+        }
+        res.setHeader('Content-Type', 'text/tab-separated-values');
+        return sendFile(res, file);
       }
       if (url.startsWith('/vs/files/')) {
         const file = within(dataRoot, url.slice('/vs/files/'.length));

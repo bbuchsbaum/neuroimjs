@@ -196,7 +196,14 @@ export function screenRanks(points: readonly [number, number][], i: number): num
  * number of separation passes, each pushing overlapping pairs apart along their axis of least overlap,
  * then a weak pull back toward the anchor. Returns new centres; anchors are not modified.
  */
-export function declutter(pts: readonly { x: number; y: number }[], w: number, h: number, rect: PlotRect, iterations = 300): { x: number; y: number }[] {
+export function declutter(
+  pts: readonly { x: number; y: number }[],
+  w: number,
+  h: number,
+  rect: PlotRect,
+  iterations = 300,
+  anchorClearance = 0
+): { x: number; y: number }[] {
   const n = pts.length;
   const out = pts.map((p) => ({ x: p.x, y: p.y }));
   const clamp = (p: { x: number; y: number }): void => {
@@ -247,7 +254,49 @@ export function declutter(pts: readonly { x: number; y: number }[], w: number, h
   }
   // Finish with separation only, so the result has no overlaps whenever the rect has room.
   for (let it = 0; it < 200 && separate(); it++);
+  if (anchorClearance > 0) {
+    // Keep every exact position visible: no picture may cover another map's anchor (within the
+    // clearance). Push the covering picture off the anchor along the shorter way out, then re-separate.
+    const hw = w / 2 + anchorClearance;
+    const hh = h / 2 + anchorClearance;
+    const unclear = (): boolean => {
+      let moved = false;
+      for (let j = 0; j < n; j++) {
+        for (let i = 0; i < n; i++) {
+          if (i === j) continue;
+          const dx = pts[i].x - out[j].x;
+          const dy = pts[i].y - out[j].y;
+          const px = hw - Math.abs(dx);
+          const py = hh - Math.abs(dy);
+          if (px <= 0 || py <= 0) continue;
+          moved = true;
+          if (px / w < py / h) out[j].x -= (px + 0.01) * Math.sign(dx || (i < j ? -1 : 1));
+          else out[j].y -= (py + 0.01) * Math.sign(dy || (i < j ? -1 : 1));
+          clamp(out[j]);
+        }
+      }
+      return moved;
+    };
+    for (let round = 0; round < 60; round++) {
+      const a = unclear();
+      let b = false;
+      for (let it = 0; it < 20 && separate(); it++) b = true;
+      if (!a && !b) break;
+    }
+  }
   return out;
+}
+
+/** Number of anchors lying inside (or within `clearance` of) a picture other than their own. */
+export function coveredAnchors(anchors: readonly { x: number; y: number }[], boxes: readonly { x: number; y: number }[], w: number, h: number, clearance = 0): number {
+  let k = 0;
+  for (let i = 0; i < anchors.length; i++)
+    for (let j = 0; j < boxes.length; j++)
+      if (i !== j && Math.abs(anchors[i].x - boxes[j].x) < w / 2 + clearance && Math.abs(anchors[i].y - boxes[j].y) < h / 2 + clearance) {
+        k++;
+        break;
+      }
+  return k;
 }
 
 /** Largest pairwise overlap area between equal boxes centred at `pts` (0 means no overlap). */

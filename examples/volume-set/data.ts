@@ -113,3 +113,52 @@ export function toVolume(set: VolumeSet, values: Float32Array): FloatNeuroVol {
   for (let m = 0; m < set.maskIndex.length; m++) grid[set.maskIndex[m]] = values[m];
   return new FloatNeuroVol(set.space, grid);
 }
+
+/** Per-subject covariates from an optional BIDS participants.tsv. Values are numbers, strings or null (missing). */
+export interface Covariates {
+  fields: { name: string; kind: 'numeric' | 'categorical' }[];
+  /** Subject ID (without "sub-") -> field -> value. */
+  values: Map<string, Record<string, number | string | null>>;
+}
+
+/**
+ * Load covariates if the data server has a participants.tsv; null when there is none (HTTP 204) or it
+ * has no usable columns. A column is numeric when every non-missing value parses as a finite number.
+ */
+export async function fetchCovariates(): Promise<Covariates | null> {
+  try {
+    const res = await fetch('/vs/participants.tsv');
+    if (!res.ok || res.status === 204) return null;
+    const lines = (await res.text()).split(/\r?\n/).filter((l) => l.trim());
+    if (lines.length < 2) return null;
+    const head = lines[0].split('\t').map((h) => h.trim());
+    const idCol = head.indexOf('participant_id');
+    if (idCol < 0) return null;
+    const missing = (v: string): boolean => v === '' || v === 'n/a' || v === 'NA' || v === 'NaN';
+    const rows = lines.slice(1).map((l) => l.split('\t').map((v) => v.trim()));
+    const fields = head
+      .map((name, c) => ({ name, c }))
+      .filter(({ c }) => c !== idCol)
+      .map(({ name, c }) => {
+        const present = rows.map((r) => r[c] ?? '').filter((v) => !missing(v));
+        const numeric = present.length > 0 && present.every((v) => Number.isFinite(Number(v)));
+        return { name, c, kind: numeric ? ('numeric' as const) : ('categorical' as const) };
+      })
+      .filter((f) => rows.some((r) => !missing(r[f.c] ?? '')));
+    if (!fields.length) return null;
+    const values = new Map<string, Record<string, number | string | null>>();
+    for (const r of rows) {
+      const id = (r[idCol] ?? '').replace(/^sub-/, '');
+      if (!id) continue;
+      const rec: Record<string, number | string | null> = {};
+      for (const f of fields) {
+        const v = r[f.c] ?? '';
+        rec[f.name] = missing(v) ? null : f.kind === 'numeric' ? Number(v) : v;
+      }
+      values.set(id, rec);
+    }
+    return { fields: fields.map(({ name, kind }) => ({ name, kind })), values };
+  } catch {
+    return null;
+  }
+}

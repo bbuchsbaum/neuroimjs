@@ -136,6 +136,8 @@ function readState(): State {
   const sv = q.get('sv')?.split(',').map(Number);
   // Only one layout method exists in v1; any other value is ignored (and rewritten) with a warning.
   if (q.has('layout') && q.get('layout') !== LAYOUT.id) console.warn(`volume-set: unknown layout "${q.get('layout')}", using ${LAYOUT.id}`);
+  // Space v2 options (colour channel, overlays, subset, region) are parsed and owned by space-view.ts.
+  SV.readSpaceParams(q);
   return {
     mode,
     prevMode: mode === 'ortho' ? back : mode,
@@ -186,6 +188,8 @@ function writeState(): void {
   if (state.focus && state.mode === 'facet') q.set('focus', '1');
   if (state.zoom) q.set('zoom', [state.zoom.s, state.zoom.cx, state.zoom.cy].map((v) => +v.toFixed(2)).join(','));
   if (state.space) q.set('sv', [state.space.s, state.space.cx, state.space.cy].map((v) => +v.toFixed(4)).join(','));
+  // Writes nothing while every Space v2 option is at its default.
+  SV.writeSpaceParams(q);
   history.replaceState(null, '', `?${q}`);
 }
 
@@ -712,7 +716,7 @@ export function underImage(a: Analysis): HTMLCanvasElement {
 }
 
 /** Underlay with a transparent background outside the head (Space thumbnails sit on the page, not on black tiles). */
-function underSilhouette(a: Analysis): HTMLCanvasElement {
+export function underSilhouette(a: Analysis): HTMLCanvasElement {
   const key = `under-sil|${state.orient}|${sliceIndex()}`;
   let c = imgCache.get(key);
   if (!c) {
@@ -785,6 +789,7 @@ function ensureCanvas(): HTMLCanvasElement {
     'wheel',
     (e) => {
       e.preventDefault();
+      if (state.mode === 'space' && SV.onPointer('wheel', e)) return;
       const h = hitAt(e);
       const a = (h?.hit ?? hits[0])?.analysis;
       if (!a) return;
@@ -818,11 +823,13 @@ function ensureCanvas(): HTMLCanvasElement {
     { passive: false }
   );
   c.addEventListener('pointerdown', (e) => {
+    if (state.mode === 'space' && SV.onPointer('pointerdown', e)) return;
     const h = hitAt(e);
     drag = { x: e.clientX, y: e.clientY, moved: false, shift: e.shiftKey, hit: h?.hit ?? null, zoom0: state.zoom ? { ...state.zoom } : null, space0: state.mode === 'space' ? SV.spaceGeom?.t ?? null : null };
     c.setPointerCapture(e.pointerId);
   });
   c.addEventListener('pointermove', (e) => {
+    if (state.mode === 'space' && SV.onPointer('pointermove', e)) return;
     if (drag) {
       const dx = e.clientX - drag.x;
       const dy = e.clientY - drag.y;
@@ -867,6 +874,7 @@ function ensureCanvas(): HTMLCanvasElement {
     scheduleDraw(true);
   });
   c.addEventListener('pointerup', (e) => {
+    if (state.mode === 'space' && SV.onPointer('pointerup', e)) return;
     const d = drag;
     drag = null;
     if (!d) return;
@@ -917,13 +925,15 @@ function ensureCanvas(): HTMLCanvasElement {
       else scheduleDraw();
     }
   });
-  c.addEventListener('pointerleave', () => {
+  c.addEventListener('pointerleave', (e) => {
+    if (state.mode === 'space' && SV.onPointer('pointerleave', e)) return;
     hover = null;
     if (state.mode === 'space') SV.setSpaceHover(null);
     updateReadout();
     scheduleDraw(true);
   });
   c.addEventListener('dblclick', (e) => {
+    if (state.mode === 'space' && SV.onPointer('dblclick', e)) return;
     if (state.mode === 'space' && SV.spaceGeom) {
       const r = c.getBoundingClientRect();
       const lbl = SV.markAt(e.clientX - r.left, e.clientY - r.top, true);
@@ -1924,6 +1934,12 @@ export function drawRail(a: Analysis, order: number[], visible: Set<string> | nu
       ctx.fillStyle = THEME.accent;
       ctx.fillRect(x - step / 2 + 3, H - 4, step - 6, 2);
     }
+    const accent = state.mode === 'space' ? SV.railAccent(subj) : null;
+    if (accent) {
+      // Space: a lasso subset member (nothing is drawn when no subset exists).
+      ctx.fillStyle = accent;
+      ctx.fillRect(x - step / 2 + 3, H - 7, step - 6, 2);
+    }
     if (visible?.has(subj)) {
       // Facet Focus: mark the subjects currently on screen.
       ctx.fillStyle = THEME.accent;
@@ -2064,6 +2080,7 @@ async function main(): Promise<void> {
     if (tag === 'INPUT' || tag === 'SELECT') return;
     // Buttons keep their own activation keys.
     if (tag === 'BUTTON' && (e.key === 'Enter' || e.key === ' ')) return;
+    if (state.mode === 'space' && SV.onKey(e)) return;
     if (state.mode === 'space' && !(e.altKey || e.metaKey || e.ctrlKey)) {
       const dir = ({ ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down' } as const)[e.key as 'ArrowLeft'];
       if (dir) {
