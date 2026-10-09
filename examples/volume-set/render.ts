@@ -136,13 +136,27 @@ export class CellView {
 }
 
 /** Fit a crop window into a rect preserving aspect; returns the placed view. */
+/**
+ * Physical size of one slice pixel (screen x, screen y), relative units. Set by the app for the current
+ * plane from the grid's voxel spacing, so anisotropic grids are drawn to scale; (1, 1) for cubic voxels.
+ */
+let pixelSize: [number, number] = [1, 1];
+export function setPixelSize(px: number, py: number): void {
+  const m = Math.min(px, py);
+  pixelSize = m > 0 && Number.isFinite(px) && Number.isFinite(py) ? [px / m, py / m] : [1, 1];
+}
+export function getPixelSize(): [number, number] {
+  return pixelSize;
+}
+
 export function placeCrop(crop: Rect, r: Rect): CellView {
-  let s = Math.min(r.w / crop.w, r.h / crop.h);
-  // When magnified enough for crisp voxels, use a whole number of pixels per voxel (with a whole-voxel
-  // crop) so every voxel edge lands on a pixel boundary and drawing agrees exactly with hit-testing.
-  if (s >= 3 && Number.isInteger(crop.x) && Number.isInteger(crop.y) && Number.isInteger(crop.w) && Number.isInteger(crop.h)) s = Math.floor(s);
-  const w = crop.w * s;
-  const h = crop.h * s;
+  const [px, py] = pixelSize;
+  let s = Math.min(r.w / (crop.w * px), r.h / (crop.h * py));
+  // When magnified enough for crisp voxels (cubic voxels only), use a whole number of pixels per voxel
+  // (with a whole-voxel crop) so every voxel edge lands on a pixel boundary and drawing matches hit-testing.
+  if (px === 1 && py === 1 && s >= 3 && Number.isInteger(crop.x) && Number.isInteger(crop.y) && Number.isInteger(crop.w) && Number.isInteger(crop.h)) s = Math.floor(s);
+  const w = crop.w * px * s;
+  const h = crop.h * py * s;
   // Whole-pixel destination rects: voxel edges then land on pixel boundaries when magnified.
   const x = Math.round(r.x + (r.w - w) / 2);
   const y = Math.round(r.y + (r.h - h) / 2);

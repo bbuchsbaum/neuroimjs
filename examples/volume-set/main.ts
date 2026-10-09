@@ -42,6 +42,7 @@ import {
   simRamp,
   CellView,
   type Rect,
+  setPixelSize,
 } from './render';
 
 type Mode = 'montage' | 'ortho' | 'facet' | 'space';
@@ -164,7 +165,18 @@ function readState(): State {
 }
 
 export const state = readState();
-if (state.thr >= state.range) state.thr = Math.max(0, +(state.range * 0.5).toPrecision(2));
+/** Values from the URL that had to be corrected; shown once after loading so nothing changes silently. */
+const urlNotes: string[] = [];
+{
+  const q = new URLSearchParams(location.search);
+  if (q.has('thr') && Number(q.get('thr')) !== state.thr) urlNotes.push(`threshold ${q.get('thr')} → ${state.thr}`);
+  if (q.has('range') && Number(q.get('range')) !== state.range) urlNotes.push(`max ${q.get('range')} → ${state.range}`);
+}
+if (state.thr >= state.range) {
+  const was = state.thr;
+  state.thr = Math.max(0, +(state.range * 0.5).toPrecision(2));
+  urlNotes.push(`threshold ${was} ≥ max ${state.range} → ${state.thr}`);
+}
 const wantPeak = !state.cursor;
 
 function writeState(): void {
@@ -599,6 +611,8 @@ function fitHeader(): void {
 
 function syncControls(): void {
   fitHeader();
+  const pinned = document.querySelector('.display-controls') as HTMLElement | null;
+  if (pinned) document.documentElement.style.setProperty('--pinned-h', `${pinned.offsetHeight}px`);
   const press = (attr: string, value: string): void =>
     document.querySelectorAll<HTMLButtonElement>(`[${attr}]`).forEach((b) => b.setAttribute('aria-pressed', String(b.getAttribute(attr) === value)));
   press('data-mode', state.mode);
@@ -995,6 +1009,7 @@ export function scheduleDraw(light = false, keepSide = false): void {
     const skipSide = sideCurrent;
     lightOnly = true;
     sideCurrent = true;
+    applyPixelSize();
     if (light && canvas && canvas.parentElement === view && state.mode !== 'ortho') {
       drawOverlay();
       if (lastRail) drawRail(lastRail.a, lastRail.order);
@@ -1167,9 +1182,25 @@ function drawBoxSel(ctx: CanvasRenderingContext2D): void {
   ctx.restore();
 }
 
+/** Physical aspect (width / height) of the crop window, honouring anisotropic voxel spacing. */
 export function sliceAspect(set: VolumeSet): number {
   const c = cropWindow(set);
-  return c.w / c.h;
+  const [px, py] = planePixelSize(set);
+  return (c.w * px) / (c.h * py);
+}
+
+/** Voxel spacing along the slice's screen x and y for the current plane (see sliceGrid's conventions). */
+function planePixelSize(set: VolumeSet): [number, number] {
+  const sp = (set.space.spacing as number[]).map((v) => Math.abs(v));
+  if (state.orient === 'axial') return [sp[0], sp[1]];
+  if (state.orient === 'coronal') return [sp[0], sp[2]];
+  return [sp[1], sp[2]];
+}
+
+/** Draw every slice picture to physical scale for the current plane (all sets share the template grid). */
+export function applyPixelSize(): void {
+  const [px, py] = planePixelSize(template.t1 as unknown as VolumeSet);
+  setPixelSize(px, py);
 }
 
 export function fmtR(r: number): string {
@@ -1339,13 +1370,13 @@ function updateReadout(): void {
     return;
   }
   if (!hover && state.mode === 'space') {
-    text.innerHTML = `<span class="muted">Click map: cursor · Click ID: select · Double-click/Enter: open · Wheel: slice · ⌘/Ctrl+wheel: zoom layout · Drag: pan · Arrows: move between maps · PgUp/PgDn: slice · 0: fit</span>`;
-    text.title = text.textContent ?? '';
+    text.innerHTML = `<span class="muted">Click: cursor · ID: select · Enter: open · Arrows: maps · Wheel/PgUp: slice · ⌘+wheel: zoom</span>`;
+    text.title = 'Click map: cursor · Click ID: select · Double-click or Enter: open in Ortho · Arrows: move between maps · Wheel, PgUp/PgDn: slice · ⌘/Ctrl+wheel: zoom layout · Drag: pan · 0: fit';
     return;
   }
   if (!hover) {
-    text.innerHTML = `<span class="muted">Click: cursor · Wheel: slice · ⌘/Ctrl+wheel: zoom · Drag: pan · Shift+drag: zoom box · 0: fit · Double-click: open subject</span>`;
-    text.title = text.textContent ?? '';
+    text.innerHTML = `<span class="muted">Click: cursor · Wheel: slice · ⌘+wheel: zoom · Shift+drag: box · Double-click: open</span>`;
+    text.title = 'Click: cursor · Wheel or ↑↓: slice · ⌘/Ctrl+wheel: zoom all cells · Drag: pan · Shift+drag: zoom to box · 0: fit · Double-click: open in Ortho · ←→: step subjects · F: facet focus';
     return;
   }
   const { a, member, ijk } = hover;
@@ -1595,7 +1626,7 @@ export function drawSide(a: Analysis, order: number[]): void {
     </section>
     <section>
       <h3>Orientation</h3>
-      <p class="note">Neurological: subject's left on screen left. Sagittal: anterior on the left. Grid ${a.set.dim.join(' × ')} voxels of ${voxelSize(a.set)} mm${isAnisotropic(a.set) ? '; voxels are drawn square, so pictures are not to scale on this anisotropic grid' : ''}.</p>
+      <p class="note">Neurological: subject's left on screen left. Sagittal: anterior on the left. Grid ${a.set.dim.join(' × ')} voxels of ${voxelSize(a.set)} mm${isAnisotropic(a.set) ? '; pictures are drawn to physical scale' : ''}.</p>
     </section>`;
   drawColorbar(side.querySelector('#colorbar') as HTMLCanvasElement, cmap, state.range, state.thr, digits());
   drawSimMatrix(a, order);
@@ -2010,6 +2041,7 @@ export function render(): Promise<void> {
   rendering = rendering
     .then(async () => {
       buildColormap();
+      applyPixelSize();
       imgCache.clear();
       hover = null;
       railHover = null;
@@ -2151,10 +2183,18 @@ async function main(): Promise<void> {
   await document.fonts?.ready;
   await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
   SV.exposeSpaceProbe();
+  if (urlNotes.length) setStatus(`Adjusted from the URL: ${urlNotes.join('; ')}`, 8000);
   (window as unknown as { __vsReady: boolean }).__vsReady = true;
+}
+
+/** Errors that stop the app (e.g. no data) are shown in the stage, in full, not as a clipped status line. */
+function showStageError(err: unknown): void {
+  const msg = err instanceof Error ? err.message : String(err);
+  setStatus('Error');
+  view.innerHTML = `<div class="stage-msg" role="alert"><h2>Nothing to show yet</h2><p>${msg.replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' })[c]!)}</p><p class="muted">See examples/volume-set/README.md for the expected folder layout.</p></div>`;
 }
 
 main().catch((err) => {
   console.error(err);
-  setStatus(`Error: ${err instanceof Error ? err.message : String(err)}`);
+  showStageError(err);
 });
