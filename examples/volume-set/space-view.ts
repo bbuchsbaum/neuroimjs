@@ -6,9 +6,10 @@
 import { gridToSlicePixel } from '../../src/volumeset/VolumeSet';
 import { type SimilarityBasis } from '../../src/volumeset/basis';
 import { EmbeddingJobs } from '../../src/volumeset/embeddingJobs';
-import { NMDS_SOLVER, neighborPreservation, sourceNeighbors } from '../../src/volumeset/nmds';
+import { NMDS_SOLVER, neighborPreservation, sourceNeighbors, type NmdsOptions } from '../../src/volumeset/nmds';
 import { EmbedWorkerRunner, type EmbedInput, type EmbedOutput } from './embed-runner';
 import {
+  bounds,
   spaceTransform,
   coincidentGroups,
   thumbSize,
@@ -23,6 +24,7 @@ import {
 } from './space';
 import { THEME, FONT, placeCrop, drawCellImage, drawCrosshair, hidpi } from './render';
 import * as M from './main';
+import * as SX from './space-extras';
 
 // ---------------------------------------------------------------------------
 // Space: maps placed by whole-volume similarity (nonmetric MDS of the basis)
@@ -30,11 +32,20 @@ import * as M from './main';
 let jobs: EmbeddingJobs<EmbedInput, EmbedOutput> | null = null;
 let embedRunner: EmbedWorkerRunner | null = null;
 
-function layoutKey(a: M.Analysis): string {
-  return `${a.basis.key}|${M.LAYOUT.id}|${JSON.stringify(M.layoutOpts(a.basis.eligible.length))}|${NMDS_SOLVER.name}@${NMDS_SOLVER.version}`;
+/** The basis Space shows for an analysis: a region-restricted basis when one is applied, else the whole-mask basis. */
+export function basisOf(a: M.Analysis): SimilarityBasis {
+  return SX.regionBasis(a) ?? a.basis;
 }
 
-type LayoutState = { kind: 'ready'; out: EmbedOutput } | { kind: 'pending' } | { kind: 'error'; message: string } | { kind: 'none'; message: string };
+export function layoutKeyFor(b: SimilarityBasis, opts: NmdsOptions = M.layoutOpts(b.eligible.length)): string {
+  return `${b.key}|${M.LAYOUT.id}|${JSON.stringify(opts)}|${NMDS_SOLVER.name}@${NMDS_SOLVER.version}`;
+}
+
+function layoutKey(a: M.Analysis): string {
+  return layoutKeyFor(basisOf(a));
+}
+
+export type LayoutState = { kind: 'ready'; out: EmbedOutput } | { kind: 'pending' } | { kind: 'error'; message: string } | { kind: 'none'; message: string };
 
 const BASIS_STATUS: Record<string, string> = {
   'insufficient-support': 'Too few voxels are valid in every map to compare them; nothing is placed.',
@@ -47,18 +58,24 @@ const BASIS_STATUS: Record<string, string> = {
  * only on request). Display-only redraws reach the cache and never refit.
  */
 function layoutFor(a: M.Analysis): LayoutState {
-  if (a.basis.status !== 'ok') return { kind: 'none', message: BASIS_STATUS[a.basis.status] ?? a.basis.status };
+  const b = basisOf(a);
+  return layoutForBasis(b, b.eligible.map((i) => b.ids[i]));
+}
+
+/** Layout for any basis (ids = the eligible members' IDs, in eligible order). */
+export function layoutForBasis(basis: SimilarityBasis, ids: string[], opts: NmdsOptions = M.layoutOpts(basis.eligible.length)): LayoutState {
+  if (basis.status !== 'ok') return { kind: 'none', message: BASIS_STATUS[basis.status] ?? basis.status };
   if (!jobs) {
     embedRunner = new EmbedWorkerRunner();
     jobs = new EmbeddingJobs(embedRunner, 6);
   }
-  const key = layoutKey(a);
+  const key = layoutKeyFor(basis, opts);
   const failed = jobs.failure(key);
   if (failed) return { kind: 'error', message: failed.message };
   const cached = jobs.peek(key);
-  const p = jobs.request(key, () => ({ dist: a.basis.dist, ids: a.basis.eligible.map((i) => a.ids[i]), opts: M.layoutOpts(a.basis.eligible.length) }));
+  const p = jobs.request(key, () => ({ dist: basis.dist, ids, opts }));
   if (cached) return { kind: 'ready', out: cached };
-  M.setStatus(`Fitting layout (${a.basis.eligible.length} maps)…`);
+  M.setStatus(`Fitting layout (${basis.eligible.length} maps)…`);
   p.then(
     (o) => {
       if (o.current && M.state.mode === 'space') {
@@ -79,16 +96,17 @@ function layoutFor(a: M.Analysis): LayoutState {
 
 export function retryLayout(): void {
   if (!jobs || !M.lastRail) return;
-  const a = M.lastRail.a;
+  const b = SX.retryBasis() ?? basisOf(M.lastRail.a);
   // request() clears the recorded failure and runs again.
-  jobs.request(layoutKey(a), () => ({ dist: a.basis.dist, ids: a.basis.eligible.map((i) => a.ids[i]), opts: M.layoutOpts(a.basis.eligible.length) })).then(
+  const opts = SX.trajectoryMode() ? SX.pooledOpts(b.eligible.length) : M.layoutOpts(b.eligible.length);
+  jobs.request(layoutKeyFor(b, opts), () => ({ dist: b.dist, ids: b.eligible.map((i) => b.ids[i]), opts })).then(
     () => M.scheduleDraw(),
     () => M.scheduleDraw()
   );
   M.scheduleDraw();
 }
 
-interface SpacePoint {
+export interface SpacePoint {
   /** Set index. */
   member: number;
   /** Position in the basis-eligible list. */
@@ -102,7 +120,7 @@ interface SpacePoint {
   ty?: number;
 }
 
-interface SpaceGeom {
+export interface SpaceGeom {
   a: M.Analysis;
   key: string;
   t: SpaceTransform | null;
@@ -121,6 +139,8 @@ interface SpaceGeom {
   zoomBox: { member: number; box: LabelBox } | null;
   /** Fixed place for the enlarged preview in the reference column, so it never covers a map; null if no room. */
   dock: PlotRect | null;
+  /** Number of pictures drawn away from their exact positions. */
+  nudged?: number;
 }
 
 /** Nudged picture centres, computed once per layout and screen geometry in a stable order (not per selection). */
@@ -185,7 +205,7 @@ export function setSpaceHover(member: number | null): void {
 export function reasonShort(e: SimilarityBasis['excluded'][number], a: M.Analysis): string {
   switch (e.reason) {
     case 'low-coverage':
-      return `coverage ${Math.round(a.basis.coverage[e.index] * 100)}%`;
+      return `coverage ${Math.round(basisOf(a).coverage[e.index] * 100)}%`;
     case 'all-missing':
       return 'no data';
     case 'constant':
@@ -202,7 +222,8 @@ export async function drawSpace(light = false): Promise<void> {
   const { ctx, W, H } = M.prepCanvas();
   M.hits.length = 0;
   spaceZoomHit = null;
-  const b = a.basis;
+  SX.syncToolbar();
+  const b = basisOf(a);
   const st = M.STAT_LABEL[M.state.stat];
   const asp = M.sliceAspect(a.set);
   const pad = 16;
@@ -220,8 +241,9 @@ export async function drawSpace(light = false): Promise<void> {
     'Reference only: average of all',
     `${a.set.size} ${st}-maps; not placed.`,
     '',
-    'Position: whole-volume similarity',
-    `(1 − r, ${layout.kind === 'ready' ? methodShort(layout.out.result.method) : 'nonmetric MDS'}).`,
+    ...(SX.trajectoryMode()
+      ? ['Position: one shared fit of every', 'subject × contrast map (1 − r).']
+      : ['Position: whole-volume similarity', `(1 − r, ${layout.kind === 'ready' ? methodShort(layout.out.result.method) : 'nonmetric MDS'}).`]),
     `Pictures: ${M.state.orient} slice ${M.sliceIndex() + 1}.`,
     'Axes and gaps are not results.',
   ];
@@ -231,7 +253,9 @@ export async function drawSpace(light = false): Promise<void> {
   // Members the basis excludes: a strip below the layout, outside its coordinates.
   const strip = [...b.excluded].sort((x, y) => a.ids[x.index].localeCompare(a.ids[y.index]));
   const stripH = strip.length ? Math.round(Math.max(78, Math.min(120, H * 0.17))) : 0;
-  const plot: PlotRect = { x: colW + 2 * pad, y: pad, w: W - colW - 3 * pad, h: H - 2 * pad - (stripH ? stripH + 8 : 0) };
+  // A strip at the top is reserved for the Space toolbar, so it never covers a map.
+  const toolbarH = 34;
+  const plot: PlotRect = { x: colW + 2 * pad, y: pad + toolbarH, w: W - colW - 3 * pad, h: H - 2 * pad - toolbarH - (stripH ? stripH + 8 : 0) };
   if (strip.length) {
     const y0 = plot.y + plot.h + 8;
     ctx.strokeStyle = THEME.line;
@@ -292,6 +316,14 @@ export async function drawSpace(light = false): Promise<void> {
   spaceGeom = geom;
   const sel = M.selectedMember(a);
   spaceNeighborIds = new Set();
+  if (SX.trajectoryMode()) {
+    await SX.drawTrajectories(ctx, geom, plot);
+    M.drawOverlay();
+    if (!light) M.drawSide(a, order);
+    M.drawRail(a, order);
+    exposeSpaceProbe();
+    return;
+  }
 
   const message = (text: string, color: string = THEME.muted): void => {
     ctx.fillStyle = color;
@@ -305,7 +337,16 @@ export async function drawSpace(light = false): Promise<void> {
   else if (layout.kind === 'error') message(`Layout failed: ${layout.message}. Press R or use Retry in the panel.`, THEME.warn);
   else {
     const res = layout.out.result;
-    const t = spaceTransform(res.coords, inner, M.state.space);
+    // Presentation alignment to the previously shown layout (canonical pose on first show).
+    const disp = SX.displayCoords(layoutKey(a), res.ids, Float64Array.from(res.coords));
+    if (M.state.space) {
+      // A viewport centred far outside the layout (e.g. a hand-edited sv) falls back to fit.
+      const bx = bounds(disp.coords);
+      const span = Math.max(bx.x1 - bx.x0, bx.y1 - bx.y0, 1e-9);
+      const { cx, cy } = M.state.space;
+      if (cx < bx.x0 - span || cx > bx.x1 + span || cy < bx.y0 - span || cy > bx.y1 + span) M.state.space = null;
+    }
+    const t = spaceTransform(disp.coords, inner, M.state.space);
     geom.t = t;
     // Exact-pattern groups (r = 1) share one anchor: one picture with a count, every ID kept.
     const groups = coincidentGroups(b.dist, m);
@@ -313,9 +354,16 @@ export async function drawSpace(light = false): Promise<void> {
     for (const g of groups) for (const p of g) groupOf.set(p, g.map((q) => b.eligible[q]));
     const all: SpacePoint[] = [];
     for (let p = 0; p < m; p++) {
-      const [sx, sy] = t.toScreen(res.coords[2 * p], res.coords[2 * p + 1]);
+      const [sx, sy] = t.toScreen(disp.coords[2 * p], disp.coords[2 * p + 1]);
       all.push({ member: b.eligible[p], pos: p, sx, sy, group: groupOf.get(p) ?? null });
     }
+    // Transition: interpolate from where each map was drawn (by ID); positions settle on the new fit.
+    const animPts = all.map((pt) => ({ id: a.ids[pt.member], sx: pt.sx, sy: pt.sy }));
+    const settling = SX.animate(animPts) < 1;
+    all.forEach((pt, i) => {
+      pt.sx = animPts[i].sx;
+      pt.sy = animPts[i].sy;
+    });
     geom.points = all;
     // One representative per exact group: the focused member if it is in the group, else the first.
     const shown = all.filter((pt) => !pt.group || pt.member === (pt.group.includes(sel ?? -1) ? sel : pt.group[0]));
@@ -325,12 +373,13 @@ export async function drawSpace(light = false): Promise<void> {
       const pi = b.eligible.indexOf(sel);
       for (const nb of sourceNeighbors(b.dist, m, pi, 3)) spaceNeighborIds.add(a.ids[b.eligible[nb.index]]);
     }
-    const visible = (pt: SpacePoint): boolean => pt.sx >= plot.x - thumbW && pt.sx <= plot.x + plot.w + thumbW && pt.sy >= plot.y - thumbH && pt.sy <= plot.y + plot.h + thumbH;
+    // A map is drawn only when its exact position is in view (zoomed layouts never show detached pictures).
+    const visible = (pt: SpacePoint): boolean => pt.sx >= plot.x && pt.sx <= plot.x + plot.w && pt.sy >= plot.y && pt.sy <= plot.y + plot.h;
     ctx.save();
     ctx.beginPath();
     ctx.rect(plot.x - 4, plot.y - 4, plot.w + 8, plot.h + 8);
     ctx.clip();
-    if (lod === 'thumbs') {
+    if (lod === 'thumbs' && !settling) {
       // Pictures are nudged apart so none hides another or another map's exact position; each moved
       // picture keeps a dot at its exact position and a leader. Positions (dots, links, keyboard steps)
       // remain the fitted configuration. Computed in eligible order and cached, so selecting or hovering
@@ -338,7 +387,8 @@ export async function drawSpace(light = false): Promise<void> {
       const vp = M.state.space;
       const dkey = `${layoutKey(a)}|${vp ? `${vp.s},${vp.cx},${vp.cy}` : 'fit'}|${thumbW}x${thumbH}|${plot.x},${plot.y},${plot.w},${plot.h}`;
       if (!declutterCache || declutterCache.key !== dkey) {
-        const reps = all.filter((pt) => !pt.group || pt.member === pt.group[0]).sort((x, y) => x.pos - y.pos);
+        // Only maps in view take part, so off-view maps never push visible pictures.
+        const reps = all.filter((pt) => (!pt.group || pt.member === pt.group[0]) && visible(pt)).sort((x, y) => x.pos - y.pos);
         const placed = declutter(
           reps.map((pt) => ({ x: pt.sx, y: pt.sy })),
           thumbW + 6,
@@ -359,6 +409,20 @@ export async function drawSpace(light = false): Promise<void> {
         }
       }
     }
+    // Fisheye lens (display only): exact positions and pictures inside the lens are magnified.
+    const lensScale = new Map<number, number>();
+    for (const pt of all) {
+      const l = SX.lens(pt.sx, pt.sy);
+      if (pt.tx !== undefined) {
+        const lt = SX.lens(pt.tx, pt.ty!);
+        pt.tx = lt.x;
+        pt.ty = lt.y;
+        lensScale.set(pt.member, Math.max(1, Math.min(2.2, lt.scale)));
+      } else lensScale.set(pt.member, Math.max(1, Math.min(2.2, l.scale)));
+      pt.sx = l.x;
+      pt.sy = l.y;
+    }
+    SX.drawBackdrop(ctx, { a, b, out: layout.out, key: layoutKey(a), d: disp, t, points: shown, plot, thumbW, thumbH, lod });
     const labelBoxes: LabelBox[] = [];
     const labelText: string[] = [];
     ctx.font = `10.5px ${FONT.mono}`;
@@ -378,11 +442,17 @@ export async function drawSpace(light = false): Promise<void> {
         if (!visible(pt)) continue;
         const tx = pt.tx ?? pt.sx;
         const ty = pt.ty ?? pt.sy;
-        M.drawCell(ctx, a, pt.member, { x: tx - thumbW / 2, y: ty - thumbH / 2, w: thumbW, h: thumbH - 16 }, null, false, {
+        const ls = lensScale.get(pt.member) ?? 1;
+        const tw = thumbW * ls;
+        const th = thumbH * ls;
+        const cell = { x: tx - tw / 2, y: ty - th / 2, w: tw, h: th - 16 * ls };
+        M.drawCell(ctx, a, pt.member, cell, null, false, {
           silhouette: true,
-          crosshair: thumbW >= 120,
+          crosshair: tw >= 120,
         });
-        geom.marks.push({ member: pt.member, box: { x: tx - thumbW / 2, y: ty - thumbH / 2, w: thumbW, h: thumbH }, kind: 'thumb' });
+        const mc = SX.memberColour(a, pt.member);
+        if (mc) SX.drawMemberColour(ctx, mc, M.hits[M.hits.length - 1]?.view.dest ?? cell, null);
+        geom.marks.push({ member: pt.member, box: { x: tx - tw / 2, y: ty - th / 2, w: tw, h: th }, kind: 'thumb' });
       }
       // Leaders and exact-position dots on top of every picture (with a dark halo), and only for pictures
       // that were moved: an unmoved picture is centred on its position, and a dot there would read as a cursor.
@@ -412,15 +482,20 @@ export async function drawSpace(light = false): Promise<void> {
         ctx.arc(pt.sx, pt.sy, isSel ? 4 : 2.75, 0, Math.PI * 2);
         ctx.fill();
         ctx.stroke();
+        // A visible dot is its own target and wins over any picture beneath it.
+        geom.marks.push({ member: pt.member, box: { x: pt.sx - 6, y: pt.sy - 6, w: 12, h: 12 }, kind: 'dot' });
       }
+      geom.nudged = movedPts.length;
     } else {
       for (const pt of shown) {
         if (!visible(pt)) continue;
         const isSel = pt.member === sel;
         ctx.fillStyle = isSel ? THEME.brand : spaceNeighborIds.has(a.ids[pt.member]) ? THEME.accent : THEME.text;
         ctx.beginPath();
-        ctx.arc(pt.sx, pt.sy, isSel ? 6 : 4, 0, Math.PI * 2);
+        ctx.arc(pt.sx, pt.sy, (isSel ? 6 : 4) * (lensScale.get(pt.member) ?? 1), 0, Math.PI * 2);
         ctx.fill();
+        const mc = SX.memberColour(a, pt.member);
+        if (mc) SX.drawMemberColour(ctx, mc, null, [pt.sx, pt.sy]);
         if (pt.group) {
           ctx.strokeStyle = THEME.warn;
           ctx.lineWidth = 1.5;
@@ -454,6 +529,7 @@ export async function drawSpace(light = false): Promise<void> {
       geom.marks.push({ member: pt.member, box: bx, kind: 'label' });
     }
     ctx.restore();
+    SX.drawForeground(ctx, { a, b, out: layout.out, key: layoutKey(a), d: disp, t, points: shown, plot, thumbW, thumbH, lod });
     // Caption: what the picture is and is not.
     ctx.font = `11px ${FONT.sans}`;
     ctx.fillStyle = THEME.faint;
@@ -462,20 +538,32 @@ export async function drawSpace(light = false): Promise<void> {
     const zoomNote = M.state.space ? ` · layout zoom ${M.state.space.s.toFixed(1)}×` : '';
     const cropNote = M.state.zoom ? ` · anatomy crop ${M.state.zoom.s.toFixed(1)}× (set in Montage)` : '';
     const stressNote = Number.isFinite(res.stress1) ? `${res.method === 'metric-smacof' ? 'metric ' : ''}Stress-1 ${fmtStress(res.stress1)} · ` : '';
-    ctx.fillText(`${stressNote}${m} placed${zoomNote}${cropNote}`, plot.x + plot.w, plot.y + plot.h + (stripH ? 4 : pad - 2));
+    const nudgeNote = geom.nudged ? ` · ${geom.nudged} pictures nudged apart (dots = exact positions)` : '';
+    ctx.fillText(`${stressNote}${m} placed${nudgeNote}${zoomNote}${cropNote}`, plot.x + plot.w, plot.y + plot.h + (stripH ? 4 : pad - 2));
   }
   M.drawOverlay();
   if (!light) M.drawSide(a, order);
   M.drawRail(a, order);
+  if (!light && M.state.subject !== lastScrolledSubject) {
+    // A new focus from the canvas or keyboard brings its Neighbours table into view (list picks do their own).
+    lastScrolledSubject = M.state.subject;
+    if (!M.side.contains(document.activeElement)) M.side.querySelector('.nb-table')?.closest('section')?.scrollIntoView({ block: 'nearest' });
+  }
   exposeSpaceProbe();
 }
+
+let lastScrolledSubject: string | null = null;
 
 /** Space extras on the overlay canvas: true-neighbour links and the hover/keyboard enlargement. */
 export function drawSpaceOverlay(ctx: CanvasRenderingContext2D, W: number, H: number): void {
   const g = spaceGeom;
   spaceZoomHit = null;
+  SX.syncToolbar();
   if (!g || M.state.mode !== 'space') return;
   g.zoomBox = null;
+  // The agreement card takes the dock while a pair is compared; previews then float.
+  const dockBusy = SX.drawDock(ctx, g);
+  const dock = dockBusy ? null : g.dock;
   const a = g.a;
   const sel = M.selectedMember(a);
   const byMember = new Map(g.points.map((p) => [p.member, p]));
@@ -507,14 +595,14 @@ export function drawSpaceOverlay(ctx: CanvasRenderingContext2D, W: number, H: nu
     }
   }
   // The docked preview shows the hovered (or keyboard-focused) map, else the focused map.
-  const shownId = spaceEnlarged ?? (g.dock ? M.state.subject : null);
+  const shownId = spaceEnlarged ?? (dock ? M.state.subject : null);
   const m = shownId === null ? -1 : a.ids.indexOf(shownId);
   if (m < 0) return;
   const anchor = byMember.get(m);
   const inStrip = g.strip.includes(m);
   if (!anchor && !inStrip) return;
   const asp = M.sliceAspect(a.set);
-  const w = g.dock ? g.dock.w : Math.round(Math.max(200, Math.min(280, g.thumbW * 2.1)));
+  const w = dock ? dock.w : Math.round(Math.max(200, Math.min(280, g.thumbW * 2.1)));
   // The caveat wraps to the preview width so it is never cut; the caption grows to fit it.
   ctx.font = `10.5px ${FONT.sans}`;
   const caveat = wrapText(ctx, `${M.state.orient} slice ${M.sliceIndex() + 1}; placed by whole volume`, w - 12);
@@ -542,7 +630,7 @@ export function drawSpaceOverlay(ctx: CanvasRenderingContext2D, W: number, H: nu
     }
     return area;
   };
-  const best = g.dock ? { x: g.dock.x, y: g.dock.y } : candidates.reduce((p, c) => (covered(c) < covered(p) ? c : p));
+  const best = dock ? { x: dock.x, y: dock.y } : candidates.reduce((p, c) => (covered(c) < covered(p) ? c : p));
   const x = best.x;
   const y = best.y;
   const v = placeCrop(M.cropWindow(a.set), { x, y, w, h });
@@ -664,7 +752,7 @@ export function exposeSpaceProbe(): void {
       return spaceGeom?.layout.kind ?? 'none';
     },
     get key() {
-      return spaceGeom ? layoutKey(spaceGeom.a) : null;
+      return spaceGeom ? (SX.pooledLayoutKey() ?? layoutKey(spaceGeom.a)) : null;
     },
     get method() {
       return ready()?.result.method ?? null;
@@ -703,6 +791,9 @@ export function exposeSpaceProbe(): void {
     get enlarged() {
       return spaceEnlarged;
     },
+    get v2() {
+      return { ...SX.opts, subset: [...SX.opts.subset], stability: SX.stabilityProgress() };
+    },
     get neighbors() {
       return [...spaceNeighborIds];
     },
@@ -721,33 +812,53 @@ function methodName(method: string): string {
 /** One line a reader can trust at a glance: fit, how well local neighbourhoods survive, and solver robustness. */
 function trustLine(a: M.Analysis): string {
   const g = spaceGeom;
-  if (!g || g.a !== a || g.layout.kind !== 'ready') return 'Fitting…';
+  if (!g || g.a !== a || g.layout.kind !== 'ready' || SX.trajectoryMode()) return SX.trajectoryMode() ? 'Shared contrast layout' : 'Fitting…';
   const res = g.layout.out.result;
-  const n = a.basis.eligible.length;
+  const n = basisOf(a).eligible.length;
   if (res.method === 'exact' || res.method === 'none') return 'Placed exactly (too few maps for a fit).';
-  const pres = neighborPreservation(a.basis.dist, res.coords, n);
+  const pres = neighborPreservation(basisOf(a).dist, res.coords, n);
+  const pct = (x: number): string => (Number.isFinite(x) ? `${Math.round(x * 100)}%` : 'n/a');
+  // The same measure for the pictures as drawn (nudged centres), which is what the eye reads.
+  let picPres = NaN;
+  if (g.nudged && g.points.length === n) {
+    const pic = new Float64Array(2 * n);
+    const byPos = new Map(g.points.map((p) => [p.pos, p]));
+    const repOf = (p: SpacePoint): SpacePoint => (p.group ? (g.points.find((q) => q.member === p.group![0]) ?? p) : p);
+    for (let i = 0; i < n; i++) {
+      const p = repOf(byPos.get(i)!);
+      pic[2 * i] = p.tx ?? p.sx;
+      pic[2 * i + 1] = p.ty ?? p.sy;
+    }
+    picPres = neighborPreservation(basisOf(a).dist, pic, n).mean;
+  }
+  // Near-tied alternatives: another start whose stress is within 0.5% of the best but not counted as reaching it.
+  const best = res.stress1;
+  const tol = Math.max(1e-6, 1e-4 * best);
+  const runnerUp = res.starts.map((st) => st.stress1).filter((x) => x > best + tol).sort((x, y) => x - y)[0];
+  const nearTie = runnerUp !== undefined && (runnerUp - best) / best < 0.005;
   const parts = [
-    `Stress-1 <b>${fmtStress(res.stress1)}</b>`,
-    `neighbours kept on screen <b>${Number.isFinite(pres.mean) ? `${Math.round(pres.mean * 100)}%` : 'n/a'}</b>`,
+    `${res.method === 'metric-smacof' ? 'metric ' : ''}Stress-1 <b>${fmtStress(res.stress1)}</b>`,
+    `3 nearest kept: dots <b>${pct(pres.mean)}</b>${Number.isFinite(picPres) ? `, pictures as drawn <b>${pct(picPres)}</b>` : ''}`,
     `r ${M.fmtR(Math.min(...rRange(a)))} to ${M.fmtR(Math.max(...rRange(a)))}`,
-    `best of ${res.starts.length} starts (${res.bestHits} reached it)`,
+    `best of ${res.starts.length} starts (${res.bestHits} reached it)${nearTie ? `; another start came within ${((100 * (runnerUp - best)) / best).toFixed(2)}%, so a somewhat different layout fits almost as well` : ''}`,
   ];
   return parts.join(' · ');
 }
 
 function rRange(a: M.Analysis): number[] {
-  const n = a.basis.eligible.length;
+  const n = basisOf(a).eligible.length;
   const out: number[] = [];
-  for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) out.push(1 - a.basis.dist[i * n + j]);
+  for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) out.push(1 - basisOf(a).dist[i * n + j]);
   return out.length ? out : [NaN];
 }
 
 export function spaceSection(a: M.Analysis): string {
-  const b = a.basis;
+  const b = basisOf(a);
   const g = spaceGeom;
   const sel = M.selectedMember(a);
   const placedN = b.eligible.length;
-  const layout = g?.a === a ? g.layout : null;
+  // In contrast-trajectory mode the visible fit is pooled; the per-contrast panel then has no layout.
+  const layout = g?.a === a && !SX.trajectoryMode() ? g.layout : null;
   const support = `${b.support.length.toLocaleString()} of ${b.maskVoxels.toLocaleString()} mask voxels`;
   let fit = '';
   let nb = '';
@@ -786,7 +897,7 @@ export function spaceSection(a: M.Analysis): string {
       const rows = near
         .map((n) => {
           const id = a.ids[b.eligible[n.index]];
-          return `<tr><td class="num">${n.rank}</td><td class="id"><button data-pick="${id}">${id}</button></td><td class="num">${M.fmtR(1 - n.dissimilarity)}</td><td class="num">${ranks[n.index]}</td></tr>`;
+          return `<tr><td class="num">${n.rank}</td><td class="id"><button data-pick="${id}">${id}</button></td><td class="num">${M.fmtR(1 - n.dissimilarity)}</td><td class="num">${ranks[n.index]}</td><td><button class="cmp" data-compare="${id}" title="Show where ${a.ids[sel]} and ${id} agree and disagree">compare</button></td></tr>`;
         })
         .join('');
       const mismatch = notSource.length
@@ -819,7 +930,7 @@ export function spaceSection(a: M.Analysis): string {
       return `<li><button data-pick="${a.ids[i]}" aria-current="${i === sel}" class="${out ? 'out' : ''}" title="${out ? 'not placed' : 'placed'}${spaceNeighborIds.has(a.ids[i]) ? ' · true neighbour of the focused map' : ''}">${a.ids[i]}</button></li>`;
     })
     .join('');
-  return `${nb}
+  return `${SX.panelHtml(a)}${nb}
     <section>
       <h3>Maps</h3>
       <ul class="space-members" aria-label="All maps; select to focus">${list}</ul>
@@ -841,6 +952,7 @@ export function spaceSection(a: M.Analysis): string {
 
 /** Wire the Space panel controls and draw its Shepard plot. */
 export function wireSpaceSection(a: M.Analysis): void {
+  SX.wirePanel(a);
   M.side.querySelectorAll<HTMLButtonElement>('[data-pick]').forEach((btn) => {
     btn.onclick = () => {
       M.state.subject = btn.dataset.pick!;
@@ -880,7 +992,7 @@ export function wireSpaceSection(a: M.Analysis): void {
   if (retry) retry.onclick = () => retryLayout();
   const c = M.side.querySelector('#shepard') as HTMLCanvasElement | null;
   const g = spaceGeom;
-  if (!c || !g || g.layout.kind !== 'ready') return;
+  if (!c || !g || g.layout.kind !== 'ready' || SX.trajectoryMode()) return;
   const { pairs } = g.layout.out.result;
   const W = M.side.clientWidth;
   const H = 120;
@@ -981,32 +1093,26 @@ export function disposeSpaceJobs(): void {
 // ---------------------------------------------------------------------------
 // Space v2 hooks called from main.ts. Each is a strict no-op unless a v2 option or gesture is active.
 
-/** Space v2 options and their URL keys; defaults are never written to the URL. */
-export const spaceOpts = {
-  /** Colour channel: '' (none), 'cursor' (value at cursor) or 'cov:<field>'. URL `sc`. */
-  colour: '',
-};
 
 export function readSpaceParams(q: URLSearchParams): void {
-  const c = q.get('sc');
-  spaceOpts.colour = c === 'cursor' || (c !== null && /^cov:[\w.-]{1,40}$/.test(c)) ? c : '';
+  SX.readParams(q);
 }
 
 export function writeSpaceParams(q: URLSearchParams): void {
-  if (spaceOpts.colour) q.set('sc', spaceOpts.colour);
+  SX.writeParams(q);
 }
 
 /** Returns true when a Space v2 gesture consumed the event. */
-export function onPointer(_type: 'wheel' | 'pointerdown' | 'pointermove' | 'pointerup' | 'pointerleave' | 'dblclick', _e: MouseEvent): boolean {
-  return false;
+export function onPointer(type: 'wheel' | 'pointerdown' | 'pointermove' | 'pointerup' | 'pointerleave' | 'dblclick', e: MouseEvent): boolean {
+  return SX.onPointer(type, e);
 }
 
 /** Returns true when a Space v2 key binding consumed the event. */
-export function onKey(_e: KeyboardEvent): boolean {
-  return false;
+export function onKey(e: KeyboardEvent): boolean {
+  return SX.onKey(e);
 }
 
 /** Rail accent for a subject (lasso subsets); null at defaults so the rail is unchanged. */
-export function railAccent(_subject: string): string | null {
-  return null;
+export function railAccent(subject: string): string | null {
+  return SX.railAccent(subject);
 }

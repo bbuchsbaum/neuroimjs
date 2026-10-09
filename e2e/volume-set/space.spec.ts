@@ -429,7 +429,10 @@ test.describe('Space (S4)', () => {
     const p = await probe(page);
     expect(p.placed.length + p.notPlaced.length).toBe(17);
     expect(await page.locator('.space-members button').count()).toBe(17);
-    for (const t of p.thumbs) expect(t.dest.w / t.dest.h).toBeCloseTo(t.crop.w / t.crop.h, 1);
+    // One consistent aspect for every cell (1 for cubic voxels; the voxel-size ratio when pictures are drawn to scale).
+    const big = p.thumbs.filter((t) => t.dest.w >= 40);
+    const f = big.map((t) => t.dest.w / t.dest.h / (t.crop.w / t.crop.h));
+    for (const x of f) expect(Math.abs(x - f[0])).toBeLessThan(0.06);
     // Every placed anchor lies inside the canvas.
     const box = (await page.locator('canvas.montage').boundingBox())!;
     for (const q of p.placed) {
@@ -531,9 +534,19 @@ test.describe('Space on touch (emulated)', () => {
     expect(url(page).get('cursor')).toBe(cursor);
     // One-finger drag on empty layout space pans (touch-action: none keeps the page still).
     const cdp = await page.context().newCDPSession(page);
-    const sx = box.x + box.width * 0.55;
-    const sy = box.y + box.height * 0.08;
-    const touch = (type: string, x: number, y: number) =>
+    // Start on empty layout space: below the toolbar strip and away from every picture.
+    const thumbs = (await probe(page)).thumbs;
+    const free = (x: number, y: number): boolean => thumbs.every((t) => x < t.dest.x - 20 || x > t.dest.x + t.dest.w + 20 || y < t.dest.y - 30 || y > t.dest.y + t.dest.h + 30);
+    let start: [number, number] = [box.width * 0.55, box.height * 0.5];
+    outer: for (let fy = 0.15; fy < 0.6; fy += 0.05)
+      for (let fx = 0.3; fx < 0.9; fx += 0.05)
+        if (free(box.width * fx, box.height * fy) && free(box.width * fx + 80, box.height * fy + 32)) {
+          start = [box.width * fx, box.height * fy];
+          break outer;
+        }
+    const sx = box.x + start[0];
+    const sy = box.y + start[1];
+    const touch = (type: 'touchStart' | 'touchMove' | 'touchEnd', x: number, y: number) =>
       cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y }] });
     await touch('touchStart', sx, sy);
     for (let i = 1; i <= 8; i++) await touch('touchMove', sx + i * 10, sy + i * 4);
@@ -549,3 +562,206 @@ test.describe('Space on touch (emulated)', () => {
     expect(url(page).get('subject')).toBe('s07');
   });
 });
+
+interface V2 {
+  colour: string;
+  halos: boolean;
+  stability: { done: number; total: number; error: string | null; finished: boolean } | null;
+  density: string;
+  region: { ijk: number[]; radiusMm: number } | null;
+  trajectories: boolean;
+  subset: string[];
+  compare: string | null;
+  lens: boolean;
+}
+const v2 = (page: Page): Promise<V2> => page.evaluate(() => (window as unknown as { __vsSpace: { v2: V2 } }).__vsSpace.v2);
+const V2_KEYS = ['sc', 'sh', 'sb', 'sd', 'sr', 'st', 'ss', 'cp'];
+/** The toolbar is complete once the optional covariates have loaded (or been found absent). */
+const toolbarReady = (page: Page): Promise<unknown> => page.waitForSelector('#sx-colour option[value="cov:age"]', { state: 'attached', timeout: 30_000 });
+
+test.describe('Space v2 layers', () => {
+  test('defaults add no URL keys and the toolbar is present only in Space', async ({ page }) => {
+    await open(page, SPACE);
+    for (const k of V2_KEYS) expect(url(page).get(k), k).toBeNull();
+    await expect(page.locator('.space-tools')).toBeVisible();
+    await page.click('[data-mode="montage"]');
+    await settle(page);
+    await expect(page.locator('.space-tools')).toBeHidden();
+    for (const k of V2_KEYS) expect(url(page).get(k), k).toBeNull();
+  });
+
+  test('colour channels recolour without refitting; covariates come from participants.tsv', async ({ page }) => {
+    await open(page, SPACE);
+    const runs = (await probe(page)).runs;
+    await page.selectOption('#sx-colour', 'cursor');
+    await settle(page);
+    expect(url(page).get('sc')).toBe('cursor');
+    const max = Number(await page.locator('#slice').getAttribute('max'));
+    await setSlider(page, Math.round(max * 0.3));
+    await settle(page);
+    const options = await page.locator('#sx-colour option').evaluateAll((els) => els.map((e) => (e as HTMLOptionElement).value));
+    expect(options).toEqual(expect.arrayContaining(['cov:age', 'cov:site', 'cov:mean_fd']));
+    await page.selectOption('#sx-colour', 'cov:age');
+    await settle(page);
+    expect(url(page).get('sc')).toBe('cov:age');
+    expect((await probe(page)).runs).toBe(runs);
+  });
+
+  test('halos and density toggle by toolbar and keys with no refit', async ({ page }) => {
+    await open(page, SPACE);
+    await toolbarReady(page);
+    const runs = (await probe(page)).runs;
+    const before = await pixelHash(page, { x: 200, y: 60, w: 900, h: 500 });
+    await page.locator('canvas.montage').focus();
+    await page.keyboard.press('h');
+    await settle(page);
+    expect((await v2(page)).halos).toBe(true);
+    expect(url(page).get('sh')).toBe('1');
+    expect(await pixelHash(page, { x: 200, y: 60, w: 900, h: 500 })).not.toBe(before);
+    await page.click('#sx-dens');
+    await settle(page);
+    expect(url(page).get('sd')).toBe('on');
+    await page.keyboard.press('h');
+    await settle(page);
+    expect(url(page).get('sh')).toBeNull();
+    expect((await probe(page)).runs).toBe(runs);
+  });
+
+  test('stability fills in from a worker while slicing stays live, and never refits the layout', async ({ page }) => {
+    await open(page, SPACE);
+    const p0 = await probe(page);
+    await page.click('#sx-stab');
+    const max = Number(await page.locator('#slice').getAttribute('max'));
+    for (let v = 0; v <= max; v += 3) await setSlider(page, v);
+    await page.waitForFunction(() => (window as unknown as { __vsSpace: { v2: V2 } }).__vsSpace.v2.stability?.finished === true, null, { timeout: 120_000 });
+    const st = (await v2(page)).stability!;
+    expect(st.error).toBeNull();
+    expect(st.done).toBe(24);
+    const p1 = await probe(page);
+    expect(p1.runs).toBe(p0.runs);
+    expect(p1.coords).toEqual(p0.coords);
+    await expect(page.locator('#side')).toContainText('not a confidence interval');
+  });
+
+  test('region layout is explicit: applied at the cursor, not refitted on cursor moves, and the whole-brain view returns from cache', async ({ page }) => {
+    await open(page, SPACE);
+    await toolbarReady(page);
+    const k0 = (await probe(page)).key!;
+    const runs0 = (await probe(page)).runs;
+    await page.click('#sx-region');
+    await page.waitForFunction((k) => {
+      const s = (window as unknown as { __vsSpace: { layout: string; key: string } }).__vsSpace;
+      return s.layout === 'ready' && s.key !== k;
+    }, k0, { timeout: 60_000 });
+    expect(url(page).get('sr')).toMatch(/^\d+,\d+,\d+,10$/);
+    expect((await probe(page)).key).toContain('subset=');
+    const runs1 = (await probe(page)).runs;
+    expect(runs1).toBe(runs0 + 1);
+    // Moving the cursor does not refit the regional layout.
+    await page.fill('#goto', '10, -20, 15');
+    await page.press('#goto', 'Enter');
+    await settle(page);
+    expect((await probe(page)).runs).toBe(runs1);
+    // Cycle 15 -> 25 -> whole brain; whole brain comes back from the cache.
+    for (const want of ['15', '25']) {
+      await page.click('#sx-region');
+      await page.waitForFunction((w) => (new URL(location.href).searchParams.get('sr') ?? '').endsWith(`,${w}`), want);
+      await page.waitForFunction(() => (window as unknown as { __vsSpace: { layout: string } }).__vsSpace.layout === 'ready', null, { timeout: 60_000 });
+    }
+    await page.click('#sx-region');
+    await page.waitForFunction((k) => (window as unknown as { __vsSpace: { key: string; layout: string } }).__vsSpace.key === k, k0, { timeout: 60_000 });
+    expect(url(page).get('sr')).toBeNull();
+    const extraFits = (await probe(page)).runs - runs1;
+    expect(extraFits).toBe(2); // 15 mm and 25 mm, not the whole brain again
+  });
+
+  test('Shift-drag lasso selects a group, marks it on the rail, and Esc clears it', async ({ page }) => {
+    await open(page, SPACE);
+    const p = await probe(page);
+    const box = (await page.locator('canvas.montage').boundingBox())!;
+    const target = p.placed.filter((q) => ['s08', 's09', 's10', 's11', 's12'].includes(q.id));
+    const xs = target.map((q) => q.x);
+    const ys = target.map((q) => q.y);
+    const [x0, x1, y0, y1] = [Math.min(...xs) - 12, Math.max(...xs) + 12, Math.min(...ys) - 12, Math.max(...ys) + 12];
+    // Only lasso if no other anchor falls inside the rectangle.
+    const others = p.placed.filter((q) => !target.includes(q) && q.x > x0 && q.x < x1 && q.y > y0 && q.y < y1);
+    expect(others.map((q) => q.id)).toEqual([]);
+    await page.keyboard.down('Shift');
+    await page.mouse.move(box.x + x0, box.y + y0);
+    await page.mouse.down();
+    for (const [x, y] of [[x1, y0], [x1, y1], [x0, y1], [x0, y0 + 1]]) await page.mouse.move(box.x + x, box.y + y, { steps: 4 });
+    await page.mouse.up();
+    await page.keyboard.up('Shift');
+    await settle(page);
+    expect((await v2(page)).subset.sort()).toEqual(['s08', 's09', 's10', 's11', 's12']);
+    expect(url(page).get('ss')).toBe('s08,s09,s10,s11,s12');
+    await expect(page.locator('#side')).toContainText('Group');
+    await expect(page.locator('#side')).toContainText('not a test');
+    expect((await probe(page)).runs).toBe(p.runs);
+    await page.locator('canvas.montage').focus();
+    await page.keyboard.press('Escape');
+    await settle(page);
+    expect((await v2(page)).subset).toEqual([]);
+    expect(url(page).get('mode')).toBe('space');
+  });
+
+  test('compare shows where r comes from, with contributions that add up to the table r', async ({ page }) => {
+    await open(page, `${SPACE}&subject=s03`);
+    await page.click('[data-compare="s02"]');
+    await settle(page);
+    expect(url(page).get('cp')).toBe('s02');
+    const agree = page.locator('#side section', { hasText: 'Agreement' });
+    await expect(agree).toContainText('s03 × s02');
+    const text = await agree.innerText();
+    const r = Number(/\br\s+(−?\.\d+)/.exec(text)![1].replace('−', '-'));
+    const pos = Number(/agreeing voxels\s+\+(\.\d+)/.exec(text)![1]);
+    const neg = Number(/disagreeing voxels\s+−(\.\d+)/.exec(text)![1]);
+    expect(Math.abs(pos - neg - r)).toBeLessThan(0.015); // two-decimal rounding
+    const nbRow = await page.locator('.nb-table tr', { hasText: 's02' }).innerText();
+    expect(nbRow).toContain(text.match(/\br\s+(−?\.\d+)/)![1]);
+    await page.locator('canvas.montage').focus();
+    await page.keyboard.press('Escape');
+    await settle(page);
+    expect(url(page).get('cp')).toBeNull();
+  });
+
+  test('contrast trajectories fit one pooled layout over subject × contrast maps', async ({ page }) => {
+    test.setTimeout(120_000);
+    await open(page, SPACE);
+    await toolbarReady(page);
+    const k0 = (await probe(page)).key!;
+    await page.click('#sx-traj');
+    await page.waitForFunction((k) => {
+      const s = (window as unknown as { __vsSpace: { layout: string; key: string } }).__vsSpace;
+      return s.layout === 'ready' && s.key !== k;
+    }, k0, { timeout: 60_000 });
+    expect(url(page).get('st')).toBe('1');
+    expect((await probe(page)).key).toContain('pooled=cue+delayearly+delaylate');
+    await page.click('#sx-traj');
+    await page.waitForFunction((k) => (window as unknown as { __vsSpace: { key: string } }).__vsSpace.key === k, k0);
+    expect(url(page).get('st')).toBeNull();
+  });
+
+  test('the lens magnifies but clicks still place the cursor through the drawn picture', async ({ page }) => {
+    await open(page, `${SPACE}&subject=s03`);
+    await page.locator('canvas.montage').focus();
+    await page.keyboard.press('l');
+    const box = (await page.locator('canvas.montage').boundingBox())!;
+    const p = await probe(page);
+    const a = p.placed.find((q) => q.id === 's03')!;
+    await page.mouse.move(box.x + a.x, box.y + a.y);
+    await settle(page);
+    await settle(page);
+    const t = (await probe(page)).thumbs.find((x) => x.id === 's03')!;
+    const px = t.dest.x + t.dest.w * 0.5;
+    const py = t.dest.y + t.dest.h * 0.45;
+    await page.mouse.click(box.x + px, box.y + py);
+    await settle(page);
+    const col = Math.floor(t.crop.x + ((px - t.dest.x) / t.dest.w) * t.crop.w);
+    const row = Math.floor(t.crop.y + ((py - t.dest.y) / t.dest.h) * t.crop.h);
+    expect(url(page).get('cursor')).toBe(`${col},${44 - 1 - row},${url(page).get('slice')}`);
+    expect((await v2(page)).lens).toBe(true);
+    expect((await probe(page)).runs).toBe(p.runs);
+  });
+});
+
