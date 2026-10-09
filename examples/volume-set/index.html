@@ -64,11 +64,11 @@
       #side section { margin-bottom: 18px; }
       /* Pinned at the top of the side panel: the controls stay reachable while reading the panel below. */
       .display-controls { position: sticky; top: -14px; z-index: 2; background: var(--bg-alt); margin: -14px -18px 14px; padding: 14px 18px 10px; border-bottom: 1px solid var(--line); }
-      .display-controls .ctl-grid { display: grid; grid-template-columns: 78px minmax(0, 1fr); gap: 7px 10px; align-items: center; }
+      .display-controls .ctl-grid { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 7px 8px; align-items: center; }
       .display-controls .ctl-grid > label { color: var(--muted); font-size: 12px; }
-      .display-controls .pair { display: flex; align-items: center; gap: 8px; }
+      .display-controls .pair { display: flex; align-items: center; gap: 6px; min-width: 0; }
       .display-controls .pair label { color: var(--muted); font-size: 12px; }
-      .display-controls .pair input { width: 64px; }
+      .display-controls .pair input { width: 54px; min-width: 0; }
       .display-controls select { width: 100% !important; min-width: 0; }
       .display-controls #thr-label { font-family: var(--mono); font-size: 12px; }
       #side h3 { margin: 0 0 8px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; display: flex; justify-content: space-between; gap: 8px; }

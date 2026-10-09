@@ -4,10 +4,15 @@ A demo for looking at a *set* of aligned maps (for example one contrast map per 
 side by side. It is a side quest, not a published API: everything in `src/volumeset/` is internal.
 
 ```bash
-npm run demo:volume-set                      # synthetic data, no network, nothing private
-VS_DATA_ROOT=… VS_TEMPLATE_DIR=… npx vite --config examples/volume-set/vite.config.ts   # local data
-npm run test:e2e:volume-set                  # browser gate (synthetic data only)
+VS_DATA_ROOT=/path/to/contrasts npm run demo:volume-set   # your real maps (the default)
+npm run demo:volume-set:synthetic                          # generated set, no private data
+npm run test:e2e:volume-set                                # browser gate (synthetic data only)
 ```
+
+The real-data demo needs only `VS_DATA_ROOT` (a folder of `<model>/sub-*/…nii.gz` contrast maps on the
+MNI152NLin2009cAsym 2 mm grid). The template, brain mask and Schaefer atlas are downloaded once from the
+public TemplateFlow archive into `examples/volume-set/.cache/templateflow/` (git-ignored); set
+`VS_TEMPLATE_DIR` to use another copy. Real data is never copied into the repository.
 
 `VS_SYNTHETIC=1` serves a generated set: a non-cubic, anisotropic grid with a translated affine and
 17 subjects with planted structure (two groups, an outlier, a sign flip, an identical-pattern pair, a

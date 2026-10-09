@@ -2,8 +2,10 @@
  * Vite plugin that serves a local volume set (per-subject contrast NIfTIs) and
  * an MNI template to the volume-set demo. Nothing is copied into the repo.
  *
- *   VS_DATA_ROOT     directory containing <model>/sub-*\/*.nii.gz
- *   VS_TEMPLATE_DIR  directory containing the TemplateFlow res-02 T1w + brain mask
+ *   VS_DATA_ROOT     directory containing <model>/sub-*\/*.nii.gz (your real maps; required)
+ *   VS_TEMPLATE_DIR  directory for the TemplateFlow res-02 T1w, brain mask and Schaefer atlas.
+ *                    Defaults to examples/volume-set/.cache/templateflow (git-ignored); missing
+ *                    files are downloaded once from the public TemplateFlow archive.
  *   VS_SYNTHETIC=1   ignore the two above and serve a deterministic synthetic set
  *                    generated in memory (see synthetic.ts); no atlas in this mode
  *
@@ -30,6 +32,30 @@ const TEMPLATE_FILES: Record<string, string> = {
   'atlas.nii.gz': 'tpl-MNI152NLin2009cAsym_res-02_atlas-Schaefer2018_desc-400Parcels17Networks_dseg.nii.gz',
   'atlas.tsv': 'tpl-MNI152NLin2009cAsym_atlas-Schaefer2018_desc-400Parcels17Networks_dseg.tsv',
 };
+
+const TEMPLATEFLOW = 'https://templateflow.s3.amazonaws.com/tpl-MNI152NLin2009cAsym/';
+const DEFAULT_TEMPLATE_DIR = path.join(__dirname, '.cache', 'templateflow');
+
+/** Fetch a public TemplateFlow file into the cache once; resolves to its local path. */
+const inflight = new Map<string, Promise<string>>();
+function ensureTemplateFile(dir: string, name: string): Promise<string> {
+  const file = path.join(dir, name);
+  if (fs.existsSync(file)) return Promise.resolve(file);
+  let p = inflight.get(file);
+  if (!p) {
+    p = (async () => {
+      const res = await fetch(TEMPLATEFLOW + name);
+      if (!res.ok) throw new Error(`TemplateFlow ${name}: HTTP ${res.status}`);
+      fs.mkdirSync(dir, { recursive: true });
+      const tmp = `${file}.part`;
+      fs.writeFileSync(tmp, Buffer.from(await res.arrayBuffer()));
+      fs.renameSync(tmp, file);
+      return file;
+    })().finally(() => inflight.delete(file));
+    inflight.set(file, p);
+  }
+  return p;
+}
 
 function entity(name: string, key: string): string | undefined {
   const m = new RegExp(`(?:^|_)${key}-([A-Za-z0-9]+)`).exec(name);
@@ -121,7 +147,7 @@ const syntheticHandler: Connect.NextHandleFunction = (req, res, next) => {
 
 export function vsDataPlugin(): Plugin {
   const dataRoot = process.env.VS_DATA_ROOT ?? '';
-  const templateDir = process.env.VS_TEMPLATE_DIR ?? '';
+  const templateDir = process.env.VS_TEMPLATE_DIR || DEFAULT_TEMPLATE_DIR;
   const synthetic = process.env.VS_SYNTHETIC === '1';
 
   const fileHandler: Connect.NextHandleFunction = (req, res, next) => {
@@ -129,20 +155,34 @@ export function vsDataPlugin(): Plugin {
     if (!url.startsWith('/vs/')) return next();
     try {
       if (url === '/vs/manifest.json') {
+        // Real data only: without a data root, say so instead of inventing maps.
+        if (!dataRoot || !fs.existsSync(dataRoot)) {
+          res.statusCode = 404;
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ error: dataRoot ? `VS_DATA_ROOT not found: ${dataRoot}` : 'Set VS_DATA_ROOT to the folder with your <model>/sub-*/ contrast maps (or run demo:volume-set:synthetic).' }));
+          return;
+        }
         res.setHeader('Content-Type', 'application/json');
         res.end(JSON.stringify({ members: buildManifest(dataRoot) }));
         return;
       }
       if (url.startsWith('/vs/template/')) {
         const name = TEMPLATE_FILES[url.slice('/vs/template/'.length)];
-        const file = name ? path.join(templateDir, name) : null;
-        if (!file || !fs.existsSync(file)) {
+        if (!name) {
           res.statusCode = 404;
-          res.end('template not found; set VS_TEMPLATE_DIR');
+          res.end('not found');
           return;
         }
-        if (file.endsWith('.tsv')) res.setHeader('Content-Type', 'text/tab-separated-values');
-        return sendFile(res, file);
+        ensureTemplateFile(templateDir, name)
+          .then((file) => {
+            if (file.endsWith('.tsv')) res.setHeader('Content-Type', 'text/tab-separated-values');
+            sendFile(res, file);
+          })
+          .catch((err) => {
+            res.statusCode = 502;
+            res.end(String(err));
+          });
+        return;
       }
       if (url.startsWith('/vs/files/')) {
         const file = within(dataRoot, url.slice('/vs/files/'.length));

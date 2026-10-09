@@ -54,7 +54,10 @@ export function prettyParcel(name: string): string {
 
 export async function fetchManifest(): Promise<VsMember[]> {
   const res = await fetch('/vs/manifest.json');
-  if (!res.ok) throw new Error(`manifest: HTTP ${res.status}`);
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(body?.error ?? `manifest: HTTP ${res.status}`);
+  }
   return (await res.json()).members as VsMember[];
 }
 
