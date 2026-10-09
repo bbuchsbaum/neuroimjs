@@ -653,7 +653,7 @@ test.describe('Space v2 layers', () => {
       const s = (window as unknown as { __vsSpace: { layout: string; key: string } }).__vsSpace;
       return s.layout === 'ready' && s.key !== k;
     }, k0, { timeout: 60_000 });
-    expect(url(page).get('sr')).toMatch(/^\d+,\d+,\d+,10$/);
+    await page.waitForFunction(() => /^\d+,\d+,\d+,10$/.test(new URL(location.href).searchParams.get('sr') ?? ''), null, { timeout: 30_000 });
     expect((await probe(page)).key).toContain('subset=');
     const runs1 = (await probe(page)).runs;
     expect(runs1).toBe(runs0 + 1);
@@ -669,8 +669,9 @@ test.describe('Space v2 layers', () => {
       await page.waitForFunction(() => (window as unknown as { __vsSpace: { layout: string } }).__vsSpace.layout === 'ready', null, { timeout: 60_000 });
     }
     await page.click('#sx-region');
+    // The probe's key follows the option at once; the URL is rewritten on the next frame (late under load).
+    await page.waitForFunction(() => !new URL(location.href).searchParams.has('sr'), null, { timeout: 30_000 });
     await page.waitForFunction((k) => (window as unknown as { __vsSpace: { key: string; layout: string } }).__vsSpace.key === k, k0, { timeout: 60_000 });
-    expect(url(page).get('sr')).toBeNull();
     const extraFits = (await probe(page)).runs - runs1;
     expect(extraFits).toBe(2); // 15 mm and 25 mm, not the whole brain again
   });
@@ -735,11 +736,11 @@ test.describe('Space v2 layers', () => {
       const s = (window as unknown as { __vsSpace: { layout: string; key: string } }).__vsSpace;
       return s.layout === 'ready' && s.key !== k;
     }, k0, { timeout: 60_000 });
-    expect(url(page).get('st')).toBe('1');
+    await page.waitForFunction(() => new URL(location.href).searchParams.get('st') === '1', null, { timeout: 30_000 });
     expect((await probe(page)).key).toContain('pooled=cue+delayearly+delaylate');
     await page.click('#sx-traj');
     await page.waitForFunction((k) => (window as unknown as { __vsSpace: { key: string } }).__vsSpace.key === k, k0);
-    expect(url(page).get('st')).toBeNull();
+    await page.waitForFunction(() => !new URL(location.href).searchParams.has('st'), null, { timeout: 30_000 });
   });
 
   test('the lens magnifies but clicks still place the cursor through the drawn picture', async ({ page }) => {
