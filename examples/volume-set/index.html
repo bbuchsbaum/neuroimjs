@@ -62,10 +62,15 @@
       #readout .mono { font-family: var(--mono); font-size: 11.5px; }
       #side { min-width: 0; overflow-x: hidden; border-left: 1px solid var(--line); background: var(--bg-alt); padding: 14px 18px; overflow: auto; }
       #side section { margin-bottom: 18px; }
-      .display-controls .ctl-row { display: flex; gap: 8px; margin-bottom: 8px; align-items: center; }
-      .display-controls label { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
-      .display-controls select { flex: 1; min-width: 0; width: auto !important; }
-      .display-controls #thr-label { font-family: var(--mono); }
+      /* Pinned at the top of the side panel: the controls stay reachable while reading the panel below. */
+      .display-controls { position: sticky; top: -14px; z-index: 2; background: var(--bg-alt); margin: -14px -18px 14px; padding: 14px 18px 10px; border-bottom: 1px solid var(--line); }
+      .display-controls .ctl-grid { display: grid; grid-template-columns: 78px minmax(0, 1fr); gap: 7px 10px; align-items: center; }
+      .display-controls .ctl-grid > label { color: var(--muted); font-size: 12px; }
+      .display-controls .pair { display: flex; align-items: center; gap: 8px; }
+      .display-controls .pair label { color: var(--muted); font-size: 12px; }
+      .display-controls .pair input { width: 64px; }
+      .display-controls select { width: 100% !important; min-width: 0; }
+      .display-controls #thr-label { font-family: var(--mono); font-size: 12px; }
       #side h3 { margin: 0 0 8px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; display: flex; justify-content: space-between; gap: 8px; }
       #side h3 .sub { text-transform: none; letter-spacing: 0; font-family: var(--mono); font-weight: 400; color: var(--text); }
       #side canvas { display: block; }
@@ -78,9 +83,7 @@
       .note .smooth { color: var(--accent); font-weight: 600; }
       footer { border-top: 1px solid var(--line); min-height: 0; min-width: 0; overflow: hidden; position: relative; }
       #copy-rail { position: absolute; left: 16px; bottom: 10px; font-size: 11px; padding: 2px 8px; }
-      @media (max-width: 1560px) {
-        header .group > span:not(#thr-label):not(.keep) { display: none; }
-      }
+      header.compact .group > span:not(.keep) { display: none; }
       @media (max-width: 1440px) {
         header { gap: 8px 8px; padding: 10px 12px; }
         .seg button { padding: 5px 7px; }
@@ -143,8 +146,11 @@
       <aside id="side">
         <section class="display-controls" aria-label="Display">
           <h3>Display</h3>
-          <div class="ctl-row"><label><span id="thr-label">|t| ≥</span><input id="thr" type="number" step="0.1" aria-label="Threshold" /></label><label><span>max</span><input id="range" type="number" step="0.5" aria-label="Colour range" /></label></div>
-          <div class="ctl-row"><select id="smooth" title="Display-only smoothing; readouts stay raw"></select><select id="minc" title="Display-only: hide small suprathreshold clusters"></select></div>
+          <div class="ctl-grid">
+            <label for="thr" id="thr-label">|t| ≥</label><div class="pair"><input id="thr" type="number" step="0.1" aria-label="Threshold" /><label for="range">max</label><input id="range" type="number" step="0.5" aria-label="Colour range" /></div>
+            <label for="smooth" title="Display-only, edge-preserving; readouts stay raw">Smoothing</label><select id="smooth" aria-describedby="smooth-hint"></select>
+            <label for="minc" title="Display-only: hide suprathreshold clusters smaller than this">Min cluster</label><select id="minc"></select>
+          </div>
         </section>
         <div id="side-body"></div>
       </aside>

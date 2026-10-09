@@ -52,7 +52,8 @@ type Mode = 'montage' | 'ortho' | 'facet' | 'space';
 const MODES: readonly Mode[] = ['montage', 'ortho', 'facet', 'space'];
 type SortKey = 'similarity' | 'loo' | 'distance' | 'cursor' | 'id';
 type Smooth = 'off' | SmoothPreset;
-const SMOOTH_LABEL: Record<Smooth, string> = { off: 'No smoothing', light: 'Smooth · light', medium: 'Smooth · medium', strong: 'Smooth · strong (blur)' };
+const SMOOTH_LABEL: Record<Smooth, string> = { off: 'Off', light: 'Light', medium: 'Medium', strong: 'Strong (blurs)' };
+const MINC_OPTIONS = [0, 5, 10, 20, 40] as const;
 const SMOOTH_NOTE: Record<SmoothPreset, string> = {
   light: 'Light: self-guided (the map is its own edge guide), same strength for all subjects; removes speckle and can hide much of a weak subject\'s extent',
   medium: 'Medium: self-guided, same strength for all subjects; stronger denoising that also erodes cluster edges',
@@ -112,6 +113,13 @@ function pick<T extends string>(v: string | null, allowed: readonly T[], d: T): 
   return v !== null && (allowed as readonly string[]).includes(v) ? (v as T) : d;
 }
 
+/** "i,j,k" with three non-negative integers; anything else means "use the peak". Range is checked after loading. */
+function parseCursor(v: string | null): [number, number, number] | null {
+  if (!v || v === 'peak') return null;
+  const c = v.split(',').map(Number);
+  return c.length === 3 && c.every((x) => Number.isInteger(x) && x >= 0) ? (c as [number, number, number]) : null;
+}
+
 function readState(): State {
   const q = new URLSearchParams(location.search);
   const stat = pick<StatName>(q.get('stat'), ['t', 'beta'], 't');
@@ -133,15 +141,16 @@ function readState(): State {
     stat,
     orient: pick<SetOrientation>(q.get('orient'), ['axial', 'coronal', 'sagittal'], 'axial'),
     slice: q.has('slice') ? num('slice', 0) : null,
-    cursor: cursor && cursor !== 'peak' ? (cursor.split(',').map(Number) as [number, number, number]) : null,
+    cursor: parseCursor(cursor),
     sort: pick<SortKey>(q.get('sort'), ['similarity', 'loo', 'distance', 'cursor', 'id'], 'similarity'),
-    thr: num('thr', d.thr),
-    range: num('range', d.range),
+    // Negative thresholds and non-positive ranges are meaningless: fall back to defaults.
+    thr: num('thr', d.thr) >= 0 ? num('thr', d.thr) : d.thr,
+    range: num('range', d.range) > 0 ? num('range', d.range) : d.range,
     subject: q.get('subject'),
     smooth: parseSmooth(q.get('smooth')),
     zoom: z && z.length === 3 && z.every(Number.isFinite) ? { s: z[0], cx: z[1], cy: z[2] } : null,
     focus: q.get('focus') === '1',
-    minc: [0, 5, 10, 20].includes(Number(q.get('minc'))) ? Number(q.get('minc')) : 0,
+    minc: (MINC_OPTIONS as readonly number[]).includes(Number(q.get('minc'))) ? Number(q.get('minc')) : 0,
     // Malformed or out-of-range viewports fall back to fit.
     space: sv && sv.length === 3 && sv.every(Number.isFinite) && sv[0] >= 1 && sv[0] <= 40 ? { s: sv[0], cx: sv[1], cy: sv[2] } : null,
   };
@@ -458,12 +467,19 @@ function setupControls(): void {
     if (!contrasts.includes(state.contrast)) state.contrast = contrasts[0];
     fill($('#contrast'), contrasts, state.contrast);
   };
+  if (!models.includes(state.model)) {
+    console.warn(`volume-set: unknown model "${state.model}", using ${models[0]}`);
+    state.model = models[0];
+  }
   fill($('#model'), models, state.model);
   fillContrasts();
+  const known = new Set(manifest.filter((m) => m.model === state.model).map((m) => m.contrast));
+  const facets = state.facets.filter((c) => known.has(c));
+  state.facets = facets.length ? facets : [...known].slice(0, 3);
   fill($('#sort'), Object.keys(SORT_LABEL), state.sort, (s) => SORT_LABEL[s as SortKey]);
   fill($('#stat'), ['t', 'beta'], state.stat, (s) => STAT_LABEL[s]);
   fill($('#smooth'), Object.keys(SMOOTH_LABEL), state.smooth, (s) => SMOOTH_LABEL[s as Smooth]);
-  fill($('#minc'), ['0', '5', '10', '20'], String(state.minc), (s) => (s === '0' ? 'All clusters' : `Clusters ≥ ${s} vox`));
+  fill($('#minc'), MINC_OPTIONS.map(String), String(state.minc), (s) => (s === '0' ? 'All' : `≥ ${s} voxels`));
   ($('#minc') as HTMLSelectElement).onchange = (e) => {
     state.minc = Number((e.target as HTMLSelectElement).value);
     void render();
@@ -564,7 +580,15 @@ async function autoRange(): Promise<void> {
   state.thr = +(state.range * 0.15).toPrecision(2);
 }
 
+/** Show the header's field captions only when everything fits on one row. */
+function fitHeader(): void {
+  const header = document.querySelector('header') as HTMLElement;
+  header.classList.remove('compact');
+  if (header.offsetHeight > 56) header.classList.add('compact');
+}
+
 function syncControls(): void {
+  fitHeader();
   const press = (attr: string, value: string): void =>
     document.querySelectorAll<HTMLButtonElement>(`[${attr}]`).forEach((b) => b.setAttribute('aria-pressed', String(b.getAttribute(attr) === value)));
   press('data-mode', state.mode);
@@ -2204,6 +2228,30 @@ function clusterSummary(a: Analysis): string {
     : `none suggested (best split ${bc.sizes.join('/')}, gap ${bc.gap.toFixed(3)}, below the 0.02 gap rule)`;
 }
 
+/** How much the cluster-extent filter hides, per subject (share of coloured voxels before filtering). */
+function filterEffectNote(a: Analysis): string {
+  if (state.minc <= 1) return '';
+  const frac: number[] = [];
+  for (let m = 0; m < a.set.size; m++) {
+    const pre = smoothedValues(a, m);
+    const post = displayValues(a, m);
+    let n = 0;
+    let hid = 0;
+    for (let v = 0; v < pre.length; v++) {
+      if (!(Math.abs(pre[v]) >= state.thr)) continue;
+      n++;
+      if (!(Math.abs(post[v]) >= state.thr)) hid++;
+    }
+    frac.push(n ? hid / n : 0);
+  }
+  const sorted = [...frac].sort((x, y) => x - y);
+  const med = sorted.length % 2 ? sorted[sorted.length >> 1] : (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2;
+  let worst = 0;
+  frac.forEach((f, i) => (f > frac[worst] ? (worst = i) : 0));
+  const pct = (x: number): string => (x > 0 && x < 0.005 ? '<1%' : `${Math.round(x * 100)}%`);
+  return `<p class="note">Cluster filter hides <b>${pct(med)}</b> of coloured voxels (median); most <span class="nb">sub-${a.set.members[worst].meta.subject}</span> <span class="nb">${pct(frac[worst])}</span>.</p>`;
+}
+
 function effectBlock(a: Analysis): string {
   const e = smoothEffectOf(a);
   if (!e) return state.mode === 'ortho' ? '<p class="note">Effect figures appear once every subject is smoothed (running in the background).</p>' : '';
@@ -2227,12 +2275,12 @@ function drawSide(a: Analysis, order: number[]): void {
   const smoothNote =
     state.smooth === 'off'
       ? ''
-      : `<p class="note smooth-note"><b>Smoothed display</b>: colours use smoothed values; every number on screen is raw. ${SMOOTH_NOTE[state.smooth]}.${lastSmoothMs ? ` Smoothed in ${Math.round(lastSmoothMs)} ms.` : ''}</p>${effectBlock(a)}`;
+      : `<p class="note smooth-note"${lastSmoothMs ? ` title="Smoothed in ${Math.round(lastSmoothMs)} ms"` : ''}><b>Smoothed display</b>: colours use smoothed values; the rail, r, ordering and Copy values stay raw (the hover readout shows both). ${SMOOTH_NOTE[state.smooth]}.</p>${effectBlock(a)}`;
   side.innerHTML = `${state.mode === 'space' ? spaceSection(a) : ''}
     <section>
       <h3>Colour <span class="sub">${state.smooth === 'off' ? st : `${st}, smoothed`}${unit}</span></h3>
       <div class="cbwrap"><canvas id="colorbar"></canvas></div>
-      <p class="note">|${st}| &lt; ${state.thr} hidden${state.minc > 1 ? `; clusters smaller than ${state.minc} voxels hidden (26-connected, same sign; display only)` : ''}; one scale for every cell. Mean cell: average of the subject ${st}-maps (not a group statistic).</p>
+      <p class="note">|${st}| &lt; ${state.thr} hidden${state.minc > 1 ? `; clusters smaller than ${state.minc} voxels hidden (26-connected, same sign, formed on the ${state.smooth === 'off' ? 'raw' : 'smoothed'} values; display only)` : ''}; one scale for every cell.${state.mode === 'ortho' ? '' : ` Mean cell: average of the subject ${st}-maps (not a group statistic).`}</p>${filterEffectNote(a)}
       ${smoothNote}
     </section>
     <section>
@@ -2688,7 +2736,11 @@ async function main(): Promise<void> {
   [manifest, template, atlas] = await Promise.all([fetchManifest(), loadTemplate(), loadAtlas()]);
   setupControls();
   if (state.stat !== 't' && !new URLSearchParams(location.search).has('range')) await autoRange();
-  if (wantPeak) {
+  // A cursor outside the grid (e.g. a hand-edited URL) falls back to the peak.
+  const dim = template.t1.space.dim as number[];
+  if (state.cursor && state.cursor.some((v, i) => v >= dim[i])) state.cursor = null;
+  if (state.slice !== null && (!Number.isInteger(state.slice) || state.slice < 0)) state.slice = null;
+  if (wantPeak || !state.cursor) {
     const a = await getAnalysis(state.model, state.contrast, state.stat);
     let best = -Infinity;
     let bi = 0;
@@ -2707,6 +2759,7 @@ async function main(): Promise<void> {
     document.fonts?.load(`11px ${FONT.mono}`),
   ]).catch(() => undefined);
   await render();
+  window.addEventListener('resize', () => fitHeader());
   window.addEventListener('keydown', (e) => {
     const tag = (e.target as HTMLElement).tagName;
     if (tag === 'INPUT' || tag === 'SELECT') return;

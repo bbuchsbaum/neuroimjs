@@ -130,7 +130,10 @@ export class CellView {
 
 /** Fit a crop window into a rect preserving aspect; returns the placed view. */
 export function placeCrop(crop: Rect, r: Rect): CellView {
-  const s = Math.min(r.w / crop.w, r.h / crop.h);
+  let s = Math.min(r.w / crop.w, r.h / crop.h);
+  // When magnified enough for crisp voxels, use a whole number of pixels per voxel (with a whole-voxel
+  // crop) so every voxel edge lands on a pixel boundary and drawing agrees exactly with hit-testing.
+  if (s >= 3 && Number.isInteger(crop.x) && Number.isInteger(crop.y) && Number.isInteger(crop.w) && Number.isInteger(crop.h)) s = Math.floor(s);
   const w = crop.w * s;
   const h = crop.h * s;
   // Whole-pixel destination rects: voxel edges then land on pixel boundaries when magnified.
