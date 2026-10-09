@@ -32,6 +32,13 @@ export interface NmdsOptions {
   maxIter?: number;
   /** Converge when the relative Stress-1 decrease falls below this (default 1e-7). */
   tol?: number;
+  /**
+   * Warm start: a 2D configuration (length 2n, interleaved x0,y0,x1,y1,…, finite,
+   * not all coincident) that replaces the classical-MDS start as the first start;
+   * the `restarts` random starts still follow (set restarts = 0 for a fast refit).
+   * Only a `warmStart` flag is recorded in `params`, never the coordinates.
+   */
+  init?: ArrayLike<number>;
 }
 
 export type EmbeddingStatus =
@@ -44,7 +51,8 @@ export type EmbeddingStatus =
   | 'empty';
 
 export interface NmdsStart {
-  init: 'classical' | 'random';
+  /** 'given' is the caller's warm-start configuration (`NmdsOptions.init`). */
+  init: 'classical' | 'random' | 'given';
   /** PRNG seed of a random start. */
   seed?: number;
   /** Final Stress-1 of this start (NaN if the start was unusable). */
@@ -61,7 +69,17 @@ export interface EmbeddingResult {
    */
   method: 'nmds' | 'metric-smacof' | 'exact' | 'none';
   solver: typeof NMDS_SOLVER;
-  params: Required<NmdsOptions> & { ties: 'primary'; stress: 'kruskal-1'; init: 'classical+random' };
+  /**
+   * Options in effect. With a warm start, `init` is 'given+random' and
+   * `warmStart` is true; without one, `warmStart` is absent, so the params of an
+   * ordinary fit are unchanged.
+   */
+  params: Required<Omit<NmdsOptions, 'init'>> & {
+    ties: 'primary';
+    stress: 'kruskal-1';
+    init: 'classical+random' | 'given+random';
+    warmStart?: true;
+  };
   n: number;
   /** Input ids, in input order. */
   ids: string[];
@@ -94,7 +112,7 @@ export interface EmbeddingResult {
   message: string;
 }
 
-const DEFAULTS: Required<NmdsOptions> = { restarts: 8, seed: 1, maxIter: 500, tol: 1e-7 };
+const DEFAULTS: Required<Omit<NmdsOptions, 'init'>> = { restarts: 8, seed: 1, maxIter: 500, tol: 1e-7 };
 
 // ---------------------------------------------------------------------------
 // Small numerical helpers
@@ -525,7 +543,7 @@ function validate(dist: ArrayLike<number>, ids: readonly string[]): number {
   return n;
 }
 
-function checkOptions(o: Required<NmdsOptions>): void {
+function checkOptions(o: Required<Omit<NmdsOptions, 'init'>>): void {
   if (!Number.isInteger(o.restarts) || o.restarts < 0) throw new Error('nmds: restarts must be an integer ≥ 0');
   if (!Number.isInteger(o.seed)) throw new Error('nmds: seed must be an integer');
   if (!Number.isInteger(o.maxIter) || o.maxIter < 1) throw new Error('nmds: maxIter must be an integer ≥ 1');
@@ -566,22 +584,42 @@ type Params = EmbeddingResult['params'];
 
 interface Prepared {
   n: number;
-  o: Required<NmdsOptions>;
+  o: Required<Omit<NmdsOptions, 'init'>>;
   params: Params;
   dissim: Float64Array;
+  /** Validated warm-start configuration, or null for the classical start. */
+  init: Float64Array | null;
+}
+
+/** Copy and check a warm-start configuration: length 2n, finite, not all coincident. */
+function checkInit(init: ArrayLike<number>, n: number): Float64Array {
+  if (init.length !== 2 * n) throw new Error(`nmds: init has ${init.length} entries; expected 2n = ${2 * n}`);
+  const x = Float64Array.from(init);
+  for (let k = 0; k < x.length; k++) {
+    if (!Number.isFinite(x[k])) throw new Error(`nmds: init[${k}] is not finite (${x[k]})`);
+  }
+  if (n >= 2) {
+    let spread = false;
+    for (let i = 1; i < n && !spread; i++) spread = x[2 * i] !== x[0] || x[2 * i + 1] !== x[1];
+    if (!spread) throw new Error('nmds: init places every member at the same point');
+  }
+  return x;
 }
 
 function prepare(dist: ArrayLike<number>, ids: readonly string[], opts: NmdsOptions): Prepared {
   const n = validate(dist, ids);
-  const o: Required<NmdsOptions> = {
+  const o: Required<Omit<NmdsOptions, 'init'>> = {
     restarts: opts.restarts ?? DEFAULTS.restarts,
     seed: opts.seed ?? DEFAULTS.seed,
     maxIter: opts.maxIter ?? DEFAULTS.maxIter,
     tol: opts.tol ?? DEFAULTS.tol,
   };
   checkOptions(o);
-  const params: Params = { ...o, ties: 'primary', stress: 'kruskal-1', init: 'classical+random' };
-  return { n, o, params, dissim: upperPairs(dist, n) };
+  const init = opts.init === undefined ? null : checkInit(opts.init, n);
+  const params: Params = init
+    ? { ...o, ties: 'primary', stress: 'kruskal-1', init: 'given+random', warmStart: true }
+    : { ...o, ties: 'primary', stress: 'kruskal-1', init: 'classical+random' };
+  return { n, o, params, dissim: upperPairs(dist, n), init };
 }
 
 type Extra = Partial<Pick<EmbeddingResult, 'converged' | 'iterations' | 'starts' | 'bestHits' | 'nmdsStress1' | 'degenerate'>>;
@@ -651,8 +689,9 @@ interface MultiStart {
 }
 
 /**
- * Classical start, then `restarts` uniform random starts in [−1, 1]² seeded
- * seed, seed+1, …; lowest Stress-1 wins, ties broken by start order.
+ * Classical start (or the caller's warm start in its place), then `restarts`
+ * uniform random starts in [−1, 1]² seeded seed, seed+1, …; lowest Stress-1
+ * wins, ties broken by start order.
  */
 function multiStart(p: Prepared, fit: DisparityFit): MultiStart {
   const { n, o, dissim } = p;
@@ -666,7 +705,8 @@ function multiStart(p: Prepared, fit: DisparityFit): MultiStart {
       bestIdx = starts.length - 1;
     }
   };
-  consider(smacof(classicalStart(dissim, n, o.seed), n, fit, o.maxIter, o.tol), { init: 'classical' });
+  if (p.init) consider(smacof(p.init, n, fit, o.maxIter, o.tol), { init: 'given' });
+  else consider(smacof(classicalStart(dissim, n, o.seed), n, fit, o.maxIter, o.tol), { init: 'classical' });
   for (let r = 0; r < o.restarts; r++) {
     const seed = o.seed + r;
     const rnd = mulberry32(seed);
@@ -679,7 +719,8 @@ function multiStart(p: Prepared, fit: DisparityFit): MultiStart {
   const thr = Math.max(1e-6, 1e-4 * win.stress1);
   const bestHits = starts.filter((s) => Number.isFinite(s.stress1) && s.stress1 - win.stress1 <= thr).length;
   const w = starts[bestIdx];
-  const where = w.init === 'classical' ? 'the classical-MDS start' : `random start seed ${w.seed}`;
+  const where =
+    w.init === 'classical' ? 'the classical-MDS start' : w.init === 'given' ? 'the given warm start' : `random start seed ${w.seed}`;
   return { win, starts, bestHits, where };
 }
 
@@ -711,7 +752,8 @@ function collapsedPairs(dissim: Float64Array, coords: Float64Array, n: number): 
  * (symmetric within 1e-12, zero diagonal, finite, non-negative; throws otherwise).
  *
  * Fit: nonmetric SMACOF (see `smacof`) with Kruskal's primary tie approach, from
- * the classical (Torgerson) MDS start and then `restarts` random uniform starts
+ * the classical (Torgerson) MDS start (or `opts.init`, a warm start that replaces
+ * it; exact small-n and all-tied cases ignore it) and then `restarts` random uniform starts
  * seeded seed, seed+1, …; the start with lowest Stress-1 wins (ties broken by
  * start order). The winning configuration is put in canonical pose.
  *

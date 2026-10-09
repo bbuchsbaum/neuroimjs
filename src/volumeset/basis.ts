@@ -22,6 +22,11 @@
  *
  * Excluded members keep their identity and remain available to other views;
  * their rows of `r` are NaN.
+ *
+ * Scope: by default the analysis mask is every position of the masked vectors
+ * ('whole-mask'). With `voxels` it is that subset of positions ('subset', e.g. a
+ * sphere at the cursor): coverage, exclusion, support and r are then computed
+ * over the subset only, exactly as if the vectors had been sliced to it.
  */
 
 export const BASIS_VERSION = 'common-support-pearson/1';
@@ -37,6 +42,13 @@ export interface BasisOptions {
   labels?: Record<string, string>;
   /** Description of the analysis mask, for provenance. */
   maskRule?: string;
+  /**
+   * Positions into the members' masked vectors that restrict the analysis mask
+   * (integers in [0, length), no duplicates; order is irrelevant). Absent = whole mask.
+   */
+  voxels?: ArrayLike<number>;
+  /** Description of the subset, e.g. "sphere 15 mm at (x,y,z)"; kept in params and the key. */
+  region?: string;
 }
 
 export interface BasisExclusion {
@@ -53,7 +65,12 @@ export interface SimilarityBasis {
   version: typeof BASIS_VERSION;
   measure: 'pearson';
   dissimilarity: '1-r';
-  scope: 'whole-mask';
+  /** 'subset' when `voxels` restricted the analysis mask. */
+  scope: 'whole-mask' | 'subset';
+  /** Sorted subset positions, or null for the whole mask. */
+  voxels: Int32Array | null;
+  /** Fingerprint of `voxels` (part of the key), or null for the whole mask. */
+  subsetFingerprint: string | null;
   status: 'ok' | 'insufficient-support' | 'no-eligible-members';
   /** Member IDs in set order. */
   ids: string[];
@@ -62,9 +79,9 @@ export interface SimilarityBasis {
   excluded: BasisExclusion[];
   /** Per member: fraction of analysis-mask voxels that are finite (absolute, not relative to the median). */
   coverage: Float64Array;
-  /** Analysis-mask size (voxels). */
+  /** Analysis-mask size (voxels): the subset size when `scope` is 'subset'. */
   maskVoxels: number;
-  /** Mask positions of the common support. */
+  /** Positions (into the full masked vectors, ascending) of the common support. */
   support: Int32Array;
   /** k x k correlation over all members (row-major); NaN where either member is excluded; 1 on eligible diagonal. */
   r: Float64Array;
@@ -72,7 +89,11 @@ export interface SimilarityBasis {
   dist: Float64Array;
   /** Data fingerprint used in the key. */
   fingerprint: string;
-  params: Required<Omit<BasisOptions, 'labels' | 'maskRule'>> & { labels: Record<string, string>; maskRule: string };
+  params: Required<Omit<BasisOptions, 'labels' | 'maskRule' | 'voxels' | 'region'>> & {
+    labels: Record<string, string>;
+    maskRule: string;
+    region: string;
+  };
 }
 
 /** Relative tolerance for treating r as exactly +/-1 (floating-point roundoff only). */
@@ -111,6 +132,33 @@ export function dataFingerprint(data: readonly Float32Array[], ids: readonly str
     }
   }
   return `${fnv1a(ids.join('\u0000'))}${h.toString(16).padStart(8, '0')}`;
+}
+
+/** FNV-1a over a sorted list of positions (with its length), as 8 hex digits. */
+function positionsFingerprint(pos: Int32Array): string {
+  let h = 0x811c9dc5;
+  const mix = (x: number): void => {
+    for (let s = 0; s < 32; s += 8) {
+      h ^= (x >>> s) & 0xff;
+      h = Math.imul(h, 0x01000193) >>> 0;
+    }
+  };
+  mix(pos.length);
+  for (let t = 0; t < pos.length; t++) mix(pos[t]);
+  return h.toString(16).padStart(8, '0');
+}
+
+/** Validate and sort a voxel subset of vectors of length V. */
+function checkVoxels(voxels: ArrayLike<number>, V: number): Int32Array {
+  const pos = new Int32Array(voxels.length);
+  for (let t = 0; t < voxels.length; t++) {
+    const v = voxels[t];
+    if (!Number.isInteger(v) || v < 0 || v >= V) throw new Error(`voxels[${t}] = ${v} is not a position in [0, ${V})`);
+    pos[t] = v;
+  }
+  pos.sort();
+  for (let t = 1; t < pos.length; t++) if (pos[t] === pos[t - 1]) throw new Error(`voxel position ${pos[t]} is repeated`);
+  return pos;
 }
 
 /** Mean and sum of squared deviations over an index list (two-pass, float64). */
@@ -159,11 +207,16 @@ export function similarityBasis(data: readonly Float32Array[], ids: readonly str
   if (new Set(ids).size !== k) throw new Error('member ids must be unique');
   const V = k ? data[0].length : 0;
   for (const d of data) if (d.length !== V) throw new Error('set members have different lengths');
+  const subset = opts.voxels === undefined ? null : checkVoxels(opts.voxels, V);
+  // Analysis positions: the subset, or every position of the vectors.
+  const N = subset ? subset.length : V;
+  const at = (t: number): number => (subset ? subset[t] : t);
   const params = {
     minCoverage: opts.minCoverage ?? 0.9,
     minSupport: opts.minSupport ?? 30,
     labels: opts.labels ?? {},
     maskRule: opts.maskRule ?? 'analysis mask supplied by caller',
+    region: opts.region ?? (subset ? `subset of ${N} mask voxels` : 'whole analysis mask'),
   };
 
   const coverage = new Float64Array(k);
@@ -178,14 +231,14 @@ export function similarityBasis(data: readonly Float32Array[], ids: readonly str
   const sums = new Float64Array(k);
   for (let i = 0; i < k; i++) {
     const d = data[i];
-    for (let v = 0; v < V; v++) {
-      const x = d[v];
+    for (let t = 0; t < N; t++) {
+      const x = d[at(t)];
       if (Number.isFinite(x)) {
         counts[i]++;
         sums[i] += x;
       }
     }
-    coverage[i] = V ? counts[i] / V : 0;
+    coverage[i] = N ? counts[i] / N : 0;
   }
   const covered = Array.from(coverage).filter((c) => c > 0).sort((x, y) => x - y);
   const h = covered.length >> 1;
@@ -204,8 +257,8 @@ export function similarityBasis(data: readonly Float32Array[], ids: readonly str
       continue;
     }
     const mean = s / c;
-    for (let v = 0; v < V; v++) {
-      const x = d[v];
+    for (let t = 0; t < N; t++) {
+      const x = d[at(t)];
       if (Number.isFinite(x)) ss += (x - mean) * (x - mean);
     }
     if (isConstant(ss, mean, c)) exclude(i, 'constant', `constant map (every finite value is ${mean})`);
@@ -218,7 +271,8 @@ export function similarityBasis(data: readonly Float32Array[], ids: readonly str
   for (let round = 0; round <= k; round++) {
     const live = [...Array(k).keys()].filter((i) => !out.has(i));
     const keep: number[] = [];
-    for (let v = 0; v < V; v++) {
+    for (let t = 0; t < N; t++) {
+      const v = at(t);
       let ok = true;
       for (const i of live) {
         if (!Number.isFinite(data[i][v])) {
@@ -275,19 +329,26 @@ export function similarityBasis(data: readonly Float32Array[], ids: readonly str
     .sort()
     .map((key) => `${key}=${params.labels[key]}`)
     .join(',');
-  const key = `${BASIS_VERSION}|${fingerprint}|cov${params.minCoverage}|sup${params.minSupport}|V${V}|mask=${fnv1a(params.maskRule)}|${labelText}`;
+  const subsetFingerprint = subset ? positionsFingerprint(subset) : null;
+  const scope: SimilarityBasis['scope'] = subset ? 'subset' : 'whole-mask';
+  const scopeText = subset ? `subset=${subsetFingerprint}:${N}` : scope;
+  const key =
+    `${BASIS_VERSION}|${fingerprint}|cov${params.minCoverage}|sup${params.minSupport}|V${V}|mask=${fnv1a(params.maskRule)}` +
+    `|${scopeText}|region=${fnv1a(params.region)}|${labelText}`;
   return {
     key,
     version: BASIS_VERSION,
     measure: 'pearson',
     dissimilarity: '1-r',
-    scope: 'whole-mask',
+    scope,
+    voxels: subset,
+    subsetFingerprint,
     status,
     ids: [...ids],
     eligible,
     excluded,
     coverage,
-    maskVoxels: V,
+    maskVoxels: N,
     support,
     r,
     dist,

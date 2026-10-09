@@ -939,3 +939,86 @@ describe('nmds: timing sanity', () => {
     }, 60000);
   }
 });
+
+describe('nmds: warm start (init)', () => {
+  const rnd = lcg(77);
+  const n = 15;
+  const pts = Array.from({ length: n }, () => [gauss(rnd), gauss(rnd), 0.3 * gauss(rnd)]);
+  const dist = euclidMatrix(pts, (d) => d * Math.exp(0.15 * gauss(rnd)));
+  for (let i = 0; i < n; i++) for (let j = 0; j < i; j++) dist[i * n + j] = dist[j * n + i];
+
+  it('reconverges from its own solution in very few iterations to the same Stress-1', () => {
+    const cold = nmds(dist, ids(n));
+    const warm = nmds(dist, ids(n), { init: cold.coords, restarts: 0 });
+    expect(warm.status).toBe('converged');
+    expect(warm.starts).toHaveLength(1);
+    expect(warm.starts[0].init).toBe('given');
+    expect(warm.iterations).toBeLessThanOrEqual(3);
+    expect(warm.stress1).toBeCloseTo(cold.stress1, 6);
+    expect(warm.params.warmStart).toBe(true);
+    expect(warm.params.init).toBe('given+random');
+    expect(warm.message).toMatch(/given warm start/);
+    // Same configuration up to the canonical pose (both are in canonical pose).
+    expect(procrustesResidual(Array.from({ length: n }, (_, i) => [cold.coords[2 * i], cold.coords[2 * i + 1]]), warm.coords)).toBeLessThan(1e-3);
+  });
+
+  it('keeps params and starts of a cold fit unchanged and is deterministic', () => {
+    const cold = nmds(dist, ids(n), { restarts: 2 });
+    expect('warmStart' in cold.params).toBe(false);
+    expect(cold.starts.map((s) => s.init)).toEqual(['classical', 'random', 'random']);
+    const init = Float64Array.from({ length: 2 * n }, () => 2 * rnd() - 1);
+    const a = nmds(dist, ids(n), { init, restarts: 2 });
+    const b = nmds(dist, ids(n), { init: Array.from(init), restarts: 2 });
+    expect(a.starts.map((s) => s.init)).toEqual(['given', 'random', 'random']);
+    expect(Array.from(b.coords)).toEqual(Array.from(a.coords));
+    expect(b.starts).toEqual(a.starts);
+    // Random restarts after the warm start are the same as after the classical start.
+    expect(a.starts.slice(1)).toEqual(cold.starts.slice(1));
+  });
+
+  it('works with restarts = 0 from a poor start', () => {
+    const init = new Float64Array(2 * n);
+    for (let i = 0; i < n; i++) {
+      init[2 * i] = Math.cos(i);
+      init[2 * i + 1] = Math.sin(3 * i);
+    }
+    const r = nmds(dist, ids(n), { init, restarts: 0 });
+    expect(r.method).toBe('nmds');
+    expectFiniteCoords(r);
+    expect(r.stress1).toBeLessThan(0.2);
+  });
+
+  it('rejects an invalid init', () => {
+    expect(() => nmds(dist, ids(n), { init: new Float64Array(2 * n - 1) })).toThrow(/init has/);
+    const bad = Float64Array.from({ length: 2 * n }, (_, k) => k);
+    bad[5] = NaN;
+    expect(() => nmds(dist, ids(n), { init: bad })).toThrow(/not finite/);
+    expect(() => nmds(dist, ids(n), { init: new Float64Array(2 * n).fill(0.5) })).toThrow(/same point/);
+    expect(() => metricSmacof(dist, ids(n), { init: [1, 2] })).toThrow(/init has/);
+  });
+
+  it('still falls back to metric SMACOF on degenerate input, using the warm start there too', () => {
+    const { dist: gd } = separatedGroups([5, 5, 4], 3);
+    const m = 14;
+    const cold = nmds(gd, ids(m));
+    expect(cold.status).toBe('degenerate-fallback');
+    const warm = nmds(gd, ids(m), { init: cold.coords, restarts: 0 });
+    expect([warm.method, warm.status]).toEqual(['metric-smacof', 'degenerate-fallback']);
+    expect(warm.starts.map((s) => s.init)).toEqual(['given']);
+    expect(warm.stress1).toBeCloseTo(cold.stress1, 4);
+  });
+
+  it('metricSmacof accepts a warm start', () => {
+    const cold = metricSmacof(dist, ids(n));
+    const warm = metricSmacof(dist, ids(n), { init: cold.coords, restarts: 0 });
+    expect(warm.starts[0].init).toBe('given');
+    expect(warm.iterations).toBeLessThanOrEqual(3);
+    expect(warm.stress1).toBeCloseTo(cold.stress1, 6);
+  });
+
+  it('ignores init for exact small-n cases after validating it', () => {
+    const d3 = [0, 1, 2, 1, 0, 1.5, 2, 1.5, 0];
+    expect(Array.from(nmds(d3, ids(3), { init: [0, 0, 1, 0, 0, 1] }).coords)).toEqual(Array.from(nmds(d3, ids(3)).coords));
+    expect(() => nmds(d3, ids(3), { init: [0, 0] })).toThrow(/init has/);
+  });
+});
