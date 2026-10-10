@@ -84,9 +84,12 @@ similar whole-volume patterns.
 
 The anatomical crop (zoom inside each picture) is set in Montage or Facet and shared by Space.
 
-**Positions.** Pictures are nudged apart so none overlaps another. Every picture moved by more than a fifth of
-its width keeps a mark at its exact fitted position, joined by a faint line: a dot, or a ring when that
-position falls inside another map's picture. The caption under the layout counts every moved picture.
+**Positions.** Pictures are nudged apart so none overlaps another. A picture moved by more than a fifth of its
+width keeps a mark at its exact fitted position, joined by a faint line: a dot, or a small ring with an ID tag
+when that position falls inside another map's picture. Where the exact position is still over the map's own
+picture there is no mark; the caption under the layout counts every moved picture, marked or not. Hovering a
+mark highlights its line and its picture. While a peek is open it is the only enlarged view (no hover preview),
+and a hairline joins it to its picture.
 On a narrow window the toolbar switches to short labels ("Halos", "Side by side").
 
 **Peek.** A small slice viewer for one map, placed where it covers the fewest pictures (never the side
