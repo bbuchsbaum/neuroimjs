@@ -41,3 +41,29 @@ let σᵢ be the SD of βᵢ over S, so the noise variance of zᵢ(v) is SEᵢ(v
 
 V3-01, then V3-02 + V3-03, then V3-04 and V3-05, then V3-06 to V3-08, then V3-09. V3-01 comes first because it
 does not need parcels and may change how every existing layout should be read.
+
+## Evidence record (2026-10-09)
+
+Commits on feat/volume-set-browser: ef89d30 (neuroatlasjs devDependency + dogfood test), 2d42b4f (plan),
+7d82108 (explain.ts numerics), ba3950e (Space v3 UI, synthetic parcellation). Gates on ba3950e:
+VolumeSet unit suites 193/193 (explain.ts 24: exact identities against independent Pearson, the basis.ts
+distances, leave-one-out recomputes, simulations for reliability, noise floor, heterogeneity null and envfit);
+npm run test:types 0; eslint clean on src/volumeset; space e2e 30/30 (synthetic only).
+
+Real data (local only, aggregates; glm4 cue t, 17 subjects, Schaefer-400 via neuroatlasjs on the real grid):
+about 41% of the total pairwise dissimilarity is what independent noise alone would produce. Reliability
+ρ: least reliable 1008 .21, 1002 .30, 1010 .32, 1014 .46 (median .72). Three of these four (1008, 1002, 1010)
+are the subjects the existing cluster summary isolates as single-subject outliers, so their apparent
+divergence is largely low signal-to-noise. Top Explain parcels: left auditory (SomMotB Aud), temporo-parietal
+and S2, at 4–8× their voxel share; 28% of the divergence falls outside the cortical parcellation.
+
+Synthetic data: age (planted to track the groups) fits the layout (R² .49, p .03); site (random) does not
+(p .82).
+
+Not done: an external critic round on v2/v3 (wrap-up by maintainer decision); the region sphere drawn on
+every picture; voxel/parcel arrows (circular, deferred by design).
+
+neuroatlasjs dogfooding: VolumeAtlas, roi, regionAtVoxel and reduce (with affineTolerance) worked unchanged on
+the in-repo NeuroSpace/NeuroVol and on the real template grid. Friction, filed upstream: a BIDS dseg.tsv
+region-table parser (written locally in space-v3.ts), and reduction over masked vectors or index lists (the
+demo expands each masked term to a full grid per reduce).

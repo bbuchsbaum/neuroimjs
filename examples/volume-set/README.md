@@ -107,6 +107,22 @@ stability are descriptive; none is a significance test. A pooled 2D fit over sub
 was tried and removed: on real data it could not place a subject's contrast maps together even
 though they are each other's most similar maps.
 
+### What drives the layout (Explain, reliability)
+
+| Control | URL | What it shows |
+|---|---|---|
+| Explain | `sx=all\|focused\|group` | the layout's dissimilarity split by voxel: what separates all maps (beyond the noise floor), where the focused map differs from the rest, or where a lasso group differs from the others. Each voxel's term sums exactly to the dissimilarity named. The panel ranks parcels by share, density (share ÷ share of voxels), share beyond noise and per-parcel I², reports how concentrated the top parcels are (against size, and against random splits for groups) and the mass outside the parcellation, and lists the parcels the layout depends on most (exact leave-one-parcel-out correlation, no refit). Clicking a parcel marks every map by its mean z there (`sc=parcel:<id>`) and goes to it. |
+| Mark: reliability | `sc=rel` | ρ per map: 1 − noise variance ÷ spatial variance (t-maps: noise ≈ 1 per voxel; β-maps: SE², loaded on demand). Low-ρ maps correlate weakly with everyone and sit at the edge for that reason alone. A yardstick on the layout shows how far apart two noisy copies of one map would sit. |
+| Correct for noise | `sn=1` | lays out by r ÷ √(ρᵢρⱼ) (Spearman's correction, clamped to ±1; maps with ρ < .1 are set aside), animating from the uncorrected layout so you can see which maps moved |
+| Mark: a covariate | `sc=cov:<column>` | also fits the covariate to the layout (envfit: a gradient arrow for numbers, centroids for categories) with a permutation p-value; valid because the covariate did not build the layout |
+
+Explain is descriptive: maps are z-scored (pattern, not amplitude), voxels are spatially correlated,
+and the layout was built from the same voxels. The noise floor counts independent measurement noise;
+maps that differ in reliability add more, so the remainder is an upper bound on true pattern
+differences. I² assumes calibrated first-level SEs and averages about .1 even without heterogeneity.
+Parcels come from the template's parcellation via [neuroatlasjs](https://github.com/bbuchsbaum/neuroatlasjs)
+(Schaefer covers cortex only); Explain runs on up to 100 placed maps.
+
 ### Limitations
 
 - Correlation compares spatial patterns. It ignores amplitude, and it does not account for voxelwise
