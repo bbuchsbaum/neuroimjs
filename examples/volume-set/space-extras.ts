@@ -20,7 +20,7 @@ import type { NmdsOptions } from '../../src/volumeset/nmds';
 import { THEME, FONT, fmt, hidpi, placeCrop, drawCellImage, drawCrosshair, thresholdedDiverging } from './render';
 import { fetchCovariates, type Covariates } from './data';
 import type { EmbedOutput } from './embed-runner';
-import { spaceTransform, thumbSize, declutter, type SpaceTransform, type PlotRect } from './space';
+import { spaceTransform, thumbSize, declutter, maxOverlap, type SpaceTransform, type PlotRect } from './space';
 import * as M from './main';
 import * as SV from './space-view';
 import * as V3 from './space-v3';
@@ -587,6 +587,7 @@ let brushCmap: { range: number; cmap: ColorMap } | null = null;
 
 /** Each placed map's mean z in the brushed parcel (atlas permitting). */
 function brushedValues(a: M.Analysis): { values: Map<number, number>; range: number } | null {
+  if (opts.colour.startsWith('parcel:')) ensureAtlas(); // a brushed link may arrive without Explain
   const sa = atlasNow;
   if (!sa || !opts.colour.startsWith('parcel:')) return null;
   const id = Number(opts.colour.slice(7));
@@ -1828,15 +1829,27 @@ export async function drawTrajectories(ctx: CanvasRenderingContext2D, g: SV.Spac
   const pw = (plot.w - gap * (cols - 1)) / cols;
   const ph = (plot.h - gap * (rows - 1)) / rows;
   const asp = M.sliceAspect(a.set);
-  const { size, lod } = thumbSize(ids.length, { x: 0, y: 0, w: pw, h: ph - titleH }, M.state.space?.s ?? 1);
-  const tw = Math.round(size * Math.sqrt(asp));
-  const th = Math.round(size / Math.sqrt(asp));
+  let { size, lod } = thumbSize(ids.length, { x: 0, y: 0, w: pw, h: ph - titleH }, M.state.space?.s ?? 1);
+  let tw = Math.round(size * Math.sqrt(asp));
+  let th = Math.round(size / Math.sqrt(asp));
   const sel = M.state.subject;
   // Positions within a panel: identical in every panel (same transform, same nudges).
   const inner0 = lod === 'thumbs' ? { x: tw / 2, y: titleH + th / 2, w: Math.max(1, pw - tw), h: Math.max(1, ph - titleH - th) } : { x: 12, y: titleH + 10, w: pw - 24, h: ph - titleH - 20 };
   const t0 = spaceTransform(d.coords, inner0, M.state.space);
   const local = ids.map((_, i) => t0.toScreen(d.coords[2 * i], d.coords[2 * i + 1]));
-  const placed = lod === 'thumbs' ? declutter(local.map(([x, y]) => ({ x, y })), tw + 4, th + 4, { x: 0, y: titleH, w: pw, h: ph - titleH }, 300, 4) : local.map(([x, y]) => ({ x, y }));
+  // Narrow panels: shrink the pictures until decluttering removes every overlap (then fall back to dots).
+  let placed = local.map(([x, y]) => ({ x, y }));
+  for (let attempt = 0; lod === 'thumbs' && attempt < 8; attempt++) {
+    placed = declutter(local.map(([x, y]) => ({ x, y })), tw + 4, th + 4, { x: 0, y: titleH, w: pw, h: ph - titleH }, 300, 4);
+    if (maxOverlap(placed, tw + 4, th + 4) === 0) break;
+    size *= 0.85;
+    tw = Math.round(size * Math.sqrt(asp));
+    th = Math.round(size / Math.sqrt(asp));
+    if (size < 40) {
+      lod = 'marks';
+      placed = local.map(([x, y]) => ({ x, y }));
+    }
+  }
   g.t = null;
   list.forEach((ak, k) => {
     const ox = plot.x + (k % cols) * (pw + gap);
@@ -1919,7 +1932,7 @@ function acrossContrastsSection(a: M.Analysis): string {
     total++;
     if (P.of[bj].subject === P.of[i].subject) same++;
   }
-  const s = M.state.subject;
+  const s = M.state.subject && P.subjects.includes(M.state.subject) ? M.state.subject : null;
   const rows: string[] = [];
   const med = (v: number[]): number => {
     const x = v.filter(Number.isFinite).sort((p, q) => p - q);
@@ -1928,11 +1941,13 @@ function acrossContrastsSection(a: M.Analysis): string {
   for (let p = 0; p < P.contrasts.length; p++)
     for (let q = p + 1; q < P.contrasts.length; q++) {
       const [c1, c2] = [P.contrasts[p], P.contrasts[q]];
-      const own = s ? r(`${s}·${c1}`, `${s}·${c2}`) : NaN;
-      const others = med(P.subjects.filter((o) => o !== s).map((o) => r(`${s}·${c1}`, `${o}·${c2}`)));
+      // With a focused subject: its own value; otherwise the median over subjects.
+      const subs = s ? [s] : P.subjects;
+      const own = med(subs.map((x) => r(`${x}·${c1}`, `${x}·${c2}`)));
+      const others = med(subs.flatMap((x) => P.subjects.filter((o) => o !== x).map((o) => r(`${x}·${c1}`, `${o}·${c2}`))));
       rows.push(`<tr><td>${c1} × ${c2}</td><td class="num">${M.fmtR(own)}</td><td class="num">${M.fmtR(others)}</td></tr>`);
     }
-  return `<section><h3>Across contrasts <span class="sub">${s ?? ''}</span></h3>
+  return `<section><h3>Across contrasts <span class="sub">${s ?? 'median over subjects'}</span></h3>
     <table class="nb-table"><tr><th>pair</th><th>same subject r</th><th>vs other subjects (median)</th></tr>${rows.join('')}</table>
     <p class="note">Each panel draws one contrast at the ${a.contrast} layout's positions, so a map that changes between contrasts shows a different picture in the same place. Across all ${total} subject × contrast maps, the most similar other map is the same subject's other contrast for <b>${same}</b>. (r on the ${b.support.length.toLocaleString()} voxels every contrast shares.)</p>
   </section>`;

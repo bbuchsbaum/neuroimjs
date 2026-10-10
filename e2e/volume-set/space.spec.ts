@@ -830,5 +830,31 @@ test.describe('Space v3: what drives the layout', () => {
     const p = /permutation p (< \.001|\.\d+)/.exec(site)![1];
     expect(p === '< .001' ? 0 : Number(p)).toBeGreaterThan(0.05);
   });
+
+  test('a brushed parcel from a link works without Explain (the atlas loads on demand)', async ({ page }) => {
+    await open(page, `${SPACE}&sc=parcel:3`);
+    await expect(page.locator('#side')).toContainText("Each map's mean z in", { timeout: 30_000 });
+    expect(new URL(page.url()).searchParams.get('sx')).toBeNull();
+  });
+
+  test('side by side without a focused map reports cohort medians and keeps pictures apart', async ({ page }) => {
+    await open(page, `${SPACE}&st=1`);
+    const section = page.locator('#side section', { hasText: 'Across contrasts' });
+    await expect(section).toContainText('median over subjects', { timeout: 60_000 });
+    const cells = await section.locator('td.num').allInnerTexts();
+    expect(cells.length).toBeGreaterThan(0);
+    for (const c of cells) expect(c.trim()).not.toBe('–');
+    // No two pictures of the same contrast panel overlap.
+    const thumbs = (await probe(page)).thumbs.filter((t) => t.id !== 'mean' && !['s16', 's17'].includes(t.id));
+    for (const c of new Set(thumbs.map((t) => t.contrast))) {
+      const ts = thumbs.filter((t) => t.contrast === c).map((t) => t.dest);
+      for (let i = 0; i < ts.length; i++)
+        for (let j = i + 1; j < ts.length; j++) {
+          const ox = Math.min(ts[i].x + ts[i].w, ts[j].x + ts[j].w) - Math.max(ts[i].x, ts[j].x);
+          const oy = Math.min(ts[i].y + ts[i].h, ts[j].y + ts[j].h) - Math.max(ts[i].y, ts[j].y);
+          expect(ox > 1 && oy > 1, `${c}: pictures ${i} and ${j} overlap`).toBe(false);
+        }
+    }
+  });
 });
 
