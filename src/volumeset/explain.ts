@@ -301,6 +301,41 @@ export function focusedExcess(table: FocusedShareTable, i: number, minN = 1): Fo
   });
 }
 
+/**
+ * A pure-noise reference for `focusedExcess`: the largest excess a map of
+ * independent N(0, 1) noise at every position reaches when added to the k maps as
+ * map k + 1, over parcels with at least `minN` positions. Repeated for `draws`
+ * seeded draws (mulberry32 + Box–Muller); `median` is the median of those maxima.
+ *
+ * Independent per-position noise is the least structured noise there is: a noise
+ * map that is spatially smooth, as real measurement noise is, concentrates in
+ * fewer parcels and reaches larger ratios. So this is a floor for what noise can
+ * produce, not a significance threshold.
+ */
+export function noiseExcessReference(z: ZMaps, labels: Int32Array, minN = 1, draws = 5, seed = 1): { median: number; tops: Float64Array } {
+  const N = checkZ(z, 2);
+  if (draws < 1) throw new Error('noiseExcessReference: draws must be ≥ 1');
+  const rnd = mulberry32(seed);
+  const tops = new Float64Array(draws);
+  const noise = new Float64Array(N);
+  for (let d = 0; d < draws; d++) {
+    let s = 0;
+    for (let v = 0; v < N; v++) {
+      const u1 = 1 - rnd(); // (0, 1]
+      noise[v] = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * rnd());
+      s += noise[v];
+    }
+    const mean = s / N;
+    let ss = 0;
+    for (let v = 0; v < N; v++) ss += (noise[v] - mean) ** 2;
+    const sd = Math.sqrt(ss / N);
+    for (let v = 0; v < N; v++) noise[v] = (noise[v] - mean) / sd;
+    const top = focusedExcess(focusedShareTable([...z, noise], labels), z.length, minN)[0];
+    tops[d] = top ? top.excess : NaN;
+  }
+  return { median: median(tops), tops };
+}
+
 export interface GroupTerms {
   /** z̄_A − z̄_B. */
   signed: Float64Array;

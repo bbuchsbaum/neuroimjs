@@ -28,8 +28,15 @@ const ORIENT_KEYS: [SetOrientation, string][] = [
   ['sagittal', 'S'],
 ];
 
-/** Largest picture side in CSS px; the scale is a whole number of pixels per voxel so voxels stay crisp. */
-const MAX_SIDE = 300;
+/**
+ * Largest picture side in CSS px: 300 on a desktop stage, less on a short one (≈ 60% of the stage height minus the
+ * panel's own rows), so on a laptop the peek stays small enough not to hide whole maps. The scale is a whole number
+ * of pixels per voxel so voxels stay crisp.
+ */
+function maxSide(): number {
+  const h = document.querySelector('#view')?.getBoundingClientRect().height ?? 800;
+  return Math.max(150, Math.min(300, Math.round(h * 0.6 - 100)));
+}
 
 export function isPeekOpen(): boolean {
   return peek !== null;
@@ -69,6 +76,8 @@ export function togglePeekFor(subject: string): void {
   }
   const c = M.state.cursor;
   const anchor = pictureCentre(subject) ?? { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+  // Focus stays on the page, so the arrow keys keep moving between maps and the peek follows them;
+  // Tab or a click reaches its slider (where P or Esc also closes it).
   openPeek(subject, M.state.contrast, c ?? [-1, -1, -1], anchor);
 }
 
@@ -135,7 +144,7 @@ function ensureEl(): HTMLDivElement {
   input.addEventListener('input', () => setSlice(Number(input.value)));
   // Keys typed in the slider stay local (the page ignores keys in inputs); Escape still closes.
   el.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') {
+    if (e.key === 'Escape' || ((e.key === 'p' || e.key === 'P') && (e.target as HTMLElement).tagName === 'INPUT')) {
       e.stopPropagation();
       closePeek();
     }
@@ -235,7 +244,8 @@ async function draw(): Promise<void> {
     const crop = M.brainBox(set, o);
     return { o, crop, rel, w: crop.w * rel[0], h: crop.h * rel[1] };
   });
-  const s = Math.max(1, Math.floor(Math.min(...planes.map((q) => Math.min(MAX_SIDE / q.w, MAX_SIDE / q.h)))));
+  const side = maxSide();
+  const s = Math.max(1, Math.floor(Math.min(...planes.map((q) => Math.min(side / q.w, side / q.h)))));
   const W = Math.round(Math.max(...planes.map((q) => q.w)) * s);
   const H = Math.round(Math.max(...planes.map((q) => q.h)) * s);
   const pl = planes.find((q) => q.o === p.orient)!;
@@ -330,10 +340,16 @@ function place(box: HTMLDivElement, anchor: { x: number; y: number }, retarget: 
   clampToViewport(box);
 }
 
+/** Keep the panel inside the Space stage (so it never covers the side panel), and inside the window. */
 function clampToViewport(box: HTMLDivElement): void {
   const r = box.getBoundingClientRect();
-  const x = Math.max(8, Math.min(window.innerWidth - r.width - 8, r.left));
-  const y = Math.max(8, Math.min(window.innerHeight - r.height - 8, r.top));
+  const st = document.querySelector('#view')?.getBoundingClientRect();
+  const left = Math.max(8, (st?.left ?? 0) + 8);
+  const top = Math.max(8, (st?.top ?? 0) + 8);
+  const right = Math.min(window.innerWidth, st?.right ?? window.innerWidth) - 8;
+  const bottom = Math.min(window.innerHeight, st?.bottom ?? window.innerHeight) - 8;
+  const x = Math.max(left, Math.min(right - r.width, r.left));
+  const y = Math.max(top, Math.min(bottom - r.height, r.top));
   box.style.left = `${x}px`;
   box.style.top = `${y}px`;
 }
@@ -352,6 +368,7 @@ function dragByHead(box: HTMLDivElement): void {
     if (!start) return;
     box.style.left = `${start.l + e.clientX - start.x}px`;
     box.style.top = `${start.t + e.clientY - start.y}px`;
+    clampToViewport(box);
   });
   head.addEventListener('pointerup', () => {
     if (start) clampToViewport(box);

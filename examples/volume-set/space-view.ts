@@ -372,6 +372,8 @@ export async function drawSpace(light = false): Promise<void> {
       if (cx < bx.x0 - span || cx > bx.x1 + span || cy < bx.y0 - span || cy > bx.y1 + span) {
         if (fromUrl) M.announceUrl(`layout viewport centred at ${fmt(cx, 2)}, ${fmt(cy, 2)}, outside the layout → fit`);
         M.state.space = null;
+        // This draw finishes after the frame's URL write: schedule one more so the dropped sv leaves the URL.
+        M.scheduleDraw(false, true);
       }
     }
     const t = spaceTransform(disp.coords, inner, M.state.space);
@@ -569,6 +571,7 @@ export async function drawSpace(light = false): Promise<void> {
       geom.marks.push({ member: pt.member, box: bx, kind: 'label' });
     }
     // Exact-position marks go above the labels, so no ID box can hide one.
+    const ringTags: { x: number; y: number; w: number; h: number }[] = [];
     for (const { pt, kind } of markers) {
       const isSel = pt.member === sel;
       ctx.beginPath();
@@ -589,6 +592,32 @@ export async function drawSpace(light = false): Promise<void> {
       ctx.strokeStyle = idColour(pt);
       ctx.lineWidth = 2;
       ctx.stroke();
+      // A ring sits on another map's picture, so say whose it is: a small ID tag beside it (also a click target),
+      // on whichever side keeps it off the other rings and the tags already placed.
+      ctx.font = `${isSel ? '600 ' : ''}9.5px ${FONT.mono}`;
+      const tag = a.ids[pt.member];
+      const tw = ctx.measureText(tag).width + 6;
+      const blockers = [
+        ...markers.filter((o) => o.kind === 'ring').map((o) => ({ x: o.pt.sx - 8, y: o.pt.sy - 8, w: 16, h: 16 })),
+        ...ringTags,
+      ];
+      const hit = (x: number, y: number): number =>
+        blockers.reduce((n, q) => n + Math.max(0, Math.min(x + tw, q.x + q.w) - Math.max(x, q.x)) * Math.max(0, Math.min(y + 13, q.y + q.h) - Math.max(y, q.y)), 0);
+      const spots: [number, number][] = [
+        [pt.sx + 8, pt.sy - 15],
+        [pt.sx + 8, pt.sy + 2],
+        [pt.sx - 8 - tw, pt.sy - 15],
+        [pt.sx - 8 - tw, pt.sy + 2],
+      ];
+      const [tx, ty] = spots.reduce((best, sp) => (hit(sp[0], sp[1]) < hit(best[0], best[1]) ? sp : best));
+      ringTags.push({ x: tx, y: ty, w: tw, h: 13 });
+      ctx.fillStyle = 'rgba(13,14,20,0.88)';
+      ctx.fillRect(tx, ty, tw, 13);
+      ctx.fillStyle = idColour(pt);
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(tag, tx + 3, ty + 7);
+      geom.marks.push({ member: pt.member, box: { x: tx, y: ty, w: tw, h: 13 }, kind: 'label' });
     }
     geom.markers = markers.map(({ pt, kind, nudge }) => ({ member: pt.member, kind, x: pt.sx, y: pt.sy, nudge }));
     ctx.restore();
@@ -978,8 +1007,8 @@ export function spaceSection(a: M.Analysis): string {
         ${res.method !== 'exact' && res.method !== 'none' ? `<dt>Starts</dt><dd>best of ${res.starts.length} (classical + ${res.starts.length - 1} seeded random); ${res.bestHits} reached it</dd>` : ''}
         <dt>Solver</dt><dd>${res.solver.name} ${res.solver.version}, seed ${res.params.seed}, ${Math.round(ms)} ms</dd>
       </dl>
-      <canvas id="shepard" aria-label="Shepard plot: layout distance against 1 − r"></canvas>
-      <p class="note">Shepard plot: each dot is a pair (1 − r → distance in the layout); the line is the ${metric ? 'linear (metric)' : 'monotone'} fit the stress measures against.</p>`;
+      <canvas id="shepard" aria-label="Shepard plot: layout distance against 1 − ${rName(a)}"></canvas>
+      <p class="note">Shepard plot: each dot is a pair (1 − ${rName(a)} → distance in the layout); the line is the ${metric ? 'linear (metric)' : 'monotone'} fit the stress measures against.</p>`;
     if (sel !== undefined && b.eligible.includes(sel)) {
       const p = b.eligible.indexOf(sel);
       const near = sourceNeighbors(b.dist, placedN, p, 3);
@@ -1039,7 +1068,7 @@ export function spaceSection(a: M.Analysis): string {
       <p class="note">Positions summarise ${scopeLong(a)} and stay fixed while you change slice, threshold, smoothing or cluster filter. Pictures are nudged apart to avoid overlap; a dot marks each moved picture's exact position, or a ring where that position falls inside another picture. Neither axis has a meaning; for who resembles whom, use the Neighbours table.</p>
       <details class="fit-details"${layout?.kind === 'ready' ? '' : ' open'}><summary>How the layout was fitted</summary>
         <dl class="fx">
-          <dt>Similarity</dt><dd>signed Pearson r of raw ${M.STAT_LABEL[M.state.stat]}-maps on the common support (${support}); dissimilarity 1 − r</dd>
+          <dt>Similarity</dt><dd>signed Pearson r of raw ${M.STAT_LABEL[M.state.stat]}-maps on the common support (${support}); ${isCorrected(a) ? 'noise-corrected: r ÷ √(ρᵢρⱼ) (Spearman), clamped to ±1, maps with ρ < .1 set aside; dissimilarity 1 − corrected r' : 'dissimilarity 1 − r'}</dd>
           ${notPlaced}
         </dl>
         ${layout?.kind === 'ready' ? fit : ''}

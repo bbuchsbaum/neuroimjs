@@ -965,7 +965,8 @@ test.describe('Space stage: exact positions, captions and toolbar', () => {
       expect(after).toEqual(before);
     });
 
-  for (const q of ['sc=rel', 'sx=all', 'sn=1'])
+  // On the noise-corrected layout there is no yardstick (two noisy copies would coincide): see the test below.
+  for (const q of ['sc=rel', 'sx=all'])
     test(`the noise yardstick caption covers no picture, mark or ID (${q})`, async ({ page }) => {
       await open(page, `${SPACE}&subject=s03&${q}`);
       await page.waitForFunction(() => ((window as unknown as { __vsSpace: { captions: unknown[] } }).__vsSpace.captions ?? []).length > 0, null, { timeout: 60_000 });
@@ -974,6 +975,14 @@ test.describe('Space stage: exact positions, captions and toolbar', () => {
       const s = await stage(page);
       for (const c of s.captions) for (const m of s.marks) expect(overlap(c, m), `caption covers ${m.kind} of ${m.id}`).toBe(0);
     });
+
+  test('the noise-corrected layout draws no noise yardstick (its premise is false there)', async ({ page }) => {
+    await open(page, `${SPACE}&subject=s03&sn=1`);
+    await waitLayout(page);
+    await settle(page);
+    const s = await stage(page);
+    expect(s.captions.length).toBe(0);
+  });
 
   test('the toolbar stays on one row at 1280x800, and the Mark select fits its label', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });

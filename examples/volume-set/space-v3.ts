@@ -17,6 +17,7 @@ import {
   focusedTerms,
   focusedShareTable,
   focusedExcess,
+  noiseExcessReference,
   groupTerms,
   reliability,
   noiseFloorTerms,
@@ -265,6 +266,9 @@ export interface ExplainResult {
     /** Maps compared (the rank is out of this many). */
     of: number;
     minN: number;
+    /** Median over NOISE_DRAWS seeded draws of the top ×typical of an independent-noise map added as map k + 1 (a floor; see noiseExcessReference). */
+    noiseTop: number;
+    noiseDraws: number;
   } | null;
   heterogeneityNote: string | null;
 }
@@ -274,6 +278,9 @@ const focusTableCache = new Map<string, ReturnType<typeof focusedShareTable>>();
 
 /** Smallest parcel (support voxels) given an excess over the typical map; smaller parcels show "–". */
 export const FOCUS_MIN_VOXELS = 20;
+/** Seeded draws of the pure-noise reference (seed 1). */
+export const NOISE_DRAWS = 5;
+const noiseRefCache = new Map<string, number>();
 
 function scopeKey(s: ExplainScope): string {
   return s.kind === 'all' ? 'all' : s.kind === 'focused' ? `f${s.member}` : `g${s.a.join('.')}|${s.b.join('.')}`;
@@ -434,7 +441,15 @@ export function explain(a: M.Analysis, b: SimilarityBasis, scope: ExplainScope, 
         focusTableCache.set(fk, table);
       }
       const rows = focusedExcess(table, b.eligible.indexOf(scope.member), FOCUS_MIN_VOXELS).map((r) => ({ ...r, name: sa.label(r.id), short: sa.short(r.id) }));
-      focus = { rows, of: b.eligible.length, minN: FOCUS_MIN_VOXELS };
+      // The pure-noise reference does not depend on the focused map: once per basis.
+      const nk = `${b.key}|noise-ref`;
+      let noiseTop = noiseRefCache.get(nk);
+      if (noiseTop === undefined) {
+        noiseTop = noiseExcessReference(z, labels, FOCUS_MIN_VOXELS, NOISE_DRAWS, 1).median;
+        if (noiseRefCache.size > 8) noiseRefCache.clear();
+        noiseRefCache.set(nk, noiseTop);
+      }
+      focus = { rows, of: b.eligible.length, minN: FOCUS_MIN_VOXELS, noiseTop, noiseDraws: NOISE_DRAWS };
     }
   }
   const res: ExplainResult = { key, scope, title, picture, signed: signedTerms !== null, total, totalLabel, noiseShare, parcels, outsideShare, concentration: conc, influence, focus, heterogeneityNote: null };

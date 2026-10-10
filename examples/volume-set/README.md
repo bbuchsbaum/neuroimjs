@@ -62,7 +62,7 @@ similar whole-volume patterns.
   neighbours and every number stay raw.
 - **Reproducibility.** The layout is a pure function of the data, the basis policy (version
   `common-support-pearson/1`, minimum coverage 0.9 × the median map, minimum support 30 voxels) and the solver
-  parameters (`neuroimjs-nmds-smacof`, seed 1, 8 random starts, 500 iterations, tolerance 1e-7), all
+  parameters (`neuroimjs-nmds-smacof`, seed 1, random starts scaled to the set size (128 for up to 50 maps, 32 up to 100, else 8), 500 iterations, tolerance 1e-7), all
   shown in the panel. The URL stores the view (`mode=space&layout=nmds`), the focused subject, the
   slice and the layout viewport (`sv=zoom,cx,cy`), so a link reopens the same state.
 
@@ -125,7 +125,7 @@ though they are each other's most similar maps.
 | Control | URL | What it shows |
 |---|---|---|
 | Explain | `sx=all\|focused\|group` | the layout's dissimilarity split by voxel: what separates all maps (beyond the noise floor), where the focused map differs from the rest, or where a lasso group differs from the others. Each voxel's term sums exactly to the dissimilarity named. For a focused map the panel ranks parcels by **×typical**: the map's share of its own divergence in the parcel ÷ the median, over all placed maps, of each map's own share there (parcels under 20 voxels show –), with the map's rank among all maps beside it; raw shares would list the same parcels for every map, because every map diverges most where the signal is. ×typical has no noise model, so a large ratio on a tiny share (or in a low-signal parcel) deserves caution. For all maps the panel ranks parcels by share, density (share ÷ share of voxels), share beyond noise and per-parcel I², reports how concentrated the top parcels are (against size, and against random splits for groups) and the mass outside the parcellation, and lists the parcels the layout depends on most (exact leave-one-parcel-out correlation, no refit). Clicking a parcel marks every map by its mean z there (`sc=parcel:<id>`) and goes to it. |
-| Mark: reliability | `sc=rel` | ρ per map: 1 − noise variance ÷ spatial variance (t-maps: noise ≈ 1 per voxel; β-maps: SE², loaded on demand). Low-ρ maps correlate weakly with everyone and sit at the edge for that reason alone. A yardstick on the layout shows how far apart two noisy copies of one map would sit; when that 1 − r is below every observed pair (the usual case), the caption says its length is extrapolated. |
+| Mark: reliability | `sc=rel` | ρ per map: 1 − noise variance ÷ spatial variance (t-maps: noise ≈ 1 per voxel; β-maps: SE², loaded on demand). Low-ρ maps correlate weakly with everyone and sit at the edge for that reason alone. A yardstick on the layout shows how far apart two noisy copies of one map would sit; when that 1 − r is below every observed pair (the usual case), the caption says its length is extrapolated. On a noise-corrected layout there is no yardstick: two noisy copies of one map would coincide. |
 | Correct for noise | `sn=1` | lays out by r ÷ √(ρᵢρⱼ) (Spearman's correction, clamped to ±1; maps with ρ < .1 are set aside), animating from the uncorrected layout so you can see which maps moved |
 | Mark: a covariate | `sc=cov:<column>` | also fits the covariate to the layout (envfit: a gradient arrow for numbers, centroids for categories) with a permutation p-value; valid because the covariate did not build the layout |
 

@@ -1414,8 +1414,11 @@ function updateReadout(): void {
     return;
   }
   if (!hover && state.mode === 'space') {
-    text.innerHTML = `<span class="muted">Click: cursor + peek (P) · ID: select · Enter: open · Arrows: maps · Wheel/PgUp: slice · ⌘+wheel: zoom</span>`;
-    text.title = 'Click map: cursor · Click ID: select · Double-click or Enter: open in Ortho · Arrows: move between maps · Wheel, PgUp/PgDn: slice · ⌘/Ctrl+wheel: zoom layout · Drag: pan · 0: fit';
+    text.innerHTML =
+      view.clientWidth < 1100
+        ? `<span class="muted">Click: cursor + peek (P) · ID: select · Enter: open · Wheel: slice</span>`
+        : `<span class="muted">Click: cursor + peek (P) · ID: select · Enter: open · Arrows: maps · Wheel: slice · ⌘wheel: zoom</span>`;
+    text.title = 'Click map: cursor and peek · P: peek the focused map · Click ID: select · Double-click or Enter: open in Ortho · Arrows: move between maps · Wheel, PgUp/PgDn: slice · ⌘/Ctrl+wheel: zoom layout · Drag: pan · 0: fit';
     return;
   }
   if (!hover) {

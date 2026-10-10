@@ -996,6 +996,8 @@ function pxPerUnit(info: LayerInfo): number {
  */
 function drawNoiseYardstick(ctx: CanvasRenderingContext2D, info: LayerInfo): void {
   if (!(opts.explain || opts.colour === 'rel' || opts.noiseCorrected)) return;
+  // On a noise-corrected layout two noisy copies of one map have corrected r = 1, i.e. distance 0: no yardstick.
+  if (SV.isCorrected(info.a)) return;
   const rel = V3.reliabilityOf(info.a, regionBasis(info.a) ?? info.a.basis);
   if (!rel) return;
   const d0 = V3.noiseYardstick(rel);
@@ -1719,8 +1721,12 @@ function layersSection(a: M.Analysis): string {
   return lines.length ? `<section><h3>Layers</h3>${lines.map((l) => `<p class="note">${l}</p>`).join('')}</section>` : '';
 }
 
-/** Shares as percent: one decimal, two below 1% (parcel shares are mostly 0.05–3%). */
-const pct = (x: number | null): string => (x === null || !Number.isFinite(x) ? '–' : `${(x * 100).toFixed(Math.abs(x) < 0.00995 ? 2 : 1)}%`);
+/** Percent with two significant figures (1.9%, 0.95%, 0.090%; whole numbers from 10%). */
+const pct = (x: number | null): string => {
+  if (x === null || !Number.isFinite(x)) return '–';
+  const v = x * 100;
+  return `${Math.abs(v) >= 10 || v === 0 ? v.toFixed(0) : v.toPrecision(2)}%`;
+};
 /** Ratios to a reference (×size, ×typical): two decimals below 10. */
 const times = (x: number): string => (Number.isFinite(x) ? `${x < 10 ? x.toFixed(2) : x.toFixed(1)}×` : '–');
 
@@ -1744,9 +1750,31 @@ function fold(key: string, body: string): string {
   return `<details class="fit-details" data-fold="${key}"${foldOpen.has(key) ? ' open' : ''}><summary>What this shows</summary>${body}</details>`;
 }
 
-/** Parcel cell: one-line abbreviation, full name in the tooltip. */
+/** Parcel cell: one-line abbreviation, cut with an ellipsis when the column is narrow; full name in the tooltip. */
 const parcelCell = (p: { id: number; name: string; short: string }, extra = ''): string =>
-  `<td><button data-parcel="${p.id}" title="${p.name}${extra}. Click to mark maps by this parcel and go to it.">${p.short}</button></td>`;
+  `<td style="overflow:hidden"><button data-parcel="${p.id}" title="${p.name}${extra}. Click to mark maps by this parcel and go to it." style="display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left">${p.short}</button></td>`;
+
+/**
+ * A table that always fits the side column: fixed layout at 100% width, the numeric columns at fixed
+ * widths (em), the first column takes what is left (its cells ellipsise; see parcelCell).
+ */
+function fitTable(heads: string[], widthsEm: number[], rows: string): string {
+  return `<table class="nb-table" style="table-layout:fixed;width:100%;white-space:nowrap"><colgroup><col>${widthsEm.map((w) => `<col style="width:${w}em">`).join('')}</colgroup><tr>${heads.join('')}</tr>${rows}</table>`;
+}
+
+/** ρ below this: most of a map's spatial variance is measurement noise (ρ = signal ÷ total variance). */
+const LOW_RHO = 0.5;
+
+/** Visible warning above the Focused table when the focused map is unreliable, or its reliability unknown. */
+function reliabilityWarning(a: M.Analysis, b: SimilarityBasis, member: number, noiseTop: number): string {
+  const id = a.ids[member];
+  const rel = member >= 0 ? V3.reliabilityOf(a, b) : null;
+  if (!rel) return `<p class="note warnline">Reliability of ${id} is not known yet (β-maps: waiting for SE), so this list cannot yet be judged against noise.</p>`;
+  const rho = rel.rho[b.eligible.indexOf(member)];
+  if (!Number.isFinite(rho)) return `<p class="note warnline">Reliability of ${id} could not be estimated, so this list cannot be judged against noise.</p>`;
+  if (rho >= LOW_RHO) return '';
+  return `<p class="note warnline">ρ ${M.fmtR(rho)}: most of ${id}'s spatial variance (${pct(1 - Math.max(0, rho))}) is measurement noise, so this list may largely reflect noise; compare reliable maps. A pure-noise map already reaches ${times(noiseTop)}.</p>`;
+}
 
 function explainSection(a: M.Analysis): string {
   if (!opts.explain || opts.trajectories) return '';
@@ -1760,6 +1788,11 @@ function explainSection(a: M.Analysis): string {
     return `<section><h3>Explain</h3>${scopes}<p class="note">${b.eligible.length > V3.EXPLAIN_MAX_MAPS ? `Explain runs on up to ${V3.EXPLAIN_MAX_MAPS} maps in this browser view (${b.eligible.length} placed).` : 'Needs at least two comparable maps.'}</p></section>`;
   const k = b.eligible.length;
   const focusId = ex.scope.kind === 'focused' ? a.ids[ex.scope.member] : '';
+  // Under noise correction the layout uses r ÷ √(ρᵢρⱼ); Explain decomposes plain r over the same maps.
+  const corrected = SV.isCorrected(a);
+  const rawNote = corrected
+    ? `<p class="note">Computed on raw r over the ${k} maps in the noise-corrected layout; the corrected r ÷ √(ρᵢρⱼ) that places them is not decomposed.</p>`
+    : '';
   const formula =
     ex.scope.kind === 'all'
       ? '(k/2N)·Σᵢ(zᵢ − z̄)², the spread of the maps at the voxel,'
@@ -1788,10 +1821,23 @@ function explainSection(a: M.Analysis): string {
       .slice(0, 8)
       .map((r) => `<tr>${parcelCell(r)}<td class="num">${pct(r.share)}</td><td class="num">${times(r.excess)}</td><td class="num">${r.rank}</td></tr>`)
       .join('');
-    tables = `<table class="nb-table" style="white-space:nowrap"><tr><th>parcel</th><th title="${focusId}'s share of its own mean 1 − r to the others">share</th><th title="share ÷ the median share of all ${f.of} maps in this parcel">×typical</th><th title="${focusId}'s share among the ${f.of} maps (1 = largest)">rank/${f.of}</th></tr>${rows}</table>`;
-    key = `<p class="note">Ranked by ×typical: ${focusId}'s share ÷ the median of all ${f.of} maps' own shares in that parcel. rank: 1 = the largest share of the ${f.of}.</p>`;
+    const warning = reliabilityWarning(a, b, ex.scope.kind === 'focused' ? ex.scope.member : -1, f.noiseTop);
+    tables =
+      warning +
+      fitTable(
+        [
+          '<th>parcel</th>',
+          `<th title="${focusId}'s share of its own mean 1 − r to the others">share</th>`,
+          `<th title="share ÷ the median share of all ${f.of} maps in this parcel">×typical</th>`,
+          `<th title="${focusId}'s share among the ${f.of} maps (1 = largest)">rank/${f.of}</th>`,
+        ],
+        [4, 4.2, 3.6],
+        rows
+      );
+    key = `<p class="note">Ranked by ×typical: ${focusId}'s share ÷ the median of all ${f.of} maps' own shares in that parcel. rank: 1 = the largest share of the ${f.of}.${warning ? '' : ` A map of pure independent noise reaches ${times(f.noiseTop)}.`}</p>`;
     prose.push(
-      `Every map's share is largest where all maps diverge from one another, so raw shares rank nearly the same parcels for every map. ×typical corrects for that common part: each of the ${f.of} maps' focused terms is summed in the parcel and divided by that map's own total; ×typical is ${focusId}'s value ÷ the median of the ${f.of} values (1× = like the typical map, 2× = twice its share). Parcels with fewer than ${f.minN} compared voxels show –.`
+      `Every map's share is largest where all maps diverge from one another, so raw shares rank nearly the same parcels for every map. ×typical corrects for that common part: each of the ${f.of} maps' focused terms is summed in the parcel and divided by that map's own total; ×typical is ${focusId}'s value ÷ the median of the ${f.of} values (1× = like the typical map, 2× = twice its share). Parcels with fewer than ${f.minN} compared voxels show –.`,
+      `<b>Caution.</b> ×typical has no noise model: it compares shares, whatever produced them. A large ratio on a tiny share (well under 1% of the total) or in a low-signal parcel (e.g. temporal pole or orbitofrontal cortex, where signal drops out) deserves caution, and for a map with low reliability ρ the whole list can be mostly noise. Noise reference: a map of independent N(0, 1) noise at every compared voxel, added to these ${f.of} maps as one more, reaches ${times(f.noiseTop)} at its top parcel (median of ${f.noiseDraws} seeded draws). Real measurement noise is spatially smooth and reaches higher ratios, so treat that value as a floor for what noise can produce, not as a significance threshold.`
     );
   } else if (ex.parcels) {
     // Four columns fit the panel: with a noise floor, the beyond-noise share replaces ×size (kept in the tooltip).
@@ -1804,27 +1850,40 @@ function explainSection(a: M.Analysis): string {
           `<tr>${parcelCell(p, `: ${pct(p.sizeShare)} of the compared voxels, share ÷ that = ${size(p)}`)}<td class="num">${pct(p.share)}</td><td class="num">${withNoise ? pct(p.beyondNoise) : size(p)}</td><td class="num">${p.i2 === null ? '…' : M.fmtR(p.i2)}</td></tr>`
       )
       .join('');
-    tables = `<table class="nb-table" style="white-space:nowrap"><tr><th>parcel</th><th title="share of the ${ex.totalLabel}">share</th>${withNoise ? '<th title="share of the part beyond the noise floor">&gt;noise</th>' : `<th title="share ÷ the parcel's share of the compared voxels (1× = proportional to size)">×size</th>`}<th title="heterogeneity of the parcel-mean β across maps">I²</th></tr>${rows}</table>`;
+    tables = fitTable(
+      [
+        '<th>parcel</th>',
+        `<th title="share of the ${ex.totalLabel}">share</th>`,
+        withNoise ? '<th title="share of the part beyond the noise floor">&gt;noise</th>' : `<th title="share ÷ the parcel's share of the compared voxels (1× = proportional to size)">×size</th>`,
+        '<th title="heterogeneity of the parcel-mean β across maps">I²</th>',
+      ],
+      [4, 4, 2.4],
+      rows
+    );
     key = `<p class="note">${withNoise ? '&gt;noise: share of the part beyond the noise floor.' : '×size: share ÷ share of voxels (1× = proportional to size).'} I²: β heterogeneity.</p>`;
     prose.push(ex.heterogeneityNote ?? 'I² loads with β and SE…');
   }
   if (atlasNow && (ex.focus || ex.parcels)) {
     const c = ex.concentration;
     prose.push(
-      `${c ? `The ${c.topK} parcels with the largest share carry <b>${pct(c.topShare)}</b> of the total while holding ${pct(c.sizeShare)} of the voxels${c.randomSplit !== null ? `; random splits of the same sizes give ${pct(c.randomSplit)}, so compare against that, not against zero` : ''}. ` : ''}${pct(ex.outsideShare)} falls outside the parcellation${(atlasNow?.name ?? '').startsWith('Schaefer') ? ' (Schaefer covers cortex only)' : ''}.`
+      `${c && ex.focus ? `Ranked by raw share instead (not the order of the table above), the ${c.topK} parcels with the largest share of ${focusId}'s total carry <b>${pct(c.topShare)}</b> of it while holding ${pct(c.sizeShare)} of the voxels. ` : ''}${c && !ex.focus ? `The ${c.topK} parcels with the largest share carry <b>${pct(c.topShare)}</b> of the total while holding ${pct(c.sizeShare)} of the voxels${c.randomSplit !== null ? `; random splits of the same sizes give ${pct(c.randomSplit)}, so compare against that, not against zero` : ''}. ` : ''}${pct(ex.outsideShare)} falls outside the parcellation${(atlasNow?.name ?? '').startsWith('Schaefer') ? ' (Schaefer covers cortex only)' : ''}.`
     );
   }
   if (atlasNow && ex.influence?.length) {
-    tables += `${key}<h3 style="margin-top:10px">Layout depends most on</h3><table class="nb-table" style="white-space:nowrap"><tr><th>parcel</th><th title="(1 − Mantel r) × 1000">change ‰</th></tr>${ex.influence
-      .slice(0, 5)
-      .map((x) => `<tr>${parcelCell(x)}<td class="num">${fmtPermille(1 - x.mantel)}</td></tr>`)
-      .join('')}</table>`;
-    key = '<p class="note">change: 1 − r between all pairwise 1 − r with and without the parcel, in thousandths.</p>';
+    tables += `${key}<h3 style="margin-top:10px">${corrected ? 'Raw 1 − r depends most on' : 'Layout depends most on'}</h3>${fitTable(
+      ['<th>parcel</th>', '<th title="(1 − Mantel r) × 1000">change ‰</th>'],
+      [5],
+      ex.influence
+        .slice(0, 5)
+        .map((x) => `<tr>${parcelCell(x)}<td class="num">${fmtPermille(1 - x.mantel)}</td></tr>`)
+        .join('')
+    )}`;
+    key = `<p class="note">change: 1 − r between all pairwise ${corrected ? 'raw ' : ''}1 − r with and without the parcel, in thousandths.${corrected ? ' Raw r, not the corrected r of the layout.' : ''}</p>`;
     prose.push(
       'Layout dependence: every pairwise 1 − r is recomputed exactly without the parcel (no refit) and correlated with the full set; the table shows 1 − that correlation in thousandths. Larger means the layout leans on the parcel more. Share and dependence differ: a parcel can carry variance without changing who resembles whom.'
     );
   }
-  return `<section><h3>Explain <span class="sub">${ex.totalLabel}</span></h3>${scopes}
+  return `<section><h3>Explain <span class="sub">${ex.totalLabel}</span></h3>${scopes}${rawNote}
     ${tables}${key}${fold('explain', prose.map((p) => `<p class="note">${p}</p>`).join(''))}</section>`;
 }
 
@@ -1847,7 +1906,7 @@ function reliabilitySection(a: M.Analysis): string {
     .map((x) => `<tr><td class="id">${x.id}</td><td class="num">${M.fmtR(x.rho)}</td></tr>`)
     .join('');
   return `<section><h3>Reliability <span class="sub">ρ</span></h3>
-    <table class="nb-table" style="white-space:nowrap"><tr><th>Least reliable first</th><th>ρ</th></tr>${rows}</table>
+    ${fitTable(['<th>Least reliable first</th>', '<th>ρ</th>'], [3.5], rows)}
     <p class="note">Median ρ ${M.fmtR(order[order.length >> 1]?.rho ?? NaN)} over ${order.length} maps.${opts.noiseCorrected && low.length ? ` Set aside from the noise-corrected layout as too unreliable (ρ &lt; .10): ${low.join(', ')}.` : ''}</p>
     ${fold(
       'reliability',

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { standardize, focusedTerms, focusedShareTable, focusedExcess, concentration, parcelSums } from '../src/volumeset/explain';
+import { standardize, focusedTerms, focusedShareTable, focusedExcess, noiseExcessReference, concentration, parcelSums } from '../src/volumeset/explain';
 
 /** LCG uniform + Box–Muller normal (independent of explain.ts). */
 function gen(seed: number): () => number {
@@ -163,5 +163,33 @@ describe('focused shares of every map at once', () => {
     expect(e[2].n).toBe(1);
     expect(() => focusedExcess(t, 3)).toThrow();
     expect(() => focusedShareTable(z, Int32Array.of(1, 2))).toThrow();
+  });
+});
+
+describe('pure-noise reference for ×typical', () => {
+  it('is deterministic, above 1, and a planted map-specific departure exceeds it', () => {
+    const { data, labels, support } = planted(9, 60, 5);
+    const z = standardize(data, [...data.keys()], support);
+    const r1 = noiseExcessReference(z, labels, 20, 5, 1);
+    const r2 = noiseExcessReference(z, labels, 20, 5, 1);
+    expect(Array.from(r1.tops)).toEqual(Array.from(r2.tops));
+    expect(r1.tops.length).toBe(5);
+    for (const t of r1.tops) expect(t).toBeGreaterThan(1);
+    expect(r1.median).toBe([...r1.tops].sort((x, y) => x - y)[2]);
+    expect(focusedExcess(focusedShareTable(z, labels), 0, 20)[0].excess).toBeGreaterThan(r1.median);
+    // The noise map is the (k + 1)th map: the reference does not change the inputs.
+    expect(z.length).toBe(9);
+    expect(() => noiseExcessReference(z, labels, 20, 0)).toThrow();
+  });
+
+  it('a map that is itself independent noise sits near the reference', () => {
+    const { data, labels, support } = planted(9, 60, 5);
+    const g = gen(77);
+    const withNoise = [...data, Float32Array.from({ length: support.length }, () => g())];
+    const z = standardize(withNoise, [...withNoise.keys()], support);
+    const ref = noiseExcessReference(z.slice(0, 9), labels, 20, 9, 2);
+    const own = focusedExcess(focusedShareTable(z, labels), 9, 20)[0].excess;
+    expect(own).toBeGreaterThan(Math.min(...ref.tops) * 0.8);
+    expect(own).toBeLessThan(Math.max(...ref.tops) * 1.25);
   });
 });
