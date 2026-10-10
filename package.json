@@ -124,6 +124,7 @@
     "eslint": "^9.39.5",
     "globals": "^17.11.0",
     "jsdom": "^26.0.0",
+    "neuroatlasjs": "github:bbuchsbaum/neuroatlasjs#e98e961617c73554f0b1928e01eab0e5a8733008",
     "opencv-ts": "^1.3.6",
     "postcss": "^8.5.26",
     "tailwindcss": "^3.4.19",
@@ -139,5 +140,8 @@
     "vitest": "^3.2.7",
     "vue": "^3.5.41"
   },
-  "type": "module"
+  "type": "module",
+  "allowScripts": {
+    "github:bbuchsbaum/neuroatlasjs#e98e961617c73554f0b1928e01eab0e5a8733008": true
+  }
 }
