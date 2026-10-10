@@ -14,6 +14,7 @@ import { type NmdsOptions } from '../../src/volumeset/nmds';
 import { SmoothPool } from './smooth-pool';
 import { zoomAbout, panBy, type Viewport, type SpaceTransform } from './space';
 import * as SV from './space-view';
+import * as P from './peek';
 import {
   fetchManifest,
   loadTemplate,
@@ -107,7 +108,7 @@ const SORT_LABEL: Record<SortKey, string> = {
 };
 export const STAT_LABEL: Record<string, string> = { t: 't', beta: 'β' };
 const DEFAULTS: Record<string, { thr: number; range: number }> = { t: { thr: 2.3, range: 6 }, beta: { thr: 0, range: 1 } };
-const AXIS: Record<SetOrientation, 0 | 1 | 2> = { sagittal: 0, coronal: 1, axial: 2 };
+export const AXIS: Record<SetOrientation, 0 | 1 | 2> = { sagittal: 0, coronal: 1, axial: 2 };
 
 function parseSmooth(v: string | null): Smooth {
   if (v === 'guided') return 'medium';
@@ -633,7 +634,7 @@ function syncControls(): void {
 // Crop windows: brain bounding box per orientation, then linked zoom inside it
 
 const boxCache = new Map<SetOrientation, Rect>();
-function brainBox(set: VolumeSet, o: SetOrientation): Rect {
+export function brainBox(set: VolumeSet, o: SetOrientation): Rect {
   let b = boxCache.get(o);
   if (b) return b;
   let x0 = Infinity;
@@ -718,11 +719,11 @@ function toCanvas(img: ImageData): HTMLCanvasElement {
 }
 
 /** Grayscale underlay for the current slice (shared by every cell). */
-export function underImage(a: Analysis): HTMLCanvasElement {
-  const key = `under|${state.orient}|${sliceIndex()}`;
+export function underImage(a: Analysis, o: SetOrientation = state.orient, index = sliceIndex()): HTMLCanvasElement {
+  const key = `under|${o}|${index}`;
   let c = imgCache.get(key);
   if (!c) {
-    const under = underlaySlice(a.set.dim, template.t1Data, state.orient, sliceIndex());
+    const under = underlaySlice(a.set.dim, template.t1Data, o, index);
     c = toCanvas(compose(under, template.range, null, cmap));
     imgCache.set(key, c);
   }
@@ -742,13 +743,13 @@ export function underSilhouette(a: Analysis): HTMLCanvasElement {
 }
 
 /** Colour-mapped overlay (transparent below threshold) for one member, cached as a canvas. */
-export function overImage(a: Analysis, member: number | 'mean'): HTMLCanvasElement {
+export function overImage(a: Analysis, member: number | 'mean', o: SetOrientation = state.orient, index = sliceIndex()): HTMLCanvasElement {
   const ready = state.smooth === 'off' || a.smoothed.has(`${state.smooth}|${member}`);
-  const key = `${a.key}|${member}|${state.orient}|${sliceIndex()}|${ready ? state.smooth : 'off'}|${state.thr}|${state.range}|${state.minc}`;
+  const key = `${a.key}|${member}|${o}|${index}|${ready ? state.smooth : 'off'}|${state.thr}|${state.range}|${state.minc}`;
   let c = imgCache.get(key);
   if (!c) {
     if (imgCache.size > 600) imgCache.clear();
-    const over = a.set.slice(displayValues(a, member), state.orient, sliceIndex());
+    const over = a.set.slice(displayValues(a, member), o, index);
     c = toCanvas(cmap.fillImageData(new ImageData(over.width, over.height), over.data));
     imgCache.set(key, c);
   }
@@ -927,7 +928,7 @@ function ensureCanvas(): HTMLCanvasElement {
         if (mk !== null && SV.spaceGeom) {
           state.subject = SV.spaceGeom.a.ids[mk];
           scheduleDraw();
-        }
+        } else if (state.mode === 'space') P.closePeek();
         return;
       }
       // Remember the cursor before this click so a double-click can open ortho without moving it.
@@ -935,6 +936,8 @@ function ensureCanvas(): HTMLCanvasElement {
       lastClickAt = performance.now();
       state.cursor = h.ijk;
       if (h.hit.member !== 'mean') state.subject = String(h.hit.analysis.set.members[h.hit.member].meta.subject);
+      // Space: a click on a picture also opens that map in the peek, at the clicked voxel's plane.
+      if (state.mode === 'space' && h.hit.member !== 'mean') P.openPeek(state.subject!, String(h.hit.analysis.set.members[h.hit.member].meta.contrast), h.ijk, { x: e.clientX, y: e.clientY });
       if (state.sort === 'cursor') void render();
       else scheduleDraw();
     }
@@ -1016,6 +1019,7 @@ export function scheduleDraw(light = false, keepSide = false): void {
     } else if (state.mode === 'montage') void drawMontage(skipSide);
     else if (state.mode === 'facet') void drawFacet(skipSide);
     else if (state.mode === 'space') void SV.drawSpace(skipSide);
+    if (!light) P.syncPeek();
     syncZoom();
     syncSlice();
     writeState();
@@ -1034,7 +1038,7 @@ function setSlice(index: number, count?: number): void {
 }
 
 const AXIS_NAME = ['x', 'y', 'z'];
-const ORIENT_NAME: Record<SetOrientation, string> = { axial: 'Axial', coronal: 'Coronal', sagittal: 'Sagittal' };
+export const ORIENT_NAME: Record<SetOrientation, string> = { axial: 'Axial', coronal: 'Coronal', sagittal: 'Sagittal' };
 
 /** Slider bounds/value and a truthful label: grid index plus the plane's world coordinate (or its range if oblique). */
 function syncSlice(): void {
@@ -1043,11 +1047,19 @@ function syncSlice(): void {
   const set = lastRail?.a.set;
   ctl.hidden = state.mode === 'ortho' || !set;
   if (!set || state.mode === 'ortho') return;
-  const n = set.sliceCount(state.orient);
   const idx = sliceIndex();
-  input.max = String(n - 1);
+  input.max = String(set.sliceCount(state.orient) - 1);
   if (document.activeElement !== input || input.value !== String(idx)) input.value = String(idx);
-  const ax = AXIS[state.orient];
+  const label = planeLabel(set, state.orient, idx);
+  $('#slice-label').textContent = label;
+  input.setAttribute('aria-valuetext', label);
+  input.setAttribute('aria-label', `${ORIENT_NAME[state.orient]} slice`);
+}
+
+/** "Axial 43/97 · z = 5.5 mm": grid index plus the plane's world coordinate (or its range if oblique). */
+export function planeLabel(set: VolumeSet, o: SetOrientation, idx: number): string {
+  const n = set.sliceCount(o);
+  const ax = AXIS[o];
   const [nx, ny, nz] = set.dim;
   const corner = (u: number, v: number): number[] => {
     const g = [0, 0, 0];
@@ -1068,10 +1080,7 @@ function syncSlice(): void {
   const lo = Math.min(...w);
   const hi = Math.max(...w);
   const world = hi - lo < 1e-6 ? `${AXIS_NAME[wax]} = ${fmt(lo, 1)} mm` : `oblique plane, ${AXIS_NAME[wax]} ${fmt(lo, 1)}…${fmt(hi, 1)} mm`;
-  const label = `${ORIENT_NAME[state.orient]} ${idx + 1}/${n} · ${world}`;
-  $('#slice-label').textContent = label;
-  input.setAttribute('aria-valuetext', label);
-  input.setAttribute('aria-label', `${ORIENT_NAME[state.orient]} slice`);
+  return `${ORIENT_NAME[o]} ${idx + 1}/${n} · ${world}`;
 }
 
 export function prepCanvas(): { ctx: CanvasRenderingContext2D; W: number; H: number } {
@@ -1190,10 +1199,10 @@ export function sliceAspect(set: VolumeSet): number {
 }
 
 /** Voxel spacing along the slice's screen x and y for the current plane (see sliceGrid's conventions). */
-function planePixelSize(set: VolumeSet): [number, number] {
+export function planePixelSize(set: VolumeSet, o: SetOrientation = state.orient): [number, number] {
   const sp = (set.space.spacing as number[]).map((v) => Math.abs(v));
-  if (state.orient === 'axial') return [sp[0], sp[1]];
-  if (state.orient === 'coronal') return [sp[0], sp[2]];
+  if (o === 'axial') return [sp[0], sp[1]];
+  if (o === 'coronal') return [sp[0], sp[2]];
   return [sp[1], sp[2]];
 }
 
@@ -1513,6 +1522,24 @@ function updateOrthoHead(a: Analysis, order: number[], cur: number): void {
     ${atlas && state.cursor ? `<span class="kv parcel">${atlasLabel(state.cursor)}</span>` : ''}
     <span class="hint">← → subjects · Esc back</span>`;
   (head.querySelector('.back') as HTMLButtonElement).onclick = () => goBack();
+}
+
+/** Move the one shared cursor to a voxel; the shared slice follows it so the set views stay on the cursor's plane. */
+export function placeCursor(ijk: [number, number, number]): void {
+  state.cursor = [...ijk];
+  state.slice = ijk[AXIS[state.orient]];
+  if (state.sort === 'cursor') void render();
+  else scheduleDraw();
+}
+
+/** Open one subject's map in Ortho with the cursor at a voxel. */
+export function openOrthoAt(subject: string, ijk: [number, number, number]): void {
+  state.cursor = [...ijk];
+  state.slice = ijk[AXIS[state.orient]];
+  state.subject = subject;
+  state.prevMode = state.mode === 'ortho' ? state.prevMode : state.mode;
+  state.mode = 'ortho';
+  void render();
 }
 
 function goBack(): void {
@@ -2067,6 +2094,7 @@ export function render(): Promise<void> {
         syncSlice();
       }
       updateReadout();
+      P.syncPeek();
       writeState();
       setStatus('');
     })
@@ -2115,6 +2143,10 @@ async function main(): Promise<void> {
   window.addEventListener('resize', () => fitHeader());
   window.addEventListener('keydown', (e) => {
     const tag = (e.target as HTMLElement).tagName;
+    if (e.key === 'Escape' && P.isPeekOpen()) {
+      P.closePeek();
+      return;
+    }
     if (tag === 'INPUT' || tag === 'SELECT') return;
     // Buttons keep their own activation keys.
     if (tag === 'BUTTON' && (e.key === 'Enter' || e.key === ' ')) return;

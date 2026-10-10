@@ -58,6 +58,18 @@
       #readout { height: 30px; padding: 0 8px 0 16px; border-top: 1px solid var(--line); color: var(--text); font-size: 12px; display: flex; align-items: center; gap: 12px; }
       #readout-text { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       #readout .ghost { padding: 2px 9px; }
+      #peek { position: fixed; z-index: 30; background: var(--panel); border: 1px solid var(--line-strong); border-radius: 9px; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55); padding: 8px; display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--text); }
+      #peek .peek-head { display: flex; align-items: center; gap: 8px; cursor: move; user-select: none; }
+      #peek .peek-id { font-weight: 600; color: var(--brand); font-family: var(--mono); }
+      #peek .peek-meta { color: var(--muted); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      #peek .seg button { padding: 2px 7px; font-size: 11px; }
+      #peek .ghost { padding: 2px 7px; }
+      #peek .peek-close { font: 15px/1 var(--sans); padding: 1px 7px 3px; }
+      #peek .peek-img { display: block; align-self: center; border-radius: 4px; cursor: crosshair; }
+      #peek .peek-slice { display: flex; align-items: center; gap: 8px; }
+      #peek .peek-slice input { flex: 1; min-width: 0; accent-color: var(--brand); }
+      #peek .peek-slice-label, #peek .peek-read { color: var(--muted); font-size: 11px; white-space: nowrap; }
+      #peek .peek-read { min-height: 14px; }
       #readout .muted, .muted { color: var(--muted); }
       #readout .mono { font-family: var(--mono); font-size: 11.5px; }
       #side { min-width: 0; overflow-x: hidden; border-left: 1px solid var(--line); background: var(--bg-alt); padding: 14px 18px; overflow: auto; }

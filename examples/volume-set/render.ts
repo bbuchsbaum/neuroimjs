@@ -149,8 +149,8 @@ export function getPixelSize(): [number, number] {
   return pixelSize;
 }
 
-export function placeCrop(crop: Rect, r: Rect): CellView {
-  const [px, py] = pixelSize;
+export function placeCrop(crop: Rect, r: Rect, ps: readonly [number, number] = pixelSize): CellView {
+  const [px, py] = ps;
   let s = Math.min(r.w / (crop.w * px), r.h / (crop.h * py));
   // When magnified enough for crisp voxels (cubic voxels only), use a whole number of pixels per voxel
   // (with a whole-voxel crop) so every voxel edge lands on a pixel boundary and drawing matches hit-testing.
