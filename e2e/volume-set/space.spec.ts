@@ -853,6 +853,10 @@ test.describe('Space v3: what drives the layout', () => {
           const ox = Math.min(ts[i].x + ts[i].w, ts[j].x + ts[j].w) - Math.max(ts[i].x, ts[j].x);
           const oy = Math.min(ts[i].y + ts[i].h, ts[j].y + ts[j].h) - Math.max(ts[i].y, ts[j].y);
           expect(ox > 1 && oy > 1, `${c}: pictures ${i} and ${j} overlap`).toBe(false);
+          // The ID label strip under picture i (drawn in the first panel) must not cover picture j either.
+          const lx = Math.min(ts[i].x + ts[i].w, ts[j].x + ts[j].w) - Math.max(ts[i].x, ts[j].x);
+          const ly = Math.min(ts[i].y + ts[i].h + 12, ts[j].y + ts[j].h) - Math.max(ts[i].y + ts[i].h, ts[j].y);
+          expect(lx > 1 && ly > 1, `${c}: label of ${i} covers picture ${j}`).toBe(false);
         }
     }
   });

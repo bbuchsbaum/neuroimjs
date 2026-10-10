@@ -1838,10 +1838,12 @@ export async function drawTrajectories(ctx: CanvasRenderingContext2D, g: SV.Spac
   const t0 = spaceTransform(d.coords, inner0, M.state.space);
   const local = ids.map((_, i) => t0.toScreen(d.coords[2 * i], d.coords[2 * i + 1]));
   // Narrow panels: shrink the pictures until decluttering removes every overlap (then fall back to dots).
+  const LBL = 12;
   let placed = local.map(([x, y]) => ({ x, y }));
   for (let attempt = 0; lod === 'thumbs' && attempt < 8; attempt++) {
-    placed = declutter(local.map(([x, y]) => ({ x, y })), tw + 4, th + 4, { x: 0, y: titleH, w: pw, h: ph - titleH }, 300, 4);
-    if (maxOverlap(placed, tw + 4, th + 4) === 0) break;
+    // Each box holds the picture and its ID label below it (LBL px), so labels never run into a neighbour.
+    placed = declutter(local.map(([x, y]) => ({ x, y })), tw + 4, th + LBL + 4, { x: 0, y: titleH, w: pw, h: ph - titleH }, 300, 4);
+    if (maxOverlap(placed, tw + 4, th + LBL + 4) === 0) break;
     size *= 0.85;
     tw = Math.round(size * Math.sqrt(asp));
     th = Math.round(size / Math.sqrt(asp));
@@ -1874,15 +1876,15 @@ export async function drawTrajectories(ctx: CanvasRenderingContext2D, g: SV.Spac
         if (m < 0) {
           ctx.setLineDash([3, 3]);
           ctx.strokeStyle = THEME.muted;
-          ctx.strokeRect(px - tw / 2, py - th / 2, tw, th);
+          ctx.strokeRect(px - tw / 2, py - (th + LBL) / 2, tw, th);
           ctx.setLineDash([]);
-        } else M.drawCell(ctx, ak, m, { x: px - tw / 2, y: py - th / 2, w: tw, h: th }, null, false, { silhouette: true, crosshair: false });
+        } else M.drawCell(ctx, ak, m, { x: px - tw / 2, y: py - (th + LBL) / 2, w: tw, h: th }, null, false, { silhouette: true, crosshair: false });
         if (Math.hypot(px - sx, py - sy) > Math.max(4, tw * 0.2)) {
           ctx.strokeStyle = 'rgba(200,202,220,0.6)';
           ctx.lineWidth = 1;
           ctx.beginPath();
           ctx.moveTo(sx, sy);
-          ctx.lineTo(Math.max(px - tw / 2, Math.min(px + tw / 2, sx)), Math.max(py - th / 2, Math.min(py + th / 2, sy)));
+          ctx.lineTo(Math.max(px - tw / 2, Math.min(px + tw / 2, sx)), Math.max(py - (th + LBL) / 2, Math.min(py + (th - LBL) / 2, sy)));
           ctx.stroke();
           ctx.fillStyle = isSel ? THEME.brand : THEME.text;
           ctx.beginPath();
@@ -1893,7 +1895,7 @@ export async function drawTrajectories(ctx: CanvasRenderingContext2D, g: SV.Spac
           ctx.font = `${isSel ? '600 ' : ''}10px ${FONT.mono}`;
           ctx.fillStyle = isSel ? THEME.brand : THEME.muted;
           ctx.textAlign = 'center';
-          ctx.fillText(id, px, py + th / 2 + 1);
+          ctx.fillText(id, px, py + (th - LBL) / 2 + 1);
         }
       } else {
         ctx.fillStyle = isSel ? THEME.brand : THEME.text;
@@ -1902,7 +1904,7 @@ export async function drawTrajectories(ctx: CanvasRenderingContext2D, g: SV.Spac
         ctx.fill();
       }
       const mm = a.ids.indexOf(id);
-      if (mm >= 0) g.marks.push({ member: mm, box: lod === 'thumbs' ? { x: px - tw / 2, y: py - th / 2, w: tw, h: th + 12 } : { x: sx - 8, y: sy - 8, w: 16, h: 16 }, kind: lod === 'thumbs' ? 'thumb' : 'dot' });
+      if (mm >= 0) g.marks.push({ member: mm, box: lod === 'thumbs' ? { x: px - tw / 2, y: py - (th + LBL) / 2, w: tw, h: th + LBL } : { x: sx - 8, y: sy - 8, w: 16, h: 16 }, kind: lod === 'thumbs' ? 'thumb' : 'dot' });
     });
     ctx.restore();
   });
