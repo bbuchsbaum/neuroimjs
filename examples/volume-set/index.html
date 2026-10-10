@@ -69,6 +69,16 @@
       #peek .peek-slice { display: flex; align-items: center; gap: 8px; }
       #peek .peek-slice input { flex: 1; min-width: 0; accent-color: var(--brand); }
       #peek .mono { font-family: var(--mono); }
+      #peek .peek-head > * { flex-shrink: 0; }
+      #peek .peek-head > .peek-meta { flex-shrink: 1; min-width: 0; }
+      #peek .peek-ortho .short { display: none; }
+      #peek.narrow .peek-meta { display: none; }
+      #peek.narrow .peek-head { justify-content: space-between; }
+      #peek.narrow .peek-ortho .wide { display: none; }
+      #peek.narrow .peek-ortho .short { display: inline; }
+      #peek.narrow .peek-slice { flex-wrap: wrap; row-gap: 2px; }
+      #peek.narrow .peek-slice input { flex: 1 0 100%; }
+      #peek-tether { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 29; overflow: visible; }
       #peek .peek-slice-label, #peek .peek-read { color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       #peek .peek-slice-label { flex: 0 1 auto; min-width: 0; }
       #peek .peek-read { min-height: 14px; }

@@ -16,6 +16,7 @@ import {
   captionCandidates,
   freeSpot,
   shortContrastNames,
+  nudgeCaption,
 } from '../examples/volume-set/space';
 
 const rect = { x: 100, y: 50, w: 400, h: 200 };
@@ -222,7 +223,13 @@ describe('Space exact-position markers', () => {
     expect(marks[0].nudge).toBeCloseTo(40, 9);
   });
 
-  it('never drops a marker on a crowded decluttered layout (every moved picture is marked)', () => {
+  it('leaves a position that is still inside its own picture unmarked but returns it as counted (own)', () => {
+    // Picture 0 moved 12 px: its anchor is still inside its own 30 x 30 picture.
+    const marks = positionMarkers([{ x: 100, y: 100 }], [{ x: 112, y: 100 }], 30, 30, 8);
+    expect(marks.map((m) => m.kind)).toEqual(['own']);
+  });
+
+  it('never drops a moved picture on a crowded decluttered layout (each is marked or counted)', () => {
     const anchors = Array.from({ length: 30 }, (_, i) => ({ x: 300 + 25 * Math.cos(i * 2.4) * Math.sqrt(i), y: 200 + 25 * Math.sin(i * 2.4) * Math.sqrt(i) }));
     const r = { x: 0, y: 0, w: 600, h: 400 };
     const placed = declutter(anchors, 44, 52, r, 300, 5);
@@ -278,5 +285,15 @@ describe('Short contrast names', () => {
     // "late" would collide with an existing contrast name: keep everything in full.
     expect(shortContrastNames(['late', 'delaylate', 'delayearly'])).toEqual(['late', 'delaylate', 'delayearly']);
     expect(shortContrastNames(['ab1', 'ab2'])).toEqual(['ab1', 'ab2']);
+  });
+});
+
+describe('Nudge caption', () => {
+  it('says what is marked and what is only counted, and adds up', () => {
+    expect(nudgeCaption({ dots: 0, rings: 0, own: 0, slight: 0, slightPx: 18 })).toBe('');
+    expect(nudgeCaption({ dots: 6, rings: 3, own: 4, slight: 1, slightPx: 18 })).toBe(
+      ' · 14 pictures nudged apart: dots mark exact positions, rings those inside another picture; unmarked: 4 still over their own picture, 1 moved ≤ 18 px'
+    );
+    expect(nudgeCaption({ dots: 0, rings: 0, own: 1, slight: 0, slightPx: 18 })).toBe(' · 1 picture nudged apart; unmarked: 1 still over its own picture');
   });
 });

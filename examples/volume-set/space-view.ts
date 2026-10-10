@@ -23,6 +23,7 @@ import {
   declutter,
   positionMarkers,
   overlapArea,
+  nudgeCaption,
 } from './space';
 import { THEME, FONT, fmt, placeCrop, drawCellImage, drawCrosshair, hidpi } from './render';
 import * as M from './main';
@@ -158,8 +159,19 @@ export interface SpaceGeom {
   nudged?: number;
   /** Pictures moved too little to mark (at most px from their exact position, so still near the centre). */
   slightNudge?: { n: number; px: number };
-  /** Exact-position markers of nudged pictures: a dot, or a ring where the position lies inside another picture. */
-  markers?: { member: number; kind: 'dot' | 'ring'; x: number; y: number; nudge: number }[];
+  /** Side by side: the footer naming the layout the positions come from, and where it is drawn. */
+  sideFooter?: { text: string; y: number };
+  /** Side by side: focused and hovered IDs labelled in every panel by the overlay. */
+  panelLabels?: [string, number, number][];
+  /** Map whose leader and picture the overlay currently highlights (hover), for the test probe. */
+  hoverHighlight?: string | null;
+  /** Pictures moved beyond the marking threshold whose exact position still lies inside their own picture (unmarked). */
+  inOwn?: number;
+  /**
+   * Drawn exact-position marks of nudged pictures: a dot, or a ring where the position lies inside another picture,
+   * with the leader (from the mark's rim to the picture's edge) and the picture box, for hover highlighting.
+   */
+  markers?: { member: number; kind: 'dot' | 'ring'; x: number; y: number; nudge: number; leader: [number, number, number, number] | null; box: LabelBox }[];
   /** Captions drawn over the layout (yardstick, covariate labels), so floating previews can avoid them. */
   captions?: LabelBox[];
 }
@@ -236,6 +248,10 @@ export function reasonShort(e: SimilarityBasis['excluded'][number], a: M.Analysi
       return 'no support';
   }
 }
+
+/** Ring marking an exact position inside another map's picture: radius (px) and its colour for ordinary maps. */
+const RING_R = 3.5;
+const RING_GREY = 'rgba(200,202,220,0.85)';
 
 export async function drawSpace(light = false): Promise<void> {
   const a = await M.getAnalysis(M.state.model, M.state.contrast, M.state.stat);
@@ -467,7 +483,7 @@ export async function drawSpace(light = false): Promise<void> {
           : { x: pt.sx + 7, y: pt.sy - 7, w: tw, h: 14 }
       );
     }
-    const markers: { pt: SpacePoint; kind: 'dot' | 'ring'; nudge: number }[] = [];
+    const markers: { pt: SpacePoint; kind: 'dot' | 'ring'; nudge: number; leader: [number, number, number, number] | null }[] = [];
     if (lod === 'thumbs') {
       for (const pt of shown) {
         if (!visible(pt)) continue;
@@ -482,13 +498,14 @@ export async function drawSpace(light = false): Promise<void> {
           crosshair: tw >= 120,
         });
         const mc = SX.memberColour(a, pt.member);
-        if (mc) SX.drawMemberColour(ctx, mc, M.hits[M.hits.length - 1]?.view.dest ?? cell, null);
+        if (mc) SX.drawMemberColour(ctx, mc, M.hits[M.hits.length - 1]?.view.dest ?? cell, null, SX.memberFraction(a, pt.member));
         geom.marks.push({ member: pt.member, box: { x: tx - tw / 2, y: ty - th / 2, w: tw, h: th }, kind: 'thumb' });
       }
       // Every picture moved by a noticeable amount keeps a mark at its exact position and a leader, drawn on
       // top of every picture (with a dark halo); an unmoved picture is centred on its position, and a dot there
-      // would read as a cursor. A position that lies inside another map's picture gets a ring in the map's ID
-      // colour instead of a dot, so it never reads as a mark on that map; no exact position is ever hidden.
+      // would read as a cursor. A position that lies inside another map's picture gets a small ring (with an ID
+      // tag) instead of a dot, so it never reads as a mark on that map. A position still inside the map's own
+      // picture gets nothing (a dot there reads as a mark on the brain) and is counted in the caption instead.
       const vis = shown.filter(visible);
       const found = positionMarkers(
         vis.map((pt) => ({ x: pt.sx, y: pt.sy })),
@@ -497,7 +514,12 @@ export async function drawSpace(light = false): Promise<void> {
         thumbH + 4,
         Math.max(4, thumbW * 0.2)
       );
-      for (const f of found) markers.push({ pt: vis[f.index], kind: f.kind, nudge: f.nudge });
+      let inOwn = 0;
+      for (const f of found) {
+        if (f.kind === 'own') inOwn++;
+        else markers.push({ pt: vis[f.index], kind: f.kind, nudge: f.nudge, leader: null });
+      }
+      geom.inOwn = inOwn;
       // Nudges too small to mark (the position is still near the picture's centre) are counted, not hidden.
       geom.slightNudge = { n: 0, px: Math.round(Math.max(4, thumbW * 0.2)) };
       for (const pt of vis) {
@@ -511,22 +533,24 @@ export async function drawSpace(light = false): Promise<void> {
         ctx.strokeStyle = color;
         ctx.lineWidth = width;
         ctx.beginPath();
-        for (const { pt, kind } of markers) {
+        for (const mk of markers) {
           // From the mark to the nearest edge of its picture; a ring's leader starts at its rim, so the
           // ring stays hollow and its centre (the exact position) is not hidden by the line.
+          const { pt, kind } = mk;
           const cx = Math.max(pt.tx! - thumbW / 2, Math.min(pt.tx! + thumbW / 2, pt.sx));
           const cy = Math.max(pt.ty! - thumbH / 2, Math.min(pt.ty! + thumbH / 2 - 16, pt.sy));
           const len = Math.hypot(cx - pt.sx, cy - pt.sy);
-          const r0 = kind === 'ring' ? (pt.member === sel ? 6 : 5) : 0;
+          const r0 = kind === 'ring' ? RING_R + 1 : 0;
           if (len <= r0) continue;
-          ctx.moveTo(pt.sx + ((cx - pt.sx) * r0) / len, pt.sy + ((cy - pt.sy) * r0) / len);
+          mk.leader = [pt.sx + ((cx - pt.sx) * r0) / len, pt.sy + ((cy - pt.sy) * r0) / len, cx, cy];
+          ctx.moveTo(mk.leader[0], mk.leader[1]);
           ctx.lineTo(cx, cy);
         }
         ctx.stroke();
       }
       // A visible mark is its own target and wins over any picture beneath it.
       for (const { pt } of markers) geom.marks.push({ member: pt.member, box: { x: pt.sx - 6, y: pt.sy - 6, w: 12, h: 12 }, kind: 'dot' });
-      geom.nudged = markers.length;
+      geom.nudged = markers.length + inOwn;
     } else {
       for (const pt of shown) {
         if (!visible(pt)) continue;
@@ -548,6 +572,7 @@ export async function drawSpace(light = false): Promise<void> {
       }
     }
     const idColour = (pt: SpacePoint): string => (pt.member === sel ? THEME.brand : pt.group ? THEME.warn : spaceNeighborIds.has(a.ids[pt.member]) ? THEME.accent : THEME.text);
+    const ringColour = (pt: SpacePoint): string => (pt.member === sel ? THEME.brand : spaceNeighborIds.has(a.ids[pt.member]) ? THEME.accent : RING_GREY);
     // Labels: focused, hovered and neighbours first; the rest only where they fit.
     const prio = shown.map((_, i) => i);
     const rank = (i: number): number => {
@@ -584,42 +609,51 @@ export async function drawSpace(light = false): Promise<void> {
         ctx.stroke();
         continue;
       }
-      // A hollow ring with a dark halo (the position is its centre): reads on top of any picture.
-      ctx.arc(pt.sx, pt.sy, isSel ? 6 : 5, 0, Math.PI * 2);
-      ctx.strokeStyle = 'rgba(13,14,20,0.92)';
-      ctx.lineWidth = 5;
+      // A small hollow ring with a thin dark halo (the position is its centre): legible on a picture but quiet,
+      // grey like the leaders unless the map is focused or a neighbour.
+      ctx.arc(pt.sx, pt.sy, RING_R, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(13,14,20,0.85)';
+      ctx.lineWidth = 4;
       ctx.stroke();
-      ctx.strokeStyle = idColour(pt);
-      ctx.lineWidth = 2;
+      ctx.strokeStyle = ringColour(pt);
+      ctx.lineWidth = 1;
       ctx.stroke();
       // A ring sits on another map's picture, so say whose it is: a small ID tag beside it (also a click target),
       // on whichever side keeps it off the other rings and the tags already placed.
-      ctx.font = `${isSel ? '600 ' : ''}9.5px ${FONT.mono}`;
+      ctx.font = `${isSel ? '600 ' : ''}9px ${FONT.mono}`;
       const tag = a.ids[pt.member];
       const tw = ctx.measureText(tag).width + 6;
       const blockers = [
-        ...markers.filter((o) => o.kind === 'ring').map((o) => ({ x: o.pt.sx - 8, y: o.pt.sy - 8, w: 16, h: 16 })),
+        ...markers.filter((o) => o.kind === 'ring').map((o) => ({ x: o.pt.sx - 6, y: o.pt.sy - 6, w: 12, h: 12 })),
         ...ringTags,
       ];
       const hit = (x: number, y: number): number =>
         blockers.reduce((n, q) => n + Math.max(0, Math.min(x + tw, q.x + q.w) - Math.max(x, q.x)) * Math.max(0, Math.min(y + 13, q.y + q.h) - Math.max(y, q.y)), 0);
       const spots: [number, number][] = [
-        [pt.sx + 8, pt.sy - 15],
-        [pt.sx + 8, pt.sy + 2],
-        [pt.sx - 8 - tw, pt.sy - 15],
-        [pt.sx - 8 - tw, pt.sy + 2],
+        [pt.sx + 6, pt.sy - 13],
+        [pt.sx + 6, pt.sy + 1],
+        [pt.sx - 6 - tw, pt.sy - 13],
+        [pt.sx - 6 - tw, pt.sy + 1],
       ];
       const [tx, ty] = spots.reduce((best, sp) => (hit(sp[0], sp[1]) < hit(best[0], best[1]) ? sp : best));
-      ringTags.push({ x: tx, y: ty, w: tw, h: 13 });
-      ctx.fillStyle = 'rgba(13,14,20,0.88)';
-      ctx.fillRect(tx, ty, tw, 13);
-      ctx.fillStyle = idColour(pt);
+      ringTags.push({ x: tx, y: ty, w: tw, h: 12 });
+      ctx.fillStyle = 'rgba(13,14,20,0.78)';
+      ctx.fillRect(tx, ty, tw, 12);
+      ctx.fillStyle = ringColour(pt) === RING_GREY ? THEME.muted : ringColour(pt);
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
-      ctx.fillText(tag, tx + 3, ty + 7);
-      geom.marks.push({ member: pt.member, box: { x: tx, y: ty, w: tw, h: 13 }, kind: 'label' });
+      ctx.fillText(tag, tx + 3, ty + 6.5);
+      geom.marks.push({ member: pt.member, box: { x: tx, y: ty, w: tw, h: 12 }, kind: 'label' });
     }
-    geom.markers = markers.map(({ pt, kind, nudge }) => ({ member: pt.member, kind, x: pt.sx, y: pt.sy, nudge }));
+    geom.markers = markers.map(({ pt, kind, nudge, leader }) => ({
+      member: pt.member,
+      kind,
+      x: pt.sx,
+      y: pt.sy,
+      nudge,
+      leader,
+      box: { x: pt.tx! - thumbW / 2, y: pt.ty! - thumbH / 2, w: thumbW, h: thumbH },
+    }));
     ctx.restore();
     SX.drawForeground(ctx, { a, b, out: layout.out, key: layoutKey(a), d: disp, t, points: shown, plot, thumbW, thumbH, lod });
     // Caption: what the picture is and is not.
@@ -630,12 +664,13 @@ export async function drawSpace(light = false): Promise<void> {
     const zoomNote = M.state.space ? ` · layout zoom ${M.state.space.s.toFixed(1)}×` : '';
     const cropNote = M.state.zoom ? ` · anatomy crop ${M.state.zoom.s.toFixed(1)}× (set in Montage)` : '';
     const stressNote = Number.isFinite(res.stress1) ? `${res.method === 'metric-smacof' ? 'metric ' : ''}Stress-1 ${fmtStress(res.stress1)} · ` : '';
-    const rings = geom.markers?.filter((mk) => mk.kind === 'ring').length ?? 0;
-    const slight = geom.slightNudge?.n ?? 0;
-    const moved = (geom.nudged ?? 0) + slight;
-    const nudgeNote = moved
-      ? ` · ${moved} ${moved === 1 ? 'picture' : 'pictures'} nudged apart${geom.nudged ? `: dots mark exact positions${rings ? ', rings those inside another picture' : ''}` : ''}${slight ? `; ${slight} moved ≤ ${geom.slightNudge!.px} px ${slight === 1 ? 'is' : 'are'} unmarked` : ''}`
-      : '';
+    const nudgeNote = nudgeCaption({
+      dots: geom.markers?.filter((mk) => mk.kind === 'dot').length ?? 0,
+      rings: geom.markers?.filter((mk) => mk.kind === 'ring').length ?? 0,
+      own: geom.inOwn ?? 0,
+      slight: geom.slightNudge?.n ?? 0,
+      slightPx: geom.slightNudge?.px ?? 0,
+    });
     ctx.fillText(M.truncate(ctx, `${stressNote}${m} placed${nudgeNote}${zoomNote}${cropNote}`, plot.w), plot.x + plot.w, plot.y + plot.h + (stripH ? footH + 4 : pad - 2));
   }
   M.drawOverlay();
@@ -674,7 +709,8 @@ function spaceOverlayBody(ctx: CanvasRenderingContext2D, W: number, H: number): 
   if (sp) {
     ctx.save();
     ctx.strokeStyle = THEME.accent;
-    ctx.globalAlpha = 0.8;
+    // Quieter while Explain shows the focused map's z picture, whose cyan/violet ramp would compete with the links.
+    ctx.globalAlpha = SX.opts.explain === 'focused' ? 0.3 : 0.8;
     ctx.lineWidth = 1.25;
     ctx.setLineDash([4, 3]);
     for (const id of spaceNeighborIds) {
@@ -687,6 +723,62 @@ function spaceOverlayBody(ctx: CanvasRenderingContext2D, W: number, H: number): 
     }
     ctx.restore();
   }
+  // Side by side: the focused and hovered maps are named under their picture in every panel.
+  g.panelLabels = [];
+  if (SX.trajectoryMode() && g.lod === 'thumbs') {
+    const named = [M.state.subject, spaceHover].filter((x, i, arr): x is string => !!x && arr.indexOf(x) === i);
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    for (const id of named) {
+      const mm = a.ids.indexOf(id);
+      const isSel = id === M.state.subject;
+      ctx.font = `${isSel ? '600 ' : ''}10px ${FONT.mono}`;
+      const tw = ctx.measureText(id).width + 6;
+      for (const mk of g.marks) {
+        if (mk.member !== mm || mk.kind !== 'thumb') continue;
+        const cx = mk.box.x + mk.box.w / 2;
+        const by = mk.box.y + mk.box.h;
+        ctx.fillStyle = isSel ? 'rgba(30,27,52,0.95)' : 'rgba(13,14,20,0.9)';
+        ctx.fillRect(cx - tw / 2, by - 12, tw, 12);
+        ctx.fillStyle = isSel ? THEME.brand : THEME.text;
+        ctx.fillText(id, cx, by);
+        g.panelLabels.push([id, cx, by]);
+      }
+    }
+    ctx.restore();
+  }
+  // Hovering a map (its picture, ID, ring or ring tag) brings out its leader and its own picture, so a ring on
+  // another map's picture is easy to trace home.
+  const hovMk = spaceHover === null ? undefined : g.markers?.find((mk) => a.ids[mk.member] === spaceHover);
+  if (hovMk) {
+    ctx.save();
+    if (hovMk.leader) {
+      const [x0, y0, x1, y1] = hovMk.leader;
+      for (const [width, color] of [
+        [4, 'rgba(13,14,20,0.9)'],
+        [1.5, THEME.text],
+      ] as const) {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = width;
+        ctx.beginPath();
+        ctx.moveTo(x0, y0);
+        ctx.lineTo(x1, y1);
+        ctx.stroke();
+      }
+    }
+    ctx.strokeStyle = THEME.text;
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(hovMk.box.x - 1, hovMk.box.y - 1, hovMk.box.w + 2, hovMk.box.h + 2);
+    if (hovMk.kind === 'ring') {
+      ctx.beginPath();
+      ctx.arc(hovMk.x, hovMk.y, RING_R, 0, Math.PI * 2);
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+    ctx.restore();
+    g.hoverHighlight = a.ids[hovMk.member];
+  } else g.hoverHighlight = null;
   // Rail hover in mark mode: ring the anchor.
   if (M.railHover && g.lod === 'marks') {
     const q = byMember.get(a.ids.indexOf(M.railHover));
@@ -699,6 +791,8 @@ function spaceOverlayBody(ctx: CanvasRenderingContext2D, W: number, H: number): 
   }
   // The docked preview shows the hovered (or keyboard-focused) map, else the focused map.
   const shownId = spaceEnlarged ?? (dock ? M.state.subject : null);
+  // The open Peek already shows this map larger: no second copy in the dock.
+  if (shownId !== null && shownId === M.peekSubject()) return;
   const m = shownId === null ? -1 : a.ids.indexOf(shownId);
   if (m < 0) return;
   const anchor = byMember.get(m);
@@ -915,6 +1009,22 @@ export function exposeSpaceProbe(): void {
     get preview() {
       return spaceGeom?.zoomBox?.box ?? null;
     },
+    /** Pictures moved beyond the marking threshold whose exact position lies inside their own picture (counted, not marked). */
+    get inOwn() {
+      return spaceGeom?.inOwn ?? 0;
+    },
+    /** Side by side: footer text naming the layout the positions come from (null in the single view). */
+    get sideFooter() {
+      return spaceGeom?.sideFooter?.text ?? null;
+    },
+    /** Side by side: IDs labelled in each panel by the overlay (focused and hovered), as [id, x, y]. */
+    get panelLabels() {
+      return spaceGeom?.panelLabels ?? [];
+    },
+    /** Map whose leader and own picture are highlighted on hover, or null. */
+    get hoverHighlight() {
+      return spaceGeom?.hoverHighlight ?? null;
+    },
     /** Captions drawn over the layout (canvas px). */
     get captions() {
       return spaceGeom?.captions ?? [];
@@ -1065,7 +1175,7 @@ export function spaceSection(a: M.Analysis): string {
     <section>
       <h3>Layout <span class="sub">${placedN} of ${a.set.size} placed</span></h3>
       ${layout?.kind === 'ready' ? `<p class="trust">${trustLine(a)}</p>` : fit}
-      <p class="note">Positions summarise ${scopeLong(a)} and stay fixed while you change slice, threshold, smoothing or cluster filter. Pictures are nudged apart to avoid overlap; a dot marks each moved picture's exact position, or a ring where that position falls inside another picture. Neither axis has a meaning; for who resembles whom, use the Neighbours table.</p>
+      <p class="note">Positions summarise ${scopeLong(a)} and stay fixed while you change slice, threshold, smoothing or cluster filter. Pictures are nudged apart to avoid overlap; a dot marks each moved picture's exact position, or a small ring where that position falls inside another picture; a position still inside the map's own picture is not marked (the caption counts these). Neither axis has a meaning; for who resembles whom, use the Neighbours table.</p>
       <details class="fit-details"${layout?.kind === 'ready' ? '' : ' open'}><summary>How the layout was fitted</summary>
         <dl class="fx">
           <dt>Similarity</dt><dd>signed Pearson r of raw ${M.STAT_LABEL[M.state.stat]}-maps on the common support (${support}); ${isCorrected(a) ? 'noise-corrected: r ÷ √(ρᵢρⱼ) (Spearman), clamped to ±1, maps with ρ < .1 set aside; dissimilarity 1 − corrected r' : 'dissimilarity 1 − r'}</dd>

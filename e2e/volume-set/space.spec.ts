@@ -911,13 +911,14 @@ interface StageProbe {
   marks: (Box & { id: string; kind: 'thumb' | 'dot' | 'label' })[];
   markers: { id: string; kind: 'dot' | 'ring'; x: number; y: number; nudge: number }[];
   nudged: number;
+  inOwn: number;
   captions: Box[];
 }
 
 const stage = (page: Page): Promise<StageProbe> =>
   page.evaluate(() => {
     const p = (window as unknown as { __vsSpace: Record<string, unknown> }).__vsSpace;
-    return { placed: p.placed, marks: p.marks, markers: p.markers, nudged: p.nudged, captions: p.captions } as unknown as StageProbe;
+    return { placed: p.placed, marks: p.marks, markers: p.markers, nudged: p.nudged, inOwn: p.inOwn, captions: p.captions } as unknown as StageProbe;
   });
 
 const overlap = (a: Box, b: Box): number => {
@@ -931,9 +932,9 @@ test.describe('Space stage: exact positions, captions and toolbar', () => {
     { width: 1600, height: 1000 },
     { width: 1280, height: 800 },
   ])
-    test(`every noticeably nudged picture keeps a visible exact-position marker (${vp.width}x${vp.height})`, async ({ page }) => {
-      // Regression: a dot that fell inside another map's picture used to be dropped with its leader, hiding
-      // that map's exact position, and the caption's count left it out.
+    test(`every noticeably nudged picture is marked or counted, never dotted on its own brain (${vp.width}x${vp.height})`, async ({ page }) => {
+      // Regressions: a dot that fell inside another map's picture used to be dropped with its leader, hiding
+      // that map's exact position; and a dot inside the map's own picture read as a mark on the brain.
       await page.setViewportSize(vp);
       await open(page, SPACE);
       await settle(page);
@@ -942,20 +943,26 @@ test.describe('Space stage: exact positions, captions and toolbar', () => {
       expect(pics.length).toBeGreaterThan(5);
       const byId = new Map(s.markers.map((m) => [m.id, m]));
       let moved = 0;
+      let own = 0;
       for (const pic of pics) {
         const q = s.placed.find((p) => p.id === pic.id)!;
         const d = Math.hypot(pic.x + pic.w / 2 - q.x, pic.y + pic.h / 2 - q.y);
         if (d <= Math.max(4, pic.w * 0.2) + 0.5) continue;
         moved++;
         const mk = byId.get(pic.id);
-        expect(mk, `${pic.id} moved ${d.toFixed(0)} px with no marker`).toBeTruthy();
-        // A position inside another picture is marked by a ring; elsewhere by a dot.
-        const inOther = pics.some((o) => o.id !== pic.id && Math.abs(q.x - (o.x + o.w / 2)) < o.w / 2 && Math.abs(q.y - (o.y + o.h / 2)) < o.h / 2);
-        if (inOther) expect(mk!.kind, `${pic.id}'s position lies inside another picture`).toBe('ring');
+        const inBox = (o: Box, m: number): boolean => Math.abs(q.x - (o.x + o.w / 2)) < o.w / 2 + m && Math.abs(q.y - (o.y + o.h / 2)) < o.h / 2 + m;
+        const inOther = pics.some((o) => o.id !== pic.id && inBox(o, 2));
+        if (inOther) expect(mk?.kind, `${pic.id}'s position lies inside another picture`).toBe('ring');
+        else if (inBox(pic, 1)) {
+          expect(mk, `${pic.id}'s position lies inside its own picture: no dot`).toBeUndefined();
+          own++;
+        } else if (!inBox(pic, 3)) expect(mk?.kind, `${pic.id} moved ${d.toFixed(0)} px onto open ground with no dot`).toBe('dot');
       }
       expect(moved).toBeGreaterThan(0); // the synthetic layout is crowded enough to nudge pictures
-      expect(s.nudged).toBe(s.markers.length);
-      expect(s.markers.length).toBeGreaterThanOrEqual(moved);
+      // Every nudged picture is either marked or counted as over its own picture.
+      expect(s.nudged).toBe(s.markers.length + s.inOwn);
+      expect(s.nudged).toBeGreaterThanOrEqual(moved);
+      expect(s.inOwn).toBeGreaterThanOrEqual(own);
       // Selecting a map moves no picture.
       const before = pics.map((p) => `${p.id}:${p.x.toFixed(1)},${p.y.toFixed(1)}`).sort();
       await page.click('.space-members button:has-text("s05")');
@@ -1011,5 +1018,49 @@ test.describe('Space stage: exact positions, captions and toolbar', () => {
     for (const h of heights) expect(h).toBeLessThan(lineH * 1.8);
     // The full pair is kept in the title.
     expect(await section.locator('td[title]').first().getAttribute('title')).toContain(' × ');
+  });
+});
+
+test.describe('Space v30: quiet marks, analysis colours, parcel bars, side by side', () => {
+  test("hovering a map's exact-position mark highlights its leader and its own picture", async ({ page }) => {
+    await open(page, SPACE);
+    const s = await stage(page);
+    const mk = s.markers[0];
+    expect(mk, 'the synthetic layout has at least one marked nudge').toBeTruthy();
+    const box = (await page.locator('canvas.montage').boundingBox())!;
+    await page.mouse.move(box.x + mk.x, box.y + mk.y);
+    await page.waitForFunction((id) => (window as unknown as { __vsSpace: { hoverHighlight: string | null } }).__vsSpace.hoverHighlight === id, mk.id, { timeout: 5_000 });
+  });
+
+  test('analysis marks never use the pure focus or neighbour colours, and the parcel brush says its sign and length scale', async ({ page }) => {
+    await open(page, `${SPACE}&sc=rel`);
+    const pure = ['rgb(155, 134, 255)', 'rgb(34, 211, 238)'];
+    const rel = await page.locator('#side .chan-legend i').evaluateAll((els) => els.map((e) => getComputedStyle(e).backgroundColor));
+    expect(rel.length).toBeGreaterThan(2);
+    for (const c of rel) expect(pure).not.toContain(c);
+    await page.goto(`/?${SPACE}&sc=parcel:3`);
+    await expect(page.locator('#side')).toContainText('Bar length: |mean z| from 0', { timeout: 30_000 });
+    const text = await page.locator('#side').innerText();
+    expect(/All positive|All negative|Violet above 0, cyan below/.test(text)).toBe(true);
+    const sw = await page.locator('#side .chan-legend i').evaluateAll((els) => els.map((e) => getComputedStyle(e).backgroundColor));
+    for (const c of sw) expect(pure).not.toContain(c);
+  });
+
+  test('side by side: no frames or headroom, IDs of the focused and hovered maps in every panel, and a stress footer', async ({ page }) => {
+    await open(page, `${SPACE}&st=1&subject=s03`);
+    await expect(page.locator('#side')).toContainText('Across contrasts', { timeout: 60_000 });
+    await settle(page);
+    const footer = await page.evaluate(() => (window as unknown as { __vsSpace: { sideFooter: string | null } }).__vsSpace.sideFooter);
+    expect(footer).toMatch(/^Positions from the cue layout: (metric )?Stress-1 \.\d{3}/);
+    const thumbs = (await probe(page)).thumbs.filter((t) => t.id !== 'mean' && t.contrast === 'delayearly');
+    // Panels start at the toolbar strip (y 50) with a 20 px header and an 8 px inset: no large empty headroom.
+    expect(Math.min(...thumbs.map((t) => t.dest.y)) - 50).toBeLessThan(45);
+    const t = thumbs.find((x) => x.id === 's09')!;
+    const box = (await page.locator('canvas.montage').boundingBox())!;
+    await page.mouse.move(box.x + t.dest.x + t.dest.w / 2, box.y + t.dest.y + t.dest.h / 2);
+    await page.waitForFunction(() => {
+      const l = (window as unknown as { __vsSpace: { panelLabels: [string, number, number][] } }).__vsSpace.panelLabels;
+      return l.filter((x) => x[0] === 's09').length === 3 && l.filter((x) => x[0] === 's03').length === 3;
+    }, null, { timeout: 5_000 });
   });
 });

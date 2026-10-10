@@ -58,14 +58,51 @@ export function closePeek(): void {
   hoverIjk = null;
   el?.remove();
   el = null;
+  tether?.remove();
+  tether = null;
+}
+
+/** The subject the open peek shows, or null (lets the Space dock skip a duplicate of the same map). */
+export function peekSubject(): string | null {
+  return peek?.subject ?? null;
 }
 
 /** Client-space centre of a subject's picture in the current Space drawing (null if it is not drawn). */
-function pictureCentre(subject: string): { x: number; y: number } | null {
+function pictureCentre(subject: string, contrast: string = M.state.contrast): { x: number; y: number } | null {
   const cv = document.querySelector('#view canvas')?.getBoundingClientRect();
   if (!cv) return null;
-  const h = M.hits.find((q) => q.member !== 'mean' && q.analysis.contrast === M.state.contrast && String(q.analysis.set.members[q.member].meta.subject) === subject);
+  const h = M.hits.find((q) => q.member !== 'mean' && q.analysis.contrast === contrast && String(q.analysis.set.members[q.member].meta.subject) === subject);
   return h ? { x: cv.left + h.view.dest.x + h.view.dest.w / 2, y: cv.top + h.view.dest.y + h.view.dest.h / 2 } : null;
+}
+
+let tether: SVGSVGElement | null = null;
+/** A hairline from the panel's nearest edge to the centre of the picture it shows (hidden if that is not drawn). */
+function updateTether(): void {
+  if (!peek || !el) return;
+  if (!tether) {
+    tether = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    tether.id = 'peek-tether';
+    tether.setAttribute('aria-hidden', 'true');
+    tether.innerHTML = '<line stroke="#9b86ff" stroke-width="1" stroke-opacity="0.75"/><circle r="3" fill="none" stroke="#9b86ff" stroke-width="1.25"/>';
+    document.body.appendChild(tether);
+  }
+  const c = pictureCentre(peek.subject, peek.contrast ?? M.state.contrast);
+  const r = el.getBoundingClientRect();
+  const line = tether.querySelector('line')!;
+  const dot = tether.querySelector('circle')!;
+  if (!c || (c.x >= r.left && c.x <= r.right && c.y >= r.top && c.y <= r.bottom)) {
+    tether.style.display = 'none';
+    return;
+  }
+  tether.style.display = '';
+  const px = Math.max(r.left, Math.min(r.right, c.x));
+  const py = Math.max(r.top, Math.min(r.bottom, c.y));
+  line.setAttribute('x1', String(px));
+  line.setAttribute('y1', String(py));
+  line.setAttribute('x2', String(c.x));
+  line.setAttribute('y2', String(c.y));
+  dot.setAttribute('cx', String(c.x));
+  dot.setAttribute('cy', String(c.y));
 }
 
 /** P key: open the peek on a subject (at the shared cursor's plane), or close it if it already shows that subject. */
@@ -116,7 +153,7 @@ function ensureEl(): HTMLDivElement {
     <div class="peek-head">
       <span class="peek-id"></span><span class="peek-meta"></span>
       <span class="peek-orient seg" role="group" aria-label="Peek plane">${ORIENT_KEYS.map(([o, k]) => `<button data-peek-orient="${o}" title="${M.ORIENT_NAME[o]}">${k}</button>`).join('')}</span>
-      <button class="ghost peek-ortho" title="Open this map in Ortho at the cursor">Ortho</button>
+      <button class="ghost peek-ortho" title="Open this map in Ortho at the cursor" aria-label="Open in Ortho"><span class="wide">Ortho</span><span class="short">↗</span></button>
       <button class="ghost peek-close" aria-label="Close (Esc)" title="Close (Esc)">×</button>
     </div>
     <canvas class="peek-img"></canvas>
@@ -255,6 +292,8 @@ async function draw(): Promise<void> {
   const cv = el.querySelector<HTMLCanvasElement>('.peek-img')!;
   // Fixed panel width: long readouts truncate rather than resize the panel.
   el.style.width = `${W + 18}px`; // 8 px padding + 1 px border each side (border-box)
+  // A narrow panel (short stage) keeps every control: the meta text goes and "Ortho" becomes an arrow.
+  el.classList.toggle('narrow', W < 260);
   const ctx = hidpi(cv, W, H);
   ctx.clearRect(0, 0, W, H);
   const v = placeCrop(crop, { x: Math.floor((W - pw) / 2), y: Math.floor((H - ph) / 2), w: pw, h: ph }, pl.rel);
@@ -286,14 +325,17 @@ async function draw(): Promise<void> {
     const mm = (set.space.gridToCoord([...at]) as number[]).map((w) => fmt(w, 1)).join(', ');
     read.textContent = `${M.STAT_LABEL[M.state.stat] ?? M.state.stat} ${Number.isFinite(val) ? fmt(val, 2) : '–'} at ${mm} mm${hoverIjk ? '' : ' (cursor)'}`;
   } else read.textContent = 'Click: cursor · Double-click: Ortho · Wheel: slice · Esc';
+  updateTether();
   (window as unknown as { __vsPeek?: unknown }).__vsPeek = { subject: p.subject, orient: p.orient, slice: p.slice, n, view: { ...v.dest } };
 }
 
 /**
- * Where the panel covers the fewest pictures: never the one it shows (weighted heavily), then other maps,
- * with a mild pull towards the source and, when retargeting, towards where it already is. Always inside the
- * Space stage, so it never covers the side panel.
+ * Where to put the panel, inside the Space stage (never over the side panel): the nearest spot that covers no
+ * picture, if one is within NEAR px of the clicked picture; otherwise the spot that best trades covered picture
+ * area (its own picture weighted heavily) against distance. On a retarget it stays put while it still covers
+ * nothing and is still near, so browsing maps does not make it jump. A tether joins it to its picture.
  */
+const NEAR = 260;
 function place(box: HTMLDivElement, anchor: { x: number; y: number }, retarget: boolean): void {
   const r = box.getBoundingClientRect();
   const st = document.querySelector('#view')?.getBoundingClientRect() ?? new DOMRect(0, 0, window.innerWidth, window.innerHeight);
@@ -304,40 +346,54 @@ function place(box: HTMLDivElement, anchor: { x: number; y: number }, retarget: 
     const isSource = anchor.x >= rect.x && anchor.x < rect.x + rect.w && anchor.y >= rect.y && anchor.y < rect.y + rect.h;
     return { ...rect, weight: isSource ? 6 : h.member === 'mean' ? 0.5 : 1 };
   });
-  const cost = (x: number, y: number): number => {
+  const covered = (x: number, y: number): number => {
     let c = 0;
     for (const o of obstacles) {
       const ox = Math.max(0, Math.min(x + r.width, o.x + o.w) - Math.max(x, o.x));
       const oy = Math.max(0, Math.min(y + r.height, o.y + o.h) - Math.max(y, o.y));
       c += ox * oy * o.weight;
     }
-    const dx = Math.max(0, x - anchor.x, anchor.x - (x + r.width));
-    const dy = Math.max(0, y - anchor.y, anchor.y - (y + r.height));
-    return c + 12 * Math.hypot(dx, dy);
+    return c;
   };
+  const dist = (x: number, y: number): number => Math.hypot(Math.max(0, x - anchor.x, anchor.x - (x + r.width)), Math.max(0, y - anchor.y, anchor.y - (y + r.height)));
   const x0 = st.left + 8;
   const y0 = st.top + 8;
   const x1 = Math.max(x0, st.right - r.width - 8);
   const y1 = Math.max(y0, st.bottom - r.height - 8);
   const clamp = (x: number, y: number): [number, number] => [Math.max(x0, Math.min(x1, x)), Math.max(y0, Math.min(y1, y))];
-  let best = clamp(anchor.x + 28, anchor.y - r.height / 2);
-  let bestCost = cost(...best);
-  const consider = (x: number, y: number, bias = 0): void => {
-    const [cx, cy] = clamp(x, y);
-    const c = cost(cx, cy) + bias;
-    if (c < bestCost) {
-      best = [cx, cy];
-      bestCost = c;
+  const spots: [number, number][] = [clamp(anchor.x + 28, anchor.y - r.height / 2), clamp(anchor.x - 28 - r.width, anchor.y - r.height / 2)];
+  const step = 12;
+  for (let y = y0; y <= y1; y += step) for (let x = x0; x <= x1; x += step) spots.push(clamp(x, y));
+  let best: [number, number] | null = null;
+  if (retarget) {
+    const here = clamp(r.left, r.top);
+    if (covered(...here) === 0 && dist(...here) <= NEAR) best = here;
+  }
+  if (!best) {
+    let bd = Infinity;
+    for (const sp of spots) {
+      const d = dist(...sp);
+      if (d < bd && d <= NEAR && covered(...sp) === 0) {
+        bd = d;
+        best = sp;
+      }
     }
-  };
-  // Staying put wins unless moving clearly uncovers pictures (≈ half a thumbnail), so browsing does not make it jump.
-  if (retarget) consider(r.left, r.top, -4000);
-  consider(anchor.x - 28 - r.width, anchor.y - r.height / 2);
-  const step = 16;
-  for (let y = y0; y <= y1; y += step) for (let x = x0; x <= x1; x += step) consider(x, y);
-  box.style.left = `${best[0]}px`;
-  box.style.top = `${best[1]}px`;
+  }
+  if (!best) {
+    // No free spot nearby: accept some overlap rather than a far-away panel (40 px² of picture per px of distance).
+    let bc = Infinity;
+    for (const sp of spots) {
+      const c = covered(...sp) + 40 * dist(...sp);
+      if (c < bc) {
+        bc = c;
+        best = sp;
+      }
+    }
+  }
+  box.style.left = `${best![0]}px`;
+  box.style.top = `${best![1]}px`;
   clampToViewport(box);
+  updateTether();
 }
 
 /** Keep the panel inside the Space stage (so it never covers the side panel), and inside the window. */
@@ -369,6 +425,7 @@ function dragByHead(box: HTMLDivElement): void {
     box.style.left = `${start.l + e.clientX - start.x}px`;
     box.style.top = `${start.t + e.clientY - start.y}px`;
     clampToViewport(box);
+    updateTether();
   });
   head.addEventListener('pointerup', () => {
     if (start) clampToViewport(box);

@@ -314,24 +314,29 @@ export function maxOverlap(pts: readonly { x: number; y: number }[], w: number, 
 export interface PositionMarker {
   /** Index into the anchors/centres passed in. */
   index: number;
-  /** 'dot' on open ground or the map's own picture; 'ring' when the exact position lies inside another picture. */
-  kind: 'dot' | 'ring';
+  /**
+   * 'dot' on open ground; 'ring' when the exact position lies inside another map's picture; 'own' when it still
+   * lies inside the map's own picture (not drawn, since a dot there reads as a mark on the brain; counted instead).
+   */
+  kind: 'dot' | 'ring' | 'own';
   /** Distance (px) from the exact position to the picture centre. */
   nudge: number;
 }
 
 /**
  * Exact-position markers for nudged pictures (boxes w × h centred at `centres`). Every picture moved more
- * than `minNudge` from its anchor gets one, so no exact position is ever hidden: a dot, or a ring when the
- * anchor lies inside another map's picture (a plain dot there would read as a mark on that map).
+ * than `minNudge` from its anchor gets one, so no exact position is unaccounted for: a dot on open ground, a
+ * ring when the anchor lies inside another map's picture (a plain dot there would read as a mark on that map),
+ * or 'own' when the anchor still lies inside the map's own picture (left undrawn and counted).
  */
 export function positionMarkers(anchors: readonly { x: number; y: number }[], centres: readonly { x: number; y: number }[], w: number, h: number, minNudge: number): PositionMarker[] {
   const out: PositionMarker[] = [];
+  const inBox = (p: { x: number; y: number }, c: { x: number; y: number }): boolean => Math.abs(p.x - c.x) < w / 2 && Math.abs(p.y - c.y) < h / 2;
   for (let i = 0; i < anchors.length; i++) {
     const nudge = Math.hypot(centres[i].x - anchors[i].x, centres[i].y - anchors[i].y);
     if (!(nudge > minNudge)) continue;
-    const foreign = centres.some((c, j) => j !== i && Math.abs(anchors[i].x - c.x) < w / 2 && Math.abs(anchors[i].y - c.y) < h / 2);
-    out.push({ index: i, kind: foreign ? 'ring' : 'dot', nudge });
+    const foreign = centres.some((c, j) => j !== i && inBox(anchors[i], c));
+    out.push({ index: i, kind: foreign ? 'ring' : inBox(anchors[i], centres[i]) ? 'own' : 'dot', nudge });
   }
   return out;
 }
@@ -401,4 +406,16 @@ export function shortContrastNames(names: readonly string[]): string[] {
     return cut >= 3 && cut < c.length ? c.slice(cut) : c;
   });
   return new Set(out).size === out.length && !out.some((x, i) => x !== names[i] && names.includes(x)) ? out : [...names];
+}
+
+/**
+ * Caption for nudged pictures: how many moved, which are marked (dots, rings) and which are only counted
+ * (position still inside the map's own picture, or moved too little to mark). Empty when nothing moved.
+ */
+export function nudgeCaption(n: { dots: number; rings: number; own: number; slight: number; slightPx: number }): string {
+  const moved = n.dots + n.rings + n.own + n.slight;
+  if (!moved) return '';
+  const marked = [n.dots ? 'dots mark exact positions' : '', n.rings ? 'rings those inside another picture' : ''].filter(Boolean).join(', ');
+  const unmarked = [n.own ? `${n.own} still over ${n.own === 1 ? 'its' : 'their'} own picture` : '', n.slight ? `${n.slight} moved ≤ ${n.slightPx} px` : ''].filter(Boolean).join(', ');
+  return ` · ${moved} ${moved === 1 ? 'picture' : 'pictures'} nudged apart${marked ? `: ${marked}` : ''}${unmarked ? `; unmarked: ${unmarked}` : ''}`;
 }

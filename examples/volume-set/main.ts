@@ -917,8 +917,11 @@ function ensureCanvas(): HTMLCanvasElement {
       const lbl = SV.markAt(e.clientX - r.left, e.clientY - r.top, true);
       const mk = h || lbl !== null ? null : SV.markAt(e.clientX - r.left, e.clientY - r.top);
       const m = lbl ?? (h && h.hit.member !== 'mean' ? h.hit.member : mk);
+      // Over an ID, ring or dot the highlight belongs to that map (drawn by Space), not to the picture beneath.
+      if (lbl !== null) hover = null;
       c.style.cursor = lbl !== null || (!h && mk !== null) ? 'pointer' : h ? 'crosshair' : 'grab';
-      SV.setSpaceHover(m);
+      // While a peek is open it is the enlarged view: no hover enlargement on top of it.
+      SV.setSpaceHover(P.isPeekOpen() ? null : m);
     }
     updateReadout();
     scheduleDraw(true);
@@ -972,6 +975,7 @@ function ensureCanvas(): HTMLCanvasElement {
       state.cursor = h.ijk;
       if (h.hit.member !== 'mean') state.subject = String(h.hit.analysis.set.members[h.hit.member].meta.subject);
       // Space: a click on a picture also opens that map in the peek, at the clicked voxel's plane.
+      if (state.mode === 'space' && h.hit.member !== 'mean') SV.setSpaceHover(null);
       if (state.mode === 'space' && h.hit.member !== 'mean') P.openPeek(state.subject!, String(h.hit.analysis.set.members[h.hit.member].meta.contrast), h.ijk, { x: e.clientX, y: e.clientY });
       if (state.sort === 'cursor') void render();
       else scheduleDraw();
@@ -1560,6 +1564,11 @@ function updateOrthoHead(a: Analysis, order: number[], cur: number): void {
     ${atlas && state.cursor ? `<span class="kv parcel">${atlasLabel(state.cursor)}</span>` : ''}
     <span class="hint">← → subjects · Esc back</span>`;
   (head.querySelector('.back') as HTMLButtonElement).onclick = () => goBack();
+}
+
+/** The subject shown in the open peek (null when closed); Space skips a duplicate dock preview of it. */
+export function peekSubject(): string | null {
+  return P.peekSubject();
 }
 
 /** Move the one shared cursor to a voxel; the shared slice follows it so the set views stay on the cursor's plane. */
@@ -2219,6 +2228,7 @@ async function main(): Promise<void> {
       }
       if ((e.key === 'p' || e.key === 'P') && state.subject) {
         // Keyboard route to the peek: the focused map at the shared cursor (or its plane's centre).
+        SV.setSpaceHover(null);
         P.togglePeekFor(state.subject);
         return;
       }

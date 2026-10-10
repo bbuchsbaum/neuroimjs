@@ -17,7 +17,7 @@ import { kde2d, densityLevels, isoContours, gridToLayout } from '../../src/volum
 import { stressShares } from '../../src/volumeset/fitShares';
 import type { Ellipse } from '../../src/volumeset/stability';
 import type { NmdsOptions } from '../../src/volumeset/nmds';
-import { THEME, FONT, fmt, hidpi, placeCrop, drawCellImage, drawCrosshair, thresholdedDiverging, simRamp } from './render';
+import { THEME, FONT, fmt, hidpi, placeCrop, drawCellImage, drawCrosshair, thresholdedDiverging } from './render';
 import { fetchCovariates, type Covariates } from './data';
 import type { EmbedOutput } from './embed-runner';
 import { spaceTransform, thumbSize, declutter, maxOverlap, zoomAbout, captionCandidates, freeSpot, shortContrastNames, type SpaceTransform, type PlotRect, type Lod, type LabelBox } from './space';
@@ -111,13 +111,16 @@ const SUBSET = '#7ee0a6';
 /** Halos and stability use one neutral hue: not a t colour, not the brand, not the cursor cyan. */
 const NEUTRAL = '205,208,228';
 // Mark colours stay clear of the statistic's ramps (red–orange–yellow positive, blue negative), so a bar
-// never reads as a t or β value. Violet (the focus colour) comes last among the categories.
-const CATEGORY_COLOURS = ['#22d3ee', '#e879f9', '#a3e635', '#d4d6e6', '#99f6e4', '#9b86ff'];
-/** Sequential violet (the similarity ramp, lifted off the background so the lowest value still shows): 0..1. */
-const SEQUENTIAL = (t: number): chroma.Color => simRamp(0.18 + 0.82 * Math.max(0, Math.min(1, t)));
-/** Diverging cyan (negative) – neutral grey (0) – violet (positive) for signed marks such as the parcel brush. */
-// Lightness rises from the grey centre toward both ends (which keep their hue), so magnitude reads as well as sign.
-const DIVERGING = chroma.scale(['#8eeefb', '#22d3ee', '#16697a', '#4a4d5e', '#5a4aa8', '#9b86ff', '#cdc2ff']).mode('lch');
+// never reads as a t or β value, and of the pure interaction colours (violet #9b86ff = focus, cyan #22d3ee =
+// neighbours and crosshair): analysis layers use desaturated violet and cyan end-points only.
+const CATEGORY_COLOURS = ['#7fc8d6', '#e879f9', '#a3e635', '#d4d6e6', '#a99be6', '#94a3b8'];
+/** Analysis violet (above / more) and cyan (below), from a dark tone that still shows on the ground to a pale end. */
+const ANALYSIS_VIOLET = ['#3a3560', '#6f63b8', '#d9d2ff'];
+const ANALYSIS_CYAN = ['#2a4750', '#3a8fa0', '#bfeef7'];
+const POS_RAMP = chroma.scale(ANALYSIS_VIOLET).mode('lch');
+const NEG_RAMP = chroma.scale(ANALYSIS_CYAN).mode('lch');
+/** Sequential analysis ramp (reliability, numeric covariates): 0..1, dark violet to pale violet. */
+const SEQUENTIAL = (t: number): chroma.Color => POS_RAMP(Math.max(0, Math.min(1, t)));
 const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 
 // ---------------------------------------------------------------------------
@@ -586,7 +589,7 @@ export function memberColour(a: M.Analysis, member: number): string | 'missing' 
     const pz = brushedValues(a);
     const v = pz?.values.get(member);
     if (v === undefined || !Number.isFinite(v)) return 'missing';
-    return brushColour(v, pz!.range);
+    return brushColour(v, pz!);
   }
   if (opts.colour === 'cursor') {
     const v = cursorValue(a, member);
@@ -608,8 +611,28 @@ export function memberColour(a: M.Analysis, member: number): string | 'missing' 
   return CATEGORY_COLOURS[cats.indexOf(String(v)) % CATEGORY_COLOURS.length];
 }
 
-/** Draw a mark: a bar along the bottom of a picture rect (thumbnails) or a ring around a dot (marks). */
-export function drawMemberColour(ctx: CanvasRenderingContext2D, colour: string, rect: { x: number; y: number; w: number; h: number } | null, dot: [number, number] | null): void {
+/**
+ * Magnitude of a member's mark as a fraction of the largest (0..1), shown as bar length; null when the channel
+ * has no magnitude (only the parcel brush has one: |mean z| from 0 to the largest observed).
+ */
+export function memberFraction(a: M.Analysis, member: number): number | null {
+  if (!opts.colour.startsWith('parcel:')) return null;
+  const pz = brushedValues(a);
+  const v = pz?.values.get(member);
+  return pz && v !== undefined && Number.isFinite(v) ? Math.min(1, Math.abs(v) / pz.range) : null;
+}
+
+/**
+ * Draw a mark: a bar along the bottom of a picture rect (thumbnails) or a ring around a dot (marks). With
+ * `fraction`, the bar is that share of a faint full-width track, so magnitude reads as length.
+ */
+export function drawMemberColour(
+  ctx: CanvasRenderingContext2D,
+  colour: string,
+  rect: { x: number; y: number; w: number; h: number } | null,
+  dot: [number, number] | null,
+  fraction: number | null = null
+): void {
   ctx.save();
   if (rect) {
     const y = rect.y + rect.h + 2;
@@ -618,6 +641,11 @@ export function drawMemberColour(ctx: CanvasRenderingContext2D, colour: string, 
       ctx.strokeStyle = THEME.muted;
       ctx.lineWidth = 1;
       ctx.strokeRect(rect.x + 0.5, y + 0.5, rect.w - 1, 4);
+    } else if (fraction !== null) {
+      ctx.fillStyle = `rgba(${NEUTRAL},0.14)`;
+      ctx.fillRect(rect.x, y, rect.w, 5);
+      ctx.fillStyle = colour;
+      ctx.fillRect(rect.x, y, Math.max(1, rect.w * fraction), 5);
     } else {
       ctx.fillStyle = colour;
       ctx.fillRect(rect.x, y, rect.w, 5);
@@ -636,10 +664,20 @@ export function drawMemberColour(ctx: CanvasRenderingContext2D, colour: string, 
   ctx.restore();
 }
 
-let brushCache: { key: string; values: Map<number, number>; range: number } | null = null;
+interface Brushed {
+  values: Map<number, number>;
+  /** Largest |value| observed (bar length 1). */
+  range: number;
+  /** Smallest |value| observed. */
+  lo: number;
+  /** 'pos' or 'neg' when every value has that sign, else 'mixed'. */
+  sign: 'pos' | 'neg' | 'mixed';
+}
+
+let brushCache: (Brushed & { key: string }) | null = null;
 
 /** Each placed map's mean z in the brushed parcel (atlas permitting). */
-function brushedValues(a: M.Analysis): { values: Map<number, number>; range: number } | null {
+function brushedValues(a: M.Analysis): Brushed | null {
   if (opts.colour.startsWith('parcel:')) ensureAtlas(); // a brushed link may arrive without Explain
   const sa = atlasNow;
   if (!sa || !opts.colour.startsWith('parcel:')) return null;
@@ -649,16 +687,31 @@ function brushedValues(a: M.Analysis): { values: Map<number, number>; range: num
   if (!brushCache || brushCache.key !== key) {
     const values = V3.parcelMeanZ(a, b, sa, id);
     let mx = 0;
-    for (const v of values.values()) if (Number.isFinite(v)) mx = Math.max(mx, Math.abs(v));
+    let mn = Infinity;
+    let pos = 0;
+    let neg = 0;
+    for (const v of values.values()) {
+      if (!Number.isFinite(v)) continue;
+      mx = Math.max(mx, Math.abs(v));
+      mn = Math.min(mn, Math.abs(v));
+      if (v > 0) pos++;
+      else if (v < 0) neg++;
+    }
     // The observed range, not a rounded-up one, so the most extreme maps reach the ends of the ramp.
-    brushCache = { key, values, range: mx || 1 };
+    brushCache = { key, values, range: mx || 1, lo: Number.isFinite(mn) ? mn : 0, sign: neg === 0 && pos > 0 ? 'pos' : pos === 0 && neg > 0 ? 'neg' : 'mixed' };
   }
   return brushCache;
 }
 
-/** Brushed-parcel mark: cyan (below 0) – grey – violet (above 0), symmetric about 0 up to the largest |value|. */
-function brushColour(v: number, range: number): string {
-  return DIVERGING((Math.max(-range, Math.min(range, v)) / range + 1) / 2).hex();
+/**
+ * Brushed-parcel mark colour: violet above 0, cyan below, lighter with |value|. With both signs present the
+ * lightness runs from 0 to the largest |value| on each side (sign-symmetric); when every value has one sign, it
+ * spans that side's full lightness range from the smallest to the largest |value| observed.
+ */
+function brushColour(v: number, pz: Pick<Brushed, 'range' | 'lo' | 'sign'>): string {
+  const m = Math.min(pz.range, Math.abs(v));
+  const t = pz.sign === 'mixed' ? m / pz.range : pz.range > pz.lo ? (m - pz.lo) / (pz.range - pz.lo) : 1;
+  return (v < 0 ? NEG_RAMP : POS_RAMP)(Math.max(0, Math.min(1, t))).hex();
 }
 
 /** The parcellation, once loaded (null until then or when the data has none). */
@@ -692,9 +745,17 @@ function channelLegendHtml(a: M.Analysis): string {
     const pz = brushedValues(a);
     const id = Number(opts.colour.slice(7));
     if (!pz) return '';
-    const range = pz.range;
+    const { range, lo, sign } = pz;
     const digits = range >= 10 ? 0 : range >= 1 ? 1 : 2;
-    return `<section><h3>Marks</h3><p class="note">Each map's mean z in <b>${atlasNow?.label(id) ?? `parcel ${id}`}</b> (z: the map standardised over the compared voxels), on a scale symmetric about 0 up to the largest |mean z| observed. Positions do not change.</p><div class="chan-legend">${[-range, -range / 2, 0, range / 2, range].map((v) => sw(brushColour(v, range), fmt(v, digits))).join('')}</div></section>`;
+    const what = `Each map's mean z in <b>${atlasNow?.label(id) ?? `parcel ${id}`}</b> (z: the map standardised over the compared voxels).`;
+    const length = `Bar length: |mean z| from 0 (no bar) to the largest, ${fmt(range, digits)}.`;
+    if (sign !== 'mixed') {
+      // One sign: the colour spans that side's whole ramp, from the smallest to the largest |mean z| observed.
+      const s0 = sign === 'pos' ? 1 : -1;
+      const stops = [lo, (lo + range) / 2, range].map((m) => s0 * m);
+      return `<section><h3>Marks</h3><p class="note">${what} <b>All ${sign === 'pos' ? 'positive' : 'negative'}</b>: colour runs from the smallest |mean z| observed (${fmt(lo, digits)}) to the largest (${fmt(range, digits)}). ${length} Positions do not change.</p><div class="chan-legend">${stops.map((v) => sw(brushColour(v, pz), fmt(v, digits))).join('')}</div></section>`;
+    }
+    return `<section><h3>Marks</h3><p class="note">${what} Violet above 0, cyan below; colour lightens with |mean z| up to the largest observed, the same on both sides. ${length} Positions do not change.</p><div class="chan-legend">${[-range, -range / 2, range / 2, range].map((v) => sw(brushColour(v, pz), fmt(v, digits))).join('')}</div></section>`;
   }
   const st = M.STAT_LABEL[M.state.stat];
   const sw = (c: string, label: string): string => (c === 'missing' ? `<span><i class="miss"></i>${label}</span>` : `<span><i style="background:${c}"></i>${label}</span>`);
@@ -1381,9 +1442,9 @@ function currentExplain(a: M.Analysis): V3.ExplainResult | null {
 }
 
 /** Explain colours: never red/blue, which mean the t/β statistic. Violet ramp from the page ground for amounts. */
-const EXPLAIN_SEQ = chroma.scale([THEME.bg, '#9b86ff', '#f4f1ff']).mode('lab');
+const EXPLAIN_SEQ = chroma.scale([THEME.bg, ANALYSIS_VIOLET[1], ANALYSIS_VIOLET[2]]).mode('lab');
 /** Signed departures: cyan (below) ↔ neutral dark ↔ violet (above), symmetric. */
-const EXPLAIN_DIV = chroma.scale(['#22d3ee', '#1c1d27', '#9b86ff']).domain([-1, 0, 1]).mode('lab');
+const EXPLAIN_DIV = chroma.scale([ANALYSIS_CYAN[2], ANALYSIS_CYAN[1], '#1c1d27', ANALYSIS_VIOLET[1], ANALYSIS_VIOLET[2]]).domain([-1, -0.5, 0, 0.5, 1]).mode('lab');
 /** Signed pictures hide |value| below this fraction of the scale. */
 const EXPLAIN_DIV_HIDE = 0.08;
 
@@ -1464,6 +1525,8 @@ function drawExplainDock(ctx: CanvasRenderingContext2D, g: SV.SpaceGeom): boolea
   for (let s = 0; s <= 8; s++) bar.addColorStop(s / 8, (ex.signed ? EXPLAIN_DIV(-1 + s / 4) : EXPLAIN_SEQ(s / 8)).hex());
   ctx.fillStyle = bar;
   ctx.fillRect(x0, y, w, 7);
+  // The band the picture leaves undrawn (|value| under the hide fraction) is left empty in the legend too.
+  if (ex.signed) ctx.clearRect(x0 + (w / 2) * (1 - EXPLAIN_DIV_HIDE), y, w * EXPLAIN_DIV_HIDE, 7);
   y += 9;
   ctx.font = `10px ${FONT.mono}`;
   ctx.fillStyle = THEME.muted;
@@ -2115,12 +2178,16 @@ export async function drawTrajectories(ctx: CanvasRenderingContext2D, g: SV.Spac
   const rows = Math.ceil(K / cols);
   const gap = 14;
   const titleH = 20;
+  // Pictures keep this clearance from a panel's edges (and from its header).
+  const inset = 8;
+  // A line under the panels holds the stress footer.
+  const footH = 16;
   const pw = (plot.w - gap * (cols - 1)) / cols;
-  const ph = (plot.h - gap * (rows - 1)) / rows;
+  let ph = (plot.h - footH - gap * (rows - 1)) / rows;
   const asp = M.sliceAspect(a.set);
   // Every panel shares the same positions, so dots alone show nothing side by side: keep pictures down to
   // TRAJ_MIN_PICTURE px rather than thumbSize's single-view threshold.
-  let { size } = thumbSize(ids.length, { x: 0, y: 0, w: pw, h: ph - titleH }, M.state.space?.s ?? 1);
+  let { size } = thumbSize(ids.length, { x: 0, y: 0, w: pw - 2 * inset, h: ph - titleH - 2 * inset }, M.state.space?.s ?? 1);
   let lod: Lod = size >= TRAJ_MIN_PICTURE ? 'thumbs' : 'marks';
   let tw = Math.round(size * Math.sqrt(asp));
   let th = Math.round(size / Math.sqrt(asp));
@@ -2128,24 +2195,25 @@ export async function drawTrajectories(ctx: CanvasRenderingContext2D, g: SV.Spac
   // Positions within a panel: identical in every panel (same transform, same nudges). The transform is
   // built in canvas coordinates for the first panel, so it doubles as the Space transform that drag-pan,
   // +/- and Ctrl/Cmd+wheel zoom act on (other panels are the same transform shifted by their offset).
-  const inner0 = lod === 'thumbs' ? { x: tw / 2, y: titleH + th / 2, w: Math.max(1, pw - tw), h: Math.max(1, ph - titleH - th) } : { x: 12, y: titleH + 10, w: pw - 24, h: ph - titleH - 20 };
-  const innerAbs = { x: plot.x + inner0.x, y: plot.y + inner0.y, w: inner0.w, h: inner0.h };
-  const t0 = spaceTransform(d.coords, innerAbs, M.state.space);
-  const local = ids.map((_, i) => {
+  const LBL = 12;
+  const top = titleH + inset;
+  const inner0 =
+    lod === 'thumbs'
+      ? { x: inset + tw / 2, y: top + (th + LBL) / 2, w: Math.max(1, pw - 2 * inset - tw), h: Math.max(1, ph - top - inset - th - LBL) }
+      : { x: inset + 12, y: top + 10, w: pw - 2 * inset - 24, h: ph - top - inset - 20 };
+  let innerAbs = { x: plot.x + inner0.x, y: plot.y + inner0.y, w: inner0.w, h: inner0.h };
+  let t0 = spaceTransform(d.coords, innerAbs, M.state.space);
+  let local = ids.map((_, i) => {
     const [x, y] = t0.toScreen(d.coords[2 * i], d.coords[2 * i + 1]);
     return [x - plot.x, y - plot.y] as [number, number];
   });
-  g.t = t0;
-  g.inner = innerAbs;
-  trajPanels = { x: plot.x, y: plot.y, pw, ph, gap, cols, n: K };
   // A map is drawn only when its exact position is in view (zoomed panels never show detached pictures),
   // and only maps in view take part in decluttering.
   const inView = local.map(([x, y]) => x >= 0 && x <= pw && y >= titleH && y <= ph);
   const view = ids.map((_, i) => i).filter((i) => inView[i]);
   // Narrow panels: shrink the pictures until no picture (with its ID label below it, LBL px) overlaps
   // another, and fall back to dots only when they would be smaller than TRAJ_MIN_PICTURE px.
-  const LBL = 12;
-  const area = { x: 0, y: titleH, w: pw, h: ph - titleH };
+  const area = { x: inset, y: top, w: pw - 2 * inset, h: ph - top - inset };
   let placed = local.map(([x, y]) => ({ x, y }));
   for (let attempt = 0; lod === 'thumbs' && attempt < 12; attempt++) {
     // Pad the boxes while separating so pictures keep a small gap; accept once the drawn boxes are clear.
@@ -2163,17 +2231,60 @@ export async function drawTrajectories(ctx: CanvasRenderingContext2D, g: SV.Spac
     th = Math.round(size / Math.sqrt(asp));
   }
   g.lod = lod;
+  // At fit (no zoom), panels end where their content ends: the unused height a uniform-scale fit leaves above
+  // and below a wide layout is dropped, so panels sit together under their headers.
+  if (!M.state.space) {
+    const half = lod === 'thumbs' ? (th + LBL) / 2 : 6;
+    let y0 = Infinity;
+    let y1 = -Infinity;
+    for (const i of view) {
+      y0 = Math.min(y0, placed[i].y - half, local[i][1] - 4);
+      y1 = Math.max(y1, placed[i].y + half, local[i][1] + 4);
+    }
+    if (Number.isFinite(y0) && y0 > top) {
+      const dy = top - y0;
+      local = local.map(([x, y]) => [x, y + dy] as [number, number]);
+      placed = placed.map((q) => ({ x: q.x, y: q.y + dy }));
+      innerAbs = { ...innerAbs, y: innerAbs.y + dy };
+      t0 = spaceTransform(d.coords, innerAbs, M.state.space);
+      ph = Math.min(ph, y1 + dy + inset);
+    }
+  }
+  g.t = t0;
+  g.inner = innerAbs;
+  trajPanels = { x: plot.x, y: plot.y, pw, ph, gap, cols, n: K };
+  // Exact-position dots follow the single view's rules: none for a position still inside its own picture.
+  const ownPicture = (i: number): boolean =>
+    lod === 'thumbs' && Math.abs(local[i][0] - placed[i].x) < tw / 2 + 2 && Math.abs(local[i][1] - placed[i].y) < (th + LBL) / 2 + 2;
+  let dotsN = 0;
+  let ownN = 0;
+  for (const i of view)
+    if (lod === 'thumbs' && Math.hypot(placed[i].x - local[i][0], placed[i].y - local[i][1]) > Math.max(4, tw * 0.2)) {
+      if (ownPicture(i)) ownN++;
+      else dotsN++;
+    }
   list.forEach((ak, k) => {
     const ox = plot.x + (k % cols) * (pw + gap);
     const oy = plot.y + Math.floor(k / cols) * (ph + gap);
     ctx.save();
+    // No frames: a hairline between panels and a mono header.
     ctx.strokeStyle = THEME.line;
-    ctx.strokeRect(ox + 0.5, oy + 0.5, pw - 1, ph - 1);
-    ctx.font = `600 11.5px ${FONT.sans}`;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    if (k % cols > 0) {
+      ctx.moveTo(Math.round(ox - gap / 2) + 0.5, oy);
+      ctx.lineTo(Math.round(ox - gap / 2) + 0.5, oy + ph);
+    }
+    if (k >= cols) {
+      ctx.moveTo(ox, Math.round(oy - gap / 2) + 0.5);
+      ctx.lineTo(ox + pw, Math.round(oy - gap / 2) + 0.5);
+    }
+    ctx.stroke();
+    ctx.font = `${ak === a ? '600 ' : ''}11px ${FONT.mono}`;
     ctx.fillStyle = ak === a ? THEME.text : THEME.muted;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
-    ctx.fillText(ak === a ? `${ak.contrast} · positions from this layout` : ak.contrast, ox + 6, oy + 4);
+    ctx.fillText(M.truncate(ctx, ak === a ? `${ak.contrast} · positions from this layout` : ak.contrast, pw - 4), ox + 2, oy + 4);
     ctx.beginPath();
     ctx.rect(ox, oy, pw, ph);
     ctx.clip();
@@ -2190,7 +2301,7 @@ export async function drawTrajectories(ctx: CanvasRenderingContext2D, g: SV.Spac
           ctx.strokeRect(px - tw / 2, py - (th + LBL) / 2, tw, th);
           ctx.setLineDash([]);
         } else M.drawCell(ctx, ak, m, { x: px - tw / 2, y: py - (th + LBL) / 2, w: tw, h: th }, null, false, { silhouette: true, crosshair: false });
-        if (Math.hypot(px - sx, py - sy) > Math.max(4, tw * 0.2)) {
+        if (Math.hypot(px - sx, py - sy) > Math.max(4, tw * 0.2) && !ownPicture(i)) {
           ctx.strokeStyle = 'rgba(200,202,220,0.6)';
           ctx.lineWidth = 1;
           ctx.beginPath();
@@ -2219,6 +2330,17 @@ export async function drawTrajectories(ctx: CanvasRenderingContext2D, g: SV.Spac
     });
     ctx.restore();
   });
+  // Footer: the fit every panel's positions come from, as in the single view.
+  const stress = Number.isFinite(res.stress1) ? `${res.method === 'metric-smacof' ? 'metric ' : ''}Stress-1 ${res.stress1.toFixed(3).replace(/^0\./, '.')} · ` : '';
+  const moved = dotsN + ownN;
+  const nudge = moved ? ` · ${moved} ${moved === 1 ? 'picture' : 'pictures'} nudged apart${dotsN ? ': dots mark exact positions' : ''}${ownN ? `; unmarked: ${ownN} still over ${ownN === 1 ? 'its' : 'their'} own picture` : ''}` : '';
+  ctx.font = `11px ${FONT.sans}`;
+  ctx.fillStyle = THEME.faint;
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'top';
+  const fy = plot.y + rows * ph + (rows - 1) * gap + 4;
+  ctx.fillText(M.truncate(ctx, `Positions from the ${a.contrast} layout: ${stress}${ids.length} placed${nudge}`, plot.w), plot.x + plot.w, fy);
+  g.sideFooter = { text: `Positions from the ${a.contrast} layout: ${stress}${ids.length} placed${nudge}`, y: fy };
 }
 
 /**
