@@ -25,6 +25,7 @@ import {
 import { THEME, FONT, placeCrop, drawCellImage, drawCrosshair, hidpi } from './render';
 import * as M from './main';
 import * as SX from './space-extras';
+import * as V3 from './space-v3';
 
 // ---------------------------------------------------------------------------
 // Space: maps placed by whole-volume similarity (nonmetric MDS of the basis)
@@ -34,7 +35,9 @@ let embedRunner: EmbedWorkerRunner | null = null;
 
 /** The basis Space shows for an analysis: a region-restricted basis when one is applied, else the whole-mask basis. */
 export function basisOf(a: M.Analysis): SimilarityBasis {
-  return SX.regionBasis(a) ?? a.basis;
+  const b = SX.regionBasis(a) ?? a.basis;
+  // Noise-corrected similarity applies on top of the whole-brain or regional basis (β-maps: once SE has loaded).
+  return SX.opts.noiseCorrected ? (V3.correctedBasis(a, b) ?? b) : b;
 }
 
 export function layoutKeyFor(b: SimilarityBasis, opts: NmdsOptions = M.layoutOpts(b.eligible.length)): string {

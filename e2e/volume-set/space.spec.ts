@@ -773,3 +773,62 @@ test.describe('Space v2 layers', () => {
   });
 });
 
+test.describe('Space v3: what drives the layout', () => {
+  const side = (page: Page): Promise<string> => page.locator('#side').innerText();
+
+  test('Explain splits the dissimilarity exactly, by parcel, with the noise share, and never refits', async ({ page }) => {
+    await open(page, `${SPACE}&subject=s03`);
+    const runs = (await probe(page)).runs;
+    await page.click('#sx-explain');
+    await page.waitForFunction(() => new URL(location.href).searchParams.get('sx') === 'all');
+    await expect(page.locator('#side')).toContainText('sums exactly to the total pairwise 1 − r', { timeout: 30_000 });
+    await expect(page.locator('#side')).toContainText('independent measurement noise alone would produce');
+    await expect(page.locator('#side')).toContainText('Layout depends most on', { timeout: 30_000 });
+    // Heterogeneity fills in once β and SE have loaded.
+    await expect(page.locator('#side')).toContainText('DerSimonian', { timeout: 60_000 });
+    expect(await page.locator('#side [data-parcel]').count()).toBeGreaterThanOrEqual(8);
+    expect((await probe(page)).runs).toBe(runs);
+    // Scopes: the focused map, then a group.
+    await page.click('[data-scope="focused"]');
+    await expect(page.locator('#side')).toContainText('mean 1 − r of s03 to the others');
+    expect(new URL(page.url()).searchParams.get('sx')).toBe('focused');
+  });
+
+  test('brushing a parcel from the Explain table marks every map by it', async ({ page }) => {
+    await open(page, `${SPACE}&subject=s03&sx=all`);
+    await expect(page.locator('#side [data-parcel]').first()).toBeVisible({ timeout: 30_000 });
+    const id = await page.locator('#side [data-parcel]').first().getAttribute('data-parcel');
+    await page.locator('#side [data-parcel]').first().click();
+    await page.waitForFunction((pid) => new URL(location.href).searchParams.get('sc') === `parcel:${pid}`, id);
+    await expect(page.locator('#side')).toContainText("Each map's mean z in");
+  });
+
+  test('reliability marks and the noise-corrected layout', async ({ page }) => {
+    await open(page, `${SPACE}&subject=s03`);
+    const k0 = (await probe(page)).key!;
+    await page.selectOption('#sx-colour', 'rel');
+    await expect(page.locator('#side')).toContainText('Least reliable first');
+    await page.click('#sx-noise');
+    await page.waitForFunction((k) => {
+      const s = (window as unknown as { __vsSpace: { layout: string; key: string } }).__vsSpace;
+      return s.layout === 'ready' && s.key !== k && s.key.includes('spearman-corrected');
+    }, k0, { timeout: 60_000 });
+    await page.waitForFunction(() => new URL(location.href).searchParams.get('sn') === '1');
+    await expect(page.locator('#side')).toContainText('Noise-corrected layout: r ÷ √(ρᵢρⱼ)');
+  });
+
+  test('covariates fit to the layout with permutation p-values (planted age, random site)', async ({ page }) => {
+    await open(page, `${SPACE}&subject=s03&sc=cov:age`);
+    await toolbarReady(page);
+    await expect(page.locator('#side')).toContainText('Fit to layout', { timeout: 30_000 });
+    const age = await side(page);
+    const r2 = Number(/R² (\.\d+)/.exec(age)![1]);
+    expect(r2).toBeGreaterThan(0.3);
+    await page.selectOption('#sx-colour', 'cov:site');
+    await expect(page.locator('#side')).toContainText("site groups' centroids");
+    const site = await side(page);
+    const p = /permutation p (< \.001|\.\d+)/.exec(site)![1];
+    expect(p === '< .001' ? 0 : Number(p)).toBeGreaterThan(0.05);
+  });
+});
+

@@ -7,7 +7,7 @@
  *                    Defaults to examples/volume-set/.cache/templateflow (git-ignored); missing
  *                    files are downloaded once from the public TemplateFlow archive.
  *   VS_SYNTHETIC=1   ignore the two above and serve a deterministic synthetic set
- *                    generated in memory (see synthetic.ts); no atlas in this mode
+ *                    generated in memory (see synthetic.ts), with a small Schaefer-style parcellation
  *
  * Endpoints:
  *   GET /vs/manifest.json         set members parsed from BIDS-style names
@@ -129,7 +129,7 @@ const syntheticHandler: Connect.NextHandleFunction = (req, res, next) => {
       const buf = syntheticTemplateFile(url.slice('/vs/template/'.length));
       if (!buf) {
         res.statusCode = 404;
-        res.end('template not found (synthetic mode has no atlas)');
+        res.end('template file not found');
         return;
       }
       return sendBuffer(res, buf);

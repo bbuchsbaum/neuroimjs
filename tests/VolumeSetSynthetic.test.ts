@@ -123,11 +123,30 @@ describe('synthetic manifest', { timeout: 30_000 }, () => {
 });
 
 describe('synthetic templates', { timeout: 30_000 }, () => {
-  it('serves T1 and mask on the member grid, no atlas', () => {
+  it('serves a Schaefer-style parcellation on the same grid, with an unlabelled core', () => {
+    const atlas = read(syntheticTemplateFile('atlas.nii.gz')!);
+    const mask = read(syntheticTemplateFile('mask.nii.gz')!).getData() as Float32Array;
+    const labels = atlas.getData() as Float32Array;
+    const tsv = syntheticTemplateFile('atlas.tsv')!.toString('utf8').trim().split('\n');
+    expect(tsv[0]).toBe('index\tname');
+    const names = new Map(tsv.slice(1).map((l) => l.split('\t')).map(([i, n]) => [Number(i), n]));
+    expect(names.size).toBe(24);
+    for (const n of names.values()) expect(n).toMatch(/^17Networks_(LH|RH)_[A-Za-z]+_\d$/);
+    let inBrainUnlabelled = 0;
+    for (let g = 0; g < labels.length; g++) {
+      if (labels[g] > 0) {
+        expect(mask[g]).toBe(1); // parcels lie inside the brain
+        expect(names.has(labels[g])).toBe(true);
+      } else if (mask[g] === 1) inBrainUnlabelled++;
+    }
+    expect(inBrainUnlabelled).toBeGreaterThan(100); // the deep core is outside every parcel
+    expect(atlas.space.gridToCoord([5, 6, 7])).toEqual(read(syntheticTemplateFile('T1w.nii.gz')!).space.gridToCoord([5, 6, 7]));
+    expect(syntheticTemplateFile('other.nii.gz')).toBeNull();
+  });
+
+  it('serves T1 and mask on the member grid', () => {
     const t1 = read(syntheticTemplateFile('T1w.nii.gz')!);
     const mask = read(syntheticTemplateFile('mask.nii.gz')!);
-    expect(syntheticTemplateFile('atlas.nii.gz')).toBeNull();
-    expect(syntheticTemplateFile('atlas.tsv')).toBeNull();
     const member = read(syntheticMemberFile('synth', 's01', 'cue'), STAT.t);
     expect(t1.space.dim).toEqual(member.space.dim);
     expect(mask.space.gridToCoord([5, 6, 7])).toEqual(member.space.gridToCoord([5, 6, 7]));

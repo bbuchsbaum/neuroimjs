@@ -467,7 +467,51 @@ export function syntheticTemplate(): SyntheticTemplate {
 const templateFileCache = new Map<string, Buffer>();
 
 /** Gzipped 3D NIfTI for `T1w.nii.gz` or `mask.nii.gz`; null for anything else. */
+/**
+ * Synthetic cortical parcellation named like Schaefer 2018 (`17Networks_<LH|RH>_<Network>_<n>`): the
+ * brain shell (normalised radius 0.55-1) split by hemisphere, anterior/posterior halves, three height
+ * bands and an inner/outer shell, giving 24 parcels. The deep core is left unlabelled (0), so
+ * "outside the atlas" is exercised the way subcortex is with the real Schaefer atlas.
+ */
+export function syntheticAtlas(): { labels: Float32Array; tsv: string } {
+  const r = ellipsoidRadius(BRAIN_AXES);
+  const [x, y, z] = worldCoords();
+  const labels = new Float32Array(NVOX);
+  const names = new Map<number, string>();
+  const networks = ['Vis', 'SomMot', 'DorsAttn'];
+  for (let g = 0; g < NVOX; g++) {
+    if (r[g] > 1 || r[g] < 0.55) continue;
+    const hemi = x[g] - CENTRE[0] < 0 ? 0 : 1;
+    const front = y[g] - CENTRE[1] >= 0 ? 1 : 0;
+    const dz = (z[g] - CENTRE[2]) / BRAIN_AXES[2];
+    const band = dz < -0.3 ? 0 : dz < 0.3 ? 1 : 2;
+    const outer = r[g] > 0.8 ? 1 : 0;
+    const local = front * 6 + band * 2 + outer; // 0..11 within a hemisphere
+    const id = 1 + hemi * 12 + local;
+    labels[g] = id;
+    if (!names.has(id)) names.set(id, `17Networks_${hemi ? 'RH' : 'LH'}_${networks[band]}${front ? 'A' : 'P'}_${outer + 1}`);
+  }
+  const ids = [...names.keys()].sort((a, b) => a - b);
+  return { labels, tsv: `index\tname\n${ids.map((id) => `${id}\t${names.get(id)}`).join('\n')}\n` };
+}
+
+let atlasCache: { labels: Float32Array; tsv: string } | null = null;
+
 export function syntheticTemplateFile(name: string): Buffer | null {
+  if (name === 'atlas.tsv') {
+    atlasCache ??= syntheticAtlas();
+    return Buffer.from(atlasCache.tsv, 'utf8');
+  }
+  if (name === 'atlas.nii.gz') {
+    let buf = templateFileCache.get(name);
+    if (!buf) {
+      atlasCache ??= syntheticAtlas();
+      const grid = syntheticGrid();
+      buf = encodeNifti({ dim: grid.dim, spacing: grid.spacing, affine: grid.affine, frames: [atlasCache.labels], description: 'neuroimjs synthetic parcellation' });
+      templateFileCache.set(name, buf);
+    }
+    return buf;
+  }
   if (name !== 'T1w.nii.gz' && name !== 'mask.nii.gz') return null;
   let buf = templateFileCache.get(name);
   if (!buf) {
