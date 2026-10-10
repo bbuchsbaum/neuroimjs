@@ -877,7 +877,7 @@ test.describe('Space v3: what drives the layout', () => {
   test('side by side without a focused map reports cohort medians and keeps pictures apart', async ({ page }) => {
     await open(page, `${SPACE}&st=1`);
     const section = page.locator('#side section', { hasText: 'Across contrasts' });
-    await expect(section).toContainText('median over subjects', { timeout: 60_000 });
+    await expect(section).toContainText('medians over subjects', { timeout: 60_000 });
     const cells = await section.locator('td.num').allInnerTexts();
     expect(cells.length).toBeGreaterThan(0);
     for (const c of cells) expect(c.trim()).not.toBe('–');
@@ -899,3 +899,108 @@ test.describe('Space v3: what drives the layout', () => {
   });
 });
 
+interface Box {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+interface StageProbe {
+  placed: Probe['placed'];
+  marks: (Box & { id: string; kind: 'thumb' | 'dot' | 'label' })[];
+  markers: { id: string; kind: 'dot' | 'ring'; x: number; y: number; nudge: number }[];
+  nudged: number;
+  captions: Box[];
+}
+
+const stage = (page: Page): Promise<StageProbe> =>
+  page.evaluate(() => {
+    const p = (window as unknown as { __vsSpace: Record<string, unknown> }).__vsSpace;
+    return { placed: p.placed, marks: p.marks, markers: p.markers, nudged: p.nudged, captions: p.captions } as unknown as StageProbe;
+  });
+
+const overlap = (a: Box, b: Box): number => {
+  const ox = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
+  const oy = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
+  return ox > 0 && oy > 0 ? ox * oy : 0;
+};
+
+test.describe('Space stage: exact positions, captions and toolbar', () => {
+  for (const vp of [
+    { width: 1600, height: 1000 },
+    { width: 1280, height: 800 },
+  ])
+    test(`every noticeably nudged picture keeps a visible exact-position marker (${vp.width}x${vp.height})`, async ({ page }) => {
+      // Regression: a dot that fell inside another map's picture used to be dropped with its leader, hiding
+      // that map's exact position, and the caption's count left it out.
+      await page.setViewportSize(vp);
+      await open(page, SPACE);
+      await settle(page);
+      const s = await stage(page);
+      const pics = s.marks.filter((m) => m.kind === 'thumb');
+      expect(pics.length).toBeGreaterThan(5);
+      const byId = new Map(s.markers.map((m) => [m.id, m]));
+      let moved = 0;
+      for (const pic of pics) {
+        const q = s.placed.find((p) => p.id === pic.id)!;
+        const d = Math.hypot(pic.x + pic.w / 2 - q.x, pic.y + pic.h / 2 - q.y);
+        if (d <= Math.max(4, pic.w * 0.2) + 0.5) continue;
+        moved++;
+        const mk = byId.get(pic.id);
+        expect(mk, `${pic.id} moved ${d.toFixed(0)} px with no marker`).toBeTruthy();
+        // A position inside another picture is marked by a ring; elsewhere by a dot.
+        const inOther = pics.some((o) => o.id !== pic.id && Math.abs(q.x - (o.x + o.w / 2)) < o.w / 2 && Math.abs(q.y - (o.y + o.h / 2)) < o.h / 2);
+        if (inOther) expect(mk!.kind, `${pic.id}'s position lies inside another picture`).toBe('ring');
+      }
+      expect(moved).toBeGreaterThan(0); // the synthetic layout is crowded enough to nudge pictures
+      expect(s.nudged).toBe(s.markers.length);
+      expect(s.markers.length).toBeGreaterThanOrEqual(moved);
+      // Selecting a map moves no picture.
+      const before = pics.map((p) => `${p.id}:${p.x.toFixed(1)},${p.y.toFixed(1)}`).sort();
+      await page.click('.space-members button:has-text("s05")');
+      await page.waitForFunction(() => new URL(location.href).searchParams.get('subject') === 's05');
+      await settle(page);
+      const after = (await stage(page)).marks.filter((m) => m.kind === 'thumb').map((p) => `${p.id}:${p.x.toFixed(1)},${p.y.toFixed(1)}`).sort();
+      expect(after).toEqual(before);
+    });
+
+  for (const q of ['sc=rel', 'sx=all', 'sn=1'])
+    test(`the noise yardstick caption covers no picture, mark or ID (${q})`, async ({ page }) => {
+      await open(page, `${SPACE}&subject=s03&${q}`);
+      await page.waitForFunction(() => ((window as unknown as { __vsSpace: { captions: unknown[] } }).__vsSpace.captions ?? []).length > 0, null, { timeout: 60_000 });
+      await waitLayout(page);
+      await settle(page);
+      const s = await stage(page);
+      for (const c of s.captions) for (const m of s.marks) expect(overlap(c, m), `caption covers ${m.kind} of ${m.id}`).toBe(0);
+    });
+
+  test('the toolbar stays on one row at 1280x800, and the Mark select fits its label', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await open(page, `${SPACE}&sc=parcel:3`);
+    await expect(page.locator('#side')).toContainText("Each map's mean z in", { timeout: 30_000 });
+    await settle(page);
+    const tops = await page.locator('.space-tools > *').evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().top)));
+    expect(new Set(tops).size).toBe(1);
+    const fits = await page.locator('#sx-colour').evaluate((el) => {
+      const sel = el as HTMLSelectElement;
+      const c = document.createElement('canvas').getContext('2d')!;
+      c.font = getComputedStyle(sel).font;
+      // Text plus the select's padding and arrow must fit its width.
+      return c.measureText(sel.selectedOptions[0].textContent ?? '').width + 24 <= sel.getBoundingClientRect().width;
+    });
+    expect(fits).toBe(true);
+  });
+
+  test('the Across contrasts table keeps every row and its header on one line at 1280x800', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await open(page, `${SPACE}&st=1`);
+    const section = page.locator('#side section', { hasText: 'Across contrasts' });
+    await expect(section.locator('td.num').first()).toBeVisible({ timeout: 60_000 });
+    const heights = await section.locator('tr').evaluateAll((rows) => rows.map((r) => r.getBoundingClientRect().height));
+    const lineH = await section.locator('td').first().evaluate((td) => parseFloat(getComputedStyle(td).lineHeight) || 16);
+    for (const h of heights) expect(h).toBeLessThan(lineH * 1.8);
+    // The full pair is kept in the title.
+    expect(await section.locator('td[title]').first().getAttribute('title')).toContain(' × ');
+  });
+});

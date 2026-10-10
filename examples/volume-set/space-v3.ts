@@ -15,6 +15,8 @@ import {
   standardize,
   dispersionTerms,
   focusedTerms,
+  focusedShareTable,
+  focusedExcess,
   groupTerms,
   reliability,
   noiseFloorTerms,
@@ -39,6 +41,18 @@ export interface SpaceAtlas {
   name: string;
   /** Parcel id -> readable name. */
   label(id: number): string;
+  /** Parcel id -> one-line abbreviation for narrow tables ("L SomMotB Aud2"); `label` holds the full name. */
+  short(id: number): string;
+}
+
+/** "17Networks_LH_SomMotB_Aud_2" -> "L SomMotB Aud2". */
+export function shortParcel(name: string): string {
+  const parts = name.replace(/^\d+Networks_/, '').split('_');
+  const hemi = parts[0] === 'LH' ? 'L' : parts[0] === 'RH' ? 'R' : parts[0];
+  const rest = parts.slice(1);
+  const num = rest.length >= 2 && /^\d+$/.test(rest[rest.length - 1]) ? rest.pop()! : '';
+  if (num) rest[rest.length - 1] += num;
+  return [hemi, ...rest].join(' ');
 }
 
 let atlasPromise: Promise<SpaceAtlas | null> | null = null;
@@ -76,6 +90,7 @@ export function loadSpaceAtlas(): Promise<SpaceAtlas | null> {
         atlas,
         name: regions.length > 100 ? 'Schaefer 2018 (400 parcels, 17 networks)' : `parcellation (${regions.length} parcels)`,
         label: (id: number) => prettyParcel(atlas.regions.get(id)?.fullLabel ?? `parcel ${id}`),
+        short: (id: number) => (atlas.regions.get(id) ? shortParcel(atlas.regions.get(id)!.fullLabel ?? `parcel ${id}`) : `parcel ${id}`),
       };
     } catch {
       return null;
@@ -236,14 +251,29 @@ export interface ExplainResult {
   totalLabel: string;
   /** Expected contribution of independent noise (dispersion scope only), and the share beyond it. */
   noiseShare: number | null;
-  parcels: { id: number; name: string; share: number; sizeShare: number; beyondNoise: number | null; i2: number | null }[] | null;
+  parcels: { id: number; name: string; short: string; share: number; sizeShare: number; beyondNoise: number | null; i2: number | null }[] | null;
   outsideShare: number | null;
   concentration: { topK: number; topShare: number; sizeShare: number; randomSplit: number | null } | null;
-  influence: { id: number; name: string; mantel: number }[] | null;
+  influence: { id: number; name: string; short: string; mantel: number }[] | null;
+  /**
+   * Focused scope only: parcels ranked by excess over the typical map (`focusedExcess`), i.e. this map's
+   * share of its own focused total in the parcel ÷ the median of every placed map's own share there.
+   * Parcels below `minN` support voxels have excess NaN and come last.
+   */
+  focus: {
+    rows: { id: number; name: string; short: string; n: number; share: number; typical: number; excess: number; rank: number }[];
+    /** Maps compared (the rank is out of this many). */
+    of: number;
+    minN: number;
+  } | null;
   heterogeneityNote: string | null;
 }
 
 const explainCache = new Map<string, ExplainResult>();
+const focusTableCache = new Map<string, ReturnType<typeof focusedShareTable>>();
+
+/** Smallest parcel (support voxels) given an excess over the typical map; smaller parcels show "–". */
+export const FOCUS_MIN_VOXELS = 20;
 
 function scopeKey(s: ExplainScope): string {
   return s.kind === 'all' ? 'all' : s.kind === 'focused' ? `f${s.member}` : `g${s.a.join('.')}|${s.b.join('.')}`;
@@ -339,7 +369,7 @@ export function explain(a: M.Analysis, b: SimilarityBasis, scope: ExplainScope, 
     terms = new Float64Array(N);
     for (let v = 0; v < N; v++) terms[v] = f.own[v] + f.baseline[v];
     signedTerms = f.signed;
-    title = `Where ${a.ids[scope.member]} differs from the rest`;
+    title = `${a.ids[scope.member]} minus the mean of the other maps`;
     totalLabel = `mean 1 − r of ${a.ids[scope.member]} to the others`;
   } else {
     const A = scope.a.map((m) => b.eligible.indexOf(m)).filter((p) => p >= 0);
@@ -347,7 +377,7 @@ export function explain(a: M.Analysis, b: SimilarityBasis, scope: ExplainScope, 
     const g = groupTerms(z, A, B);
     terms = g.between;
     signedTerms = g.signed;
-    title = `Where the group differs from the others`;
+    title = 'Group mean minus the mean of the rest';
     totalLabel = 'mean 1 − r between group and others';
   }
   // Picture: the signed map where there is one, else the per-voxel share (beyond noise when known).
@@ -361,13 +391,14 @@ export function explain(a: M.Analysis, b: SimilarityBasis, scope: ExplainScope, 
   let outsideShare: number | null = null;
   let conc: ExplainResult['concentration'] = null;
   let influence: ExplainResult['influence'] = null;
+  let focus: ExplainResult['focus'] = null;
   if (sa) {
     const t = parcelTable(a, b, sa, terms);
     const bt = beyond ? parcelTable(a, b, sa, beyond) : null;
     const totalVox = [...t.sizes.values()].reduce((x, y) => x + y, 0) + 0;
     parcels = [...t.sums.entries()]
       .filter(([id]) => (t.sizes.get(id) ?? 0) > 0)
-      .map(([id, v]) => ({ id, name: sa.label(id), share: v / t.total, sizeShare: (t.sizes.get(id) ?? 0) / N, beyondNoise: bt ? (bt.sums.get(id) ?? 0) / bt.total : null, i2: null }))
+      .map(([id, v]) => ({ id, name: sa.label(id), short: sa.short(id), share: v / t.total, sizeShare: (t.sizes.get(id) ?? 0) / N, beyondNoise: bt ? (bt.sums.get(id) ?? 0) / bt.total : null, i2: null }))
       .sort((x, y) => y.share - x.share);
     outsideShare = t.outside / t.total;
     const topK = 5;
@@ -391,14 +422,26 @@ export function explain(a: M.Analysis, b: SimilarityBasis, scope: ExplainScope, 
         labels
       )
         .slice(0, 8)
-        .map((x) => ({ id: x.id, name: sa.label(x.id), mantel: x.mantel }));
+        .map((x) => ({ id: x.id, name: sa.label(x.id), short: sa.short(x.id), mantel: x.mantel }));
+    }
+    if (scope.kind === 'focused') {
+      // Every map's focused shares come from the same z, so compute them together once per basis.
+      const fk = `${b.key}|focus-table`;
+      let table = focusTableCache.get(fk);
+      if (!table) {
+        table = focusedShareTable(z, labels);
+        if (focusTableCache.size > 4) focusTableCache.clear();
+        focusTableCache.set(fk, table);
+      }
+      const rows = focusedExcess(table, b.eligible.indexOf(scope.member), FOCUS_MIN_VOXELS).map((r) => ({ ...r, name: sa.label(r.id), short: sa.short(r.id) }));
+      focus = { rows, of: b.eligible.length, minN: FOCUS_MIN_VOXELS };
     }
   }
-  const res: ExplainResult = { key, scope, title, picture, signed: signedTerms !== null, total, totalLabel, noiseShare, parcels, outsideShare, concentration: conc, influence, heterogeneityNote: null };
+  const res: ExplainResult = { key, scope, title, picture, signed: signedTerms !== null, total, totalLabel, noiseShare, parcels, outsideShare, concentration: conc, influence, focus, heterogeneityNote: null };
   if (explainCache.size > 12) explainCache.clear();
   explainCache.set(key, res);
-  // Per-parcel heterogeneity needs β and SE; fill the column in when they arrive.
-  if (sa && parcels) {
+  // Per-parcel heterogeneity needs β and SE; fill the column in when they arrive (the focused table has no I²).
+  if (sa && parcels && scope.kind !== 'focused') {
     void loadBetaSe(a).then(({ beta, se }) => {
       const nVox = a.set.dim[0] * a.set.dim[1] * a.set.dim[2];
       const means = (vals: Float32Array): Map<number, number> => {

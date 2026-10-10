@@ -183,6 +183,124 @@ export function focusedTerms(z: ZMaps, i: number): FocusedTerms {
   return { signed, own, baseline };
 }
 
+/**
+ * Every map's focused term at once, from the identity
+ *   mean_{j≠i}(zᵢ − zⱼ)² = (k/(k − 1))·[(zᵢ − z̄)² + s²]   (z̄, s² over all k maps),
+ * so Tᵢ(v) = (1/2N)·(k/(k − 1))·[(zᵢ(v) − z̄(v))² + s²(v)] equals `focusedTerms(z, i)`
+ * own + baseline to roundoff, in O(kN) for all k maps instead of O(k²N).
+ * Identity: Σᵥ Tᵢ(v) = mean_{j≠i} dᵢⱼ. Calls `visit(i, Tᵢ)` per map, reusing one buffer.
+ */
+function forEachFocused(z: ZMaps, visit: (i: number, terms: Float64Array) => void): void {
+  const N = checkZ(z, 2);
+  const k = z.length;
+  const { mean, vari } = voxelMoments(z, [...Array(k).keys()], N);
+  const c = k / ((k - 1) * 2 * N);
+  const t = new Float64Array(N);
+  for (let i = 0; i < k; i++) {
+    const zi = z[i];
+    for (let v = 0; v < N; v++) {
+      const e = zi[v] - mean[v];
+      t[v] = c * (e * e + vari[v]);
+    }
+    visit(i, t);
+  }
+}
+
+/** Per-map parcel shares of the focused decomposition; see `focusedShareTable`. */
+export interface FocusedShareTable {
+  k: number;
+  /** Parcel labels (≠ 0), ascending; column p of `share`. */
+  ids: number[];
+  /** Positions per parcel. */
+  n: Float64Array;
+  /** Per map: Σᵥ Tᵢ(v) = mean_{j≠i} dᵢⱼ (outside positions included). */
+  totals: Float64Array;
+  /** k × P row-major: (Σ_{v∈p} Tᵢ(v)) / totals[i], map i's share of its own total in parcel p. */
+  share: Float64Array;
+}
+
+/**
+ * Parcel shares of every map's focused decomposition (Tᵢ = own + baseline of
+ * `focusedTerms`), computed together from one pass over the moments. Label 0
+ * (outside every parcel) counts towards each total but has no column. Needs k ≥ 2.
+ */
+export function focusedShareTable(z: ZMaps, labels: Int32Array): FocusedShareTable {
+  const N = checkZ(z, 2);
+  if (labels.length !== N) throw new Error('focusedShareTable: labels must be aligned with the support');
+  const k = z.length;
+  const ids = [...new Set(Array.from(labels))].filter((l) => l !== 0).sort((a, b) => a - b);
+  const P = ids.length;
+  const col = new Map<number, number>(ids.map((id, p) => [id, p]));
+  const slot = new Int32Array(N);
+  const n = new Float64Array(P);
+  for (let v = 0; v < N; v++) {
+    const p = labels[v] === 0 ? -1 : col.get(labels[v])!;
+    slot[v] = p;
+    if (p >= 0) n[p]++;
+  }
+  const totals = new Float64Array(k);
+  const share = new Float64Array(k * P);
+  forEachFocused(z, (i, t) => {
+    const row = i * P;
+    let tot = 0;
+    for (let v = 0; v < N; v++) {
+      tot += t[v];
+      const p = slot[v];
+      if (p >= 0) share[row + p] += t[v];
+    }
+    totals[i] = tot;
+    for (let p = 0; p < P; p++) share[row + p] /= tot;
+  });
+  return { k, ids, n, totals, share };
+}
+
+export interface FocusedExcess {
+  id: number;
+  /** Positions in the parcel. */
+  n: number;
+  /** Map i's share of its own focused total in the parcel. */
+  share: number;
+  /** Median over all k maps of each map's own share in the parcel (the typical map). */
+  typical: number;
+  /** share / typical: 1 = as much of its divergence here as the typical map; NaN when not defined. */
+  excess: number;
+  /** 1 + #{maps with a strictly larger share in the parcel}: 1 = highest of k. */
+  rank: number;
+}
+
+/**
+ * Where map i departs from the others more than a typical map does. Each map's
+ * focused share in a parcel mixes its own departure with the spread of the
+ * others there, so parcels where every map diverges (high spread, low
+ * reliability) top every map's list. Dividing by the median share over all k
+ * maps removes that common part: excess > 1 means map i puts more of its
+ * divergence in the parcel than the typical map puts of its own.
+ *
+ * excess is NaN for parcels with fewer than `minN` positions or a typical share
+ * that is not positive. Sorted by excess descending (NaN last, ties by id).
+ */
+export function focusedExcess(table: FocusedShareTable, i: number, minN = 1): FocusedExcess[] {
+  const { k, ids, n, share } = table;
+  if (!Number.isInteger(i) || i < 0 || i >= k) throw new Error(`focusedExcess: map ${i} is not in [0, ${k})`);
+  const P = ids.length;
+  const col = new Float64Array(k);
+  const out: FocusedExcess[] = ids.map((id, p) => {
+    for (let j = 0; j < k; j++) col[j] = share[j * P + p];
+    const s = col[i];
+    const typical = median(col);
+    let rank = 1;
+    for (let j = 0; j < k; j++) if (col[j] > s) rank++;
+    const excess = n[p] >= minN && typical > 0 ? s / typical : NaN;
+    return { id, n: n[p], share: s, typical, excess, rank };
+  });
+  return out.sort((a, b) => {
+    const an = Number.isNaN(a.excess);
+    const bn = Number.isNaN(b.excess);
+    if (an || bn) return an === bn ? a.id - b.id : an ? 1 : -1;
+    return b.excess - a.excess || a.id - b.id;
+  });
+}
+
 export interface GroupTerms {
   /** z̄_A − z̄_B. */
   signed: Float64Array;

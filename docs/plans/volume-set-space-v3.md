@@ -19,6 +19,7 @@ let σᵢ be the SD of βᵢ over S, so the noise variance of zᵢ(v) is SEᵢ(v
 | Dispersion D(v) | (1/2N)·Σᵢ<ⱼ (zᵢ − zⱼ)² = (k/2N)·Σᵢ (zᵢ − z̄)² | Σᵢ<ⱼ (1 − rᵢⱼ) |
 | Noise floor F(v) | expected D(v) if every map had the same true pattern: (k/2N)·(k−1)/k·Σᵢ SEᵢ(v)²/σᵢ² (to be derived and tested by simulation) | expected Σᵢ<ⱼ (1 − rᵢⱼ) under shared pattern |
 | Focused map i | signed: zᵢ − z̄₋ᵢ; squared share (1/2N)·(zᵢ − z̄₋ᵢ)² plus the others' baseline (1/2N)·s²₋ᵢ(v) | mean over j≠i of (1 − rᵢⱼ) |
+| Focused ranking (added 2026-10-10, after review) | per parcel P: excessᵢ(P) = shareᵢ(P) ÷ median over all k maps of shareⱼ(P), where shareⱼ(P) is map j's focused term summed over P ÷ its total; parcels under 20 voxels or with zero median are not ranked; rankᵢ(P) = 1 + #maps with a larger share. Raw shares ranked the same parcels for every map. | — (descriptive; no noise model) |
 | Groups A, B | (1/2N)·[(z̄_A − z̄_B)² + s²_A + s²_B] for the between-group mean; within-group means carry n/(n−1) | between-group mean dissimilarity (and the stated within-group form) |
 | Reliability ρᵢ | 1 − mean_S(SEᵢ²)/Var_S(βᵢ) | — (noise ceiling √(ρᵢρⱼ); Spearman-corrected r = r/√(ρᵢρⱼ), clamped, flagged when ρ is small) |
 | Heterogeneity | per parcel on parcel-mean β and SE: Q, I² = max(0, (Q − (k−1))/Q), τ² (DerSimonian–Laird) | — (simulation: homogeneous data gives E[I²] ≈ 0) |

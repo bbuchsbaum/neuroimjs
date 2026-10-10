@@ -11,6 +11,11 @@ import {
   directionalNeighbor,
   placeLabels,
   screenRanks,
+  positionMarkers,
+  overlapArea,
+  captionCandidates,
+  freeSpot,
+  shortContrastNames,
 } from '../examples/volume-set/space';
 
 const rect = { x: 100, y: 50, w: 400, h: 200 };
@@ -190,5 +195,88 @@ describe('declutter', () => {
       { x: 500, y: 300 },
     ];
     expect(maxOverlap(declutter(pts, 40, 40, rect), 40, 40)).toBe(0);
+  });
+});
+
+describe('Space exact-position markers', () => {
+  it('marks every noticeably nudged picture, with a ring when its position lies inside another picture', () => {
+    // Picture 0 sits on its anchor; 1 was pushed 40 px right of an anchor that now lies inside picture 0;
+    // 2 was pushed 30 px down onto open ground; 3 moved 3 px (below the threshold).
+    const anchors = [
+      { x: 100, y: 100 },
+      { x: 110, y: 100 },
+      { x: 300, y: 100 },
+      { x: 500, y: 100 },
+    ];
+    const centres = [
+      { x: 100, y: 100 },
+      { x: 150, y: 100 },
+      { x: 300, y: 130 },
+      { x: 503, y: 100 },
+    ];
+    const marks = positionMarkers(anchors, centres, 30, 30, 8);
+    expect(marks.map((m) => [m.index, m.kind])).toEqual([
+      [1, 'ring'],
+      [2, 'dot'],
+    ]);
+    expect(marks[0].nudge).toBeCloseTo(40, 9);
+  });
+
+  it('never drops a marker on a crowded decluttered layout (every moved picture is marked)', () => {
+    const anchors = Array.from({ length: 30 }, (_, i) => ({ x: 300 + 25 * Math.cos(i * 2.4) * Math.sqrt(i), y: 200 + 25 * Math.sin(i * 2.4) * Math.sqrt(i) }));
+    const r = { x: 0, y: 0, w: 600, h: 400 };
+    const placed = declutter(anchors, 44, 52, r, 300, 5);
+    const marks = positionMarkers(anchors, placed, 44, 52, 9);
+    const moved = anchors.filter((a, i) => Math.hypot(placed[i].x - a.x, placed[i].y - a.y) > 9).length;
+    expect(moved).toBeGreaterThan(5);
+    expect(marks.length).toBe(moved);
+  });
+});
+
+describe('Space caption placement', () => {
+  it('measures rectangle overlap', () => {
+    expect(overlapArea({ x: 0, y: 0, w: 10, h: 10 }, { x: 5, y: 5, w: 10, h: 10 })).toBe(25);
+    expect(overlapArea({ x: 0, y: 0, w: 10, h: 10 }, { x: 10, y: 0, w: 10, h: 10 })).toBe(0);
+  });
+
+  it('prefers the bottom-left corner and moves off a picture that covers it', () => {
+    const plot = { x: 0, y: 0, w: 400, h: 300 };
+    const c = captionCandidates(plot, 120, 26);
+    expect(c[0]).toEqual({ x: 8, y: 266, w: 120, h: 26 });
+    for (const b of c) {
+      expect(b.x).toBeGreaterThanOrEqual(plot.x);
+      expect(b.x + b.w).toBeLessThanOrEqual(plot.x + plot.w);
+      expect(b.y).toBeGreaterThanOrEqual(plot.y);
+      expect(b.y + b.h).toBeLessThanOrEqual(plot.y + plot.h);
+    }
+    expect(freeSpot(c, [])).toBe(0);
+    // A picture in the bottom-left corner: the caption goes to a free spot instead.
+    const pics = [{ x: 0, y: 220, w: 90, h: 80 }];
+    const i = freeSpot(c, pics);
+    expect(i).toBeGreaterThan(0);
+    expect(overlapArea(c[i], pics[0])).toBe(0);
+    // Pictures along the whole bottom edge: still found free space higher up.
+    const row = Array.from({ length: 5 }, (_, k) => ({ x: k * 80, y: 230, w: 80, h: 70 }));
+    const j = freeSpot(c, row);
+    expect(row.every((p) => overlapArea(c[j], p) === 0)).toBe(true);
+  });
+
+  it('falls back to the least-covered candidate when nothing is free', () => {
+    const c = [
+      { x: 0, y: 0, w: 10, h: 10 },
+      { x: 20, y: 0, w: 10, h: 10 },
+    ];
+    expect(freeSpot(c, [{ x: 0, y: 0, w: 30, h: 10 }, { x: 0, y: 0, w: 5, h: 5 }])).toBe(1);
+    expect(freeSpot([], [])).toBe(-1);
+  });
+});
+
+describe('Short contrast names', () => {
+  it('drops a shared prefix only when the result stays unique and non-empty', () => {
+    expect(shortContrastNames(['cue', 'delayearly', 'delaylate'])).toEqual(['cue', 'early', 'late']);
+    expect(shortContrastNames(['cue', 'cuelate'])).toEqual(['cue', 'late']);
+    // "late" would collide with an existing contrast name: keep everything in full.
+    expect(shortContrastNames(['late', 'delaylate', 'delayearly'])).toEqual(['late', 'delaylate', 'delayearly']);
+    expect(shortContrastNames(['ab1', 'ab2'])).toEqual(['ab1', 'ab2']);
   });
 });

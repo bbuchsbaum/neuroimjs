@@ -172,6 +172,32 @@ const urlNotes: string[] = [];
   const q = new URLSearchParams(location.search);
   if (q.has('thr') && Number(q.get('thr')) !== state.thr) urlNotes.push(`threshold ${q.get('thr')} → ${state.thr}`);
   if (q.has('range') && Number(q.get('range')) !== state.range) urlNotes.push(`max ${q.get('range')} → ${state.range}`);
+  if (q.has('sv') && !state.space) urlNotes.push(`layout viewport "${q.get('sv')}" is not zoom (1–40), x, y → fit`);
+}
+/** True until the first Space drawing has checked a viewport that came from the URL (see space-view). */
+let urlViewport = state.space !== null;
+export function takeUrlViewport(): boolean {
+  const v = urlViewport;
+  urlViewport = false;
+  return v;
+}
+
+let appReady = false;
+let urlNoteUntil = 0;
+let urlNoteText = '';
+/**
+ * Announce a value from the URL that had to be corrected. Before the app is up, notes are collected and shown
+ * together; afterwards (e.g. once the atlas or participants.tsv has loaded) they are shown at once and kept for
+ * a few seconds even if a render finishes meanwhile.
+ */
+export function announceUrl(note: string): void {
+  if (!appReady) {
+    urlNotes.push(note);
+    return;
+  }
+  urlNoteText = `Adjusted from the URL: ${note}`;
+  setStatus(urlNoteText, 8000);
+  urlNoteUntil = performance.now() + 8000;
 }
 if (state.thr >= state.range) {
   const was = state.thr;
@@ -470,6 +496,13 @@ const readoutEl = $<HTMLDivElement>('#readout');
 
 let statusTimer: number | undefined;
 export function setStatus(text: string, clearAfterMs = 0): void {
+  // Progress messages finishing (a render, a layout fit) must not wipe a URL correction before it can be read.
+  if (text === '' && performance.now() < urlNoteUntil) {
+    statusEl.textContent = urlNoteText;
+    clearTimeout(statusTimer);
+    statusTimer = window.setTimeout(() => statusEl.textContent === urlNoteText && (statusEl.textContent = ''), urlNoteUntil - performance.now());
+    return;
+  }
   statusEl.textContent = text;
   clearTimeout(statusTimer);
   if (clearAfterMs) statusTimer = window.setTimeout(() => statusEl.textContent === text && (statusEl.textContent = ''), clearAfterMs);
@@ -2228,7 +2261,13 @@ async function main(): Promise<void> {
   await document.fonts?.ready;
   await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
   SV.exposeSpaceProbe();
-  if (urlNotes.length) setStatus(`Adjusted from the URL: ${urlNotes.join('; ')}`, 8000);
+  urlNotes.push(...SV.takeSpaceUrlNotes());
+  appReady = true;
+  if (urlNotes.length) {
+    urlNoteText = `Adjusted from the URL: ${urlNotes.join('; ')}`;
+    setStatus(urlNoteText, 8000);
+    urlNoteUntil = performance.now() + 8000;
+  }
   (window as unknown as { __vsReady: boolean }).__vsReady = true;
 }
 

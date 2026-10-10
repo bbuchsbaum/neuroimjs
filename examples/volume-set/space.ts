@@ -310,3 +310,95 @@ export function maxOverlap(pts: readonly { x: number; y: number }[], w: number, 
     }
   return worst;
 }
+
+export interface PositionMarker {
+  /** Index into the anchors/centres passed in. */
+  index: number;
+  /** 'dot' on open ground or the map's own picture; 'ring' when the exact position lies inside another picture. */
+  kind: 'dot' | 'ring';
+  /** Distance (px) from the exact position to the picture centre. */
+  nudge: number;
+}
+
+/**
+ * Exact-position markers for nudged pictures (boxes w × h centred at `centres`). Every picture moved more
+ * than `minNudge` from its anchor gets one, so no exact position is ever hidden: a dot, or a ring when the
+ * anchor lies inside another map's picture (a plain dot there would read as a mark on that map).
+ */
+export function positionMarkers(anchors: readonly { x: number; y: number }[], centres: readonly { x: number; y: number }[], w: number, h: number, minNudge: number): PositionMarker[] {
+  const out: PositionMarker[] = [];
+  for (let i = 0; i < anchors.length; i++) {
+    const nudge = Math.hypot(centres[i].x - anchors[i].x, centres[i].y - anchors[i].y);
+    if (!(nudge > minNudge)) continue;
+    const foreign = centres.some((c, j) => j !== i && Math.abs(anchors[i].x - c.x) < w / 2 && Math.abs(anchors[i].y - c.y) < h / 2);
+    out.push({ index: i, kind: foreign ? 'ring' : 'dot', nudge });
+  }
+  return out;
+}
+
+/** Overlap area of two rectangles (0 when disjoint). */
+export function overlapArea(a: LabelBox, b: LabelBox): number {
+  const ox = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
+  const oy = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
+  return ox > 0 && oy > 0 ? ox * oy : 0;
+}
+
+/**
+ * Where to put a w × h caption inside `rect`, in order of preference: the four corners (bottom-left first),
+ * then slid along the bottom and top edges, then along rows working up from the bottom. Candidates that do
+ * not fit are left out; when nothing fits, the bottom-left corner (clipped) is the only candidate.
+ */
+export function captionCandidates(rect: PlotRect, w: number, h: number, inset = 8, step = 24): LabelBox[] {
+  const x0 = rect.x + inset;
+  const x1 = rect.x + rect.w - inset - w;
+  const yb = rect.y + rect.h - inset - h;
+  const yt = rect.y + inset;
+  if (x1 < x0 || yb < yt) return [{ x: x0, y: Math.max(yt, yb), w, h }];
+  const out: LabelBox[] = [];
+  const row = (y: number): void => {
+    for (let x = x0; x <= x1; x += step) out.push({ x, y, w, h });
+    out.push({ x: x1, y, w, h });
+  };
+  out.push({ x: x0, y: yb, w, h }, { x: x1, y: yb, w, h }, { x: x0, y: yt, w, h }, { x: x1, y: yt, w, h });
+  row(yb);
+  row(yt);
+  for (let y = yb - step; y > yt; y -= step) row(y);
+  return out;
+}
+
+/**
+ * Index of the first candidate overlapping none of `obstacles`; when every candidate overlaps something,
+ * the one with the least overlapped area (earlier wins ties). -1 for no candidates.
+ */
+export function freeSpot(candidates: readonly LabelBox[], obstacles: readonly LabelBox[]): number {
+  let best = -1;
+  let bestArea = Infinity;
+  for (let i = 0; i < candidates.length; i++) {
+    let area = 0;
+    for (const o of obstacles) area += overlapArea(candidates[i], o);
+    if (area === 0) return i;
+    if (area < bestArea) {
+      best = i;
+      bestArea = area;
+    }
+  }
+  return best;
+}
+
+/**
+ * Short contrast names for one-line table rows: a prefix shared with another contrast is dropped
+ * (delayearly, delaylate -> early, late), unless that would leave two names equal or one empty.
+ */
+export function shortContrastNames(names: readonly string[]): string[] {
+  const out = names.map((c) => {
+    let cut = 0;
+    for (const o of names) {
+      if (o === c) continue;
+      let k = 0;
+      while (k < c.length && k < o.length && c[k] === o[k]) k++;
+      cut = Math.max(cut, k);
+    }
+    return cut >= 3 && cut < c.length ? c.slice(cut) : c;
+  });
+  return new Set(out).size === out.length && !out.some((x, i) => x !== names[i] && names.includes(x)) ? out : [...names];
+}

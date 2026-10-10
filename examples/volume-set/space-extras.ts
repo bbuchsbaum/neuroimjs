@@ -17,10 +17,10 @@ import { kde2d, densityLevels, isoContours, gridToLayout } from '../../src/volum
 import { stressShares } from '../../src/volumeset/fitShares';
 import type { Ellipse } from '../../src/volumeset/stability';
 import type { NmdsOptions } from '../../src/volumeset/nmds';
-import { THEME, FONT, fmt, hidpi, placeCrop, drawCellImage, drawCrosshair, thresholdedDiverging } from './render';
+import { THEME, FONT, fmt, hidpi, placeCrop, drawCellImage, drawCrosshair, thresholdedDiverging, simRamp } from './render';
 import { fetchCovariates, type Covariates } from './data';
 import type { EmbedOutput } from './embed-runner';
-import { spaceTransform, thumbSize, declutter, maxOverlap, zoomAbout, type SpaceTransform, type PlotRect, type Lod } from './space';
+import { spaceTransform, thumbSize, declutter, maxOverlap, zoomAbout, captionCandidates, freeSpot, shortContrastNames, type SpaceTransform, type PlotRect, type Lod, type LabelBox } from './space';
 import * as M from './main';
 import * as SV from './space-view';
 import * as V3 from './space-v3';
@@ -59,8 +59,14 @@ const REGION_RADII = [10, 15, 25];
 /** Corrections to Space URL options, announced once the view is up (like the main viewer's). */
 const urlNotes: string[] = [];
 
+/** Before the app is up notes are collected (main.ts announces them with its own); afterwards they show at once. */
 function announce(note: string): void {
-  urlNotes.push(note);
+  if ((window as unknown as { __vsReady?: boolean }).__vsReady) M.announceUrl(note);
+  else urlNotes.push(note);
+}
+
+export function takeUrlNotes(): string[] {
+  return urlNotes.splice(0);
 }
 
 export function readParams(q: URLSearchParams): void {
@@ -72,10 +78,12 @@ export function readParams(q: URLSearchParams): void {
   const d = q.get('sd');
   opts.density = d === 'on' || d === 'off' ? d : 'auto';
   const r = q.get('sr')?.split(',').map(Number);
-  opts.region = r && r.length === 4 && r.every(Number.isFinite) && r.slice(0, 3).every((v) => Number.isInteger(v) && v >= 0) && REGION_RADII.includes(r[3])
-    ? { ijk: [r[0], r[1], r[2]], radiusMm: r[3] }
-    : null;
-  if (q.has('sr') && !opts.region) announce(`region "${q.get('sr')}" is not i,j,k with a radius of ${REGION_RADII.join(', ')} mm → whole brain`);
+  const okCentre = !!r && r.length === 4 && r.every(Number.isFinite) && r.slice(0, 3).every((v) => Number.isInteger(v) && v >= 0) && r[3] > 0;
+  // An unsupported radius snaps to the nearest offered one (said so); a malformed centre falls back to whole brain.
+  const radius = okCentre ? REGION_RADII.reduce((best, x) => (Math.abs(x - r![3]) < Math.abs(best - r![3]) ? x : best)) : 0;
+  opts.region = okCentre ? { ijk: [r![0], r![1], r![2]], radiusMm: radius } : null;
+  if (q.has('sr') && !opts.region) announce(`region "${q.get('sr')}" is not i,j,k,radius → whole brain`);
+  else if (opts.region && radius !== r![3]) announce(`region radius ${r![3]} mm → ${radius} mm (offered: ${REGION_RADII.join(', ')} mm)`);
   opts.trajectories = q.get('st') === '1';
   opts.subset = new Set((q.get('ss') ?? '').split(',').filter((x) => /^[\w.-]{1,40}$/.test(x)));
   const cp = q.get('cp');
@@ -102,8 +110,14 @@ export function writeParams(q: URLSearchParams): void {
 const SUBSET = '#7ee0a6';
 /** Halos and stability use one neutral hue: not a t colour, not the brand, not the cursor cyan. */
 const NEUTRAL = '205,208,228';
-const CATEGORY_COLOURS = ['#f4a261', '#8ab4f8', '#d39cf5', '#7ee0a6', '#ff8fab', '#e9c46a'];
-const SEQUENTIAL = chroma.scale(['#3b2f7a', '#3b6fb6', '#2ba59a', '#9ccc5a', '#f3e05b']).mode('lch');
+// Mark colours stay clear of the statistic's ramps (red–orange–yellow positive, blue negative), so a bar
+// never reads as a t or β value. Violet (the focus colour) comes last among the categories.
+const CATEGORY_COLOURS = ['#22d3ee', '#e879f9', '#a3e635', '#d4d6e6', '#99f6e4', '#9b86ff'];
+/** Sequential violet (the similarity ramp, lifted off the background so the lowest value still shows): 0..1. */
+const SEQUENTIAL = (t: number): chroma.Color => simRamp(0.18 + 0.82 * Math.max(0, Math.min(1, t)));
+/** Diverging cyan (negative) – neutral grey (0) – violet (positive) for signed marks such as the parcel brush. */
+// Lightness rises from the grey centre toward both ends (which keep their hue), so magnitude reads as well as sign.
+const DIVERGING = chroma.scale(['#8eeefb', '#22d3ee', '#16697a', '#4a4d5e', '#5a4aa8', '#9b86ff', '#cdc2ff']).mode('lch');
 const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 
 // ---------------------------------------------------------------------------
@@ -124,7 +138,10 @@ function ensureStyle(): void {
     .space-tools .chip:hover { color: var(--text); }
     .space-tools .chip[aria-pressed='true'] { color: var(--text); background: var(--brand-soft); }
     .space-tools .chip.subset[aria-pressed='true'] { border-color: ${SUBSET}; background: rgba(126,224,166,0.14); }
-    .space-tools select.chip { padding: 2px 6px; width: 168px; }
+    .space-tools select.chip { padding: 2px 6px; }
+    .space-tools .sm { display: none; }
+    .space-tools.compact .lg { display: none; }
+    .space-tools.compact .sm { display: inline; }
     #side .chan-legend { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 11px; color: var(--muted); margin: 4px 0; }
     #side .chan-legend i { display: inline-block; width: 11px; height: 11px; vertical-align: -1px; margin-right: 4px; border-radius: 2px; }
     #side .chan-legend i.miss { border: 1px dashed var(--muted); }
@@ -156,7 +173,7 @@ export function syncToolbar(): void {
     void fetchCovariates().then((c) => {
       covariates = c;
       if (opts.colour.startsWith('cov:') && !c?.fields.some((f) => `cov:${f.name}` === opts.colour)) {
-        M.setStatus(`Adjusted from the URL: ${c ? `no "${opts.colour.slice(4)}" column in participants.tsv` : 'no participants.tsv'} → marks off`, 6000);
+        announce(`${c ? `no "${opts.colour.slice(4)}" column in participants.tsv` : `marks "${opts.colour}" need a participants.tsv, and there is none`} → marks off`);
         opts.colour = '';
         M.scheduleDraw();
       }
@@ -174,7 +191,6 @@ export function syncToolbar(): void {
   // Left-aligned at the layout's left edge, so a chip appearing at the end never shifts the others.
   const g = SV.spaceGeom;
   if (g) toolbar.style.left = `${Math.round(g.plot.x)}px`;
-  if (urlNotes.length) M.setStatus(`Adjusted from the URL: ${urlNotes.splice(0).join('; ')}`, 6000);
   // Rebuild only when the set of controls changes; otherwise update in place, so a click is never
   // lost to a rebuild between pointer-down and pointer-up.
   const covOpts = (covariates?.fields ?? []).map((f) => `<option value="cov:${f.name}">Mark: ${f.name}${f.kind === 'numeric' ? '' : ' (category)'}</option>`).join('');
@@ -184,12 +200,12 @@ export function syncToolbar(): void {
     toolbar.innerHTML = `
     <select class="chip" id="sx-colour" title="Mark each map with a value (a bar under its picture); positions do not change" aria-label="Mark maps by">
     </select>
-    ${chip('sx-halos', 'Fit halos (H)', false, "Halo size = each map's share of the layout misfit")}
+    ${chip('sx-halos', both('Fit halos', 'Halos', ' (H)'), false, "Halo size = each map's share of the layout misfit")}
     ${chip('sx-stab', 'Stability', false, 'Where each map would sit if blocks of the compared voxels were resampled (block bootstrap)')}
     ${chip('sx-dens', 'Density', false, 'Contours of where maps concentrate in the layout')}
     ${chip('sx-lens', 'Magnifier (L)', false, 'A loupe that magnifies the view under the pointer; nothing moves')}
-    ${chip('sx-region', 'Similarity: whole brain', false, 'Lay out by similarity within a sphere: first click applies 10 mm at the cursor, further clicks widen it (15, 25 mm) and then return to the whole brain')}
-    ${chip('sx-traj', 'Contrasts side by side', false, 'Show every contrast at the same positions (this layout), one panel per contrast')}
+    ${chip('sx-region', regionLabel(), false, 'Lay out by similarity within a sphere: first click applies 10 mm at the cursor, further clicks widen it (15, 25 mm) and then return to the whole brain')}
+    ${chip('sx-traj', both('Contrasts side by side', 'Side by side'), false, 'Show every contrast at the same positions (this layout), one panel per contrast')}
     ${chip('sx-explain', 'Explain', false, 'What drives the layout: the dissimilarity split by voxel and parcel, with the part noise alone would produce')}
     ${chip('sx-noise', 'Correct for noise', false, 'Lay out by noise-corrected similarity (Spearman: r / √(ρᵢρⱼ)); unreliable maps are set aside')}
     ${opts.subset.size ? chip('sx-subset', '', true, 'Clear the selected group (Esc). Shift-drag to add, Shift+Alt-drag to remove', 'subset') : ''}`;
@@ -200,25 +216,54 @@ export function syncToolbar(): void {
     const el = toolbar!.querySelector(`#${id}`) as HTMLElement | null;
     if (!el) return;
     el.setAttribute('aria-pressed', String(pressed));
-    if (label !== undefined && el.textContent !== label) el.textContent = label;
+    if (label !== undefined && el.innerHTML !== label) el.innerHTML = label;
   };
   set('sx-halos', opts.halos);
   set('sx-stab', opts.stability);
   set('sx-dens', densityOn());
   set('sx-lens', opts.lens);
-  set('sx-region', opts.region !== null, opts.region ? `Similarity: ${opts.region.radiusMm} mm sphere` : 'Similarity: whole brain');
+  set('sx-region', opts.region !== null, regionLabel());
   set('sx-traj', opts.trajectories);
   set('sx-explain', opts.explain !== '');
   set('sx-noise', opts.noiseCorrected);
   set('sx-subset', true, `Group of ${opts.subset.size} ✕`);
   const sel = toolbar.querySelector('#sx-colour') as HTMLSelectElement;
-  const brushed = opts.colour.startsWith('parcel:') ? `<option value="${opts.colour}">Mark: parcel ${opts.colour.slice(7)} (brushed)</option>` : '';
+  const brushed = opts.colour.startsWith('parcel:') ? `<option value="${opts.colour}">Mark: parcel ${opts.colour.slice(7)}</option>` : '';
   const optionsHtml = `<option value="">Mark: none</option><option value="cursor">Mark: value at cursor</option><option value="rel">Mark: reliability</option>${covOpts}${brushed}`;
   if (sel && sel.dataset.options !== optionsHtml) {
     sel.innerHTML = optionsHtml;
     sel.dataset.options = optionsHtml;
   }
   if (sel && sel.value !== opts.colour) sel.value = opts.colour;
+  // The select is as wide as the chosen mark (never truncated, never wider than it needs at rest).
+  if (sel) {
+    const label = sel.selectedOptions[0]?.textContent ?? '';
+    measureCtx ??= document.createElement('canvas').getContext('2d');
+    if (measureCtx) {
+      measureCtx.font = `12px ${FONT.sans}`;
+      const w = `${Math.ceil(measureCtx.measureText(label).width) + 34}px`;
+      if (sel.style.width !== w) sel.style.width = w;
+    }
+  }
+  // Short chip labels only when the full ones would wrap to a second row (narrow windows).
+  const fitKey = `${view.clientWidth}|${toolbar.style.left}|${toolbar.innerHTML.length}|${sel?.style.width}`;
+  if (toolbar.dataset.fit !== fitKey) {
+    toolbar.dataset.fit = fitKey;
+    toolbar.classList.remove('compact');
+    const first = toolbar.firstElementChild as HTMLElement | null;
+    if (first && toolbar.offsetHeight > first.offsetHeight * 1.5) toolbar.classList.add('compact');
+  }
+}
+
+let measureCtx: CanvasRenderingContext2D | null = null;
+
+/** Full and short forms of a chip label (the short one is shown only in a compact toolbar). */
+function both(long: string, short: string, tail = ''): string {
+  return `<span class="lg">${long}</span><span class="sm">${short}</span>${tail}`;
+}
+
+function regionLabel(): string {
+  return opts.region ? both(`Similarity: ${opts.region.radiusMm} mm sphere`, `${opts.region.radiusMm} mm sphere`) : both('Similarity: whole brain', 'Whole brain');
 }
 
 function wireToolbar(): void {
@@ -317,11 +362,21 @@ export function regionBasis(a: M.Analysis): SimilarityBasis | null {
   if (!b) {
     const w = a.set.space.gridToCoord(r.ijk) as number[];
     const [model, , stat] = a.key.split('|');
+    const voxels = spherePositions(a, r.ijk, r.radiusMm);
+    if (voxels.length === 0) {
+      // Off the grid or entirely outside the brain mask: say so rather than "no map can be compared".
+      const dim = a.set.dim;
+      const off = r.ijk.some((v, d) => v >= dim[d]);
+      announce(`region at voxel ${r.ijk.join(',')} ${off ? `is outside the ${dim.join('×')} grid` : `holds no brain voxels within ${r.radiusMm} mm`} → whole brain`);
+      opts.region = null;
+      M.scheduleDraw();
+      return null;
+    }
     b = similarityBasis(
       a.set.members.map((m) => m.values),
       a.ids,
       {
-        voxels: spherePositions(a, r.ijk, r.radiusMm),
+        voxels,
         region: `sphere ${r.radiusMm} mm at (${w.map((v) => fmt(v, 1)).join(', ')}) mm`,
         labels: { model, contrast: a.contrast, stat },
         maskRule: 'template brain mask ∩ voxels where at least one map is finite and non-zero',
@@ -531,8 +586,7 @@ export function memberColour(a: M.Analysis, member: number): string | 'missing' 
     const pz = brushedValues(a);
     const v = pz?.values.get(member);
     if (v === undefined || !Number.isFinite(v)) return 'missing';
-    const { cmap, range } = brushScale(pz!.range);
-    return rgb(cmap.getColor(Math.max(-range, Math.min(range, v))));
+    return brushColour(v, pz!.range);
   }
   if (opts.colour === 'cursor') {
     const v = cursorValue(a, member);
@@ -583,7 +637,6 @@ export function drawMemberColour(ctx: CanvasRenderingContext2D, colour: string, 
 }
 
 let brushCache: { key: string; values: Map<number, number>; range: number } | null = null;
-let brushCmap: { range: number; cmap: ColorMap } | null = null;
 
 /** Each placed map's mean z in the brushed parcel (atlas permitting). */
 function brushedValues(a: M.Analysis): { values: Map<number, number>; range: number } | null {
@@ -597,14 +650,15 @@ function brushedValues(a: M.Analysis): { values: Map<number, number>; range: num
     const values = V3.parcelMeanZ(a, b, sa, id);
     let mx = 0;
     for (const v of values.values()) if (Number.isFinite(v)) mx = Math.max(mx, Math.abs(v));
-    brushCache = { key, values, range: niceCeil(mx || 1) };
+    // The observed range, not a rounded-up one, so the most extreme maps reach the ends of the ramp.
+    brushCache = { key, values, range: mx || 1 };
   }
   return brushCache;
 }
 
-function brushScale(range: number): { cmap: ColorMap; range: number } {
-  if (!brushCmap || brushCmap.range !== range) brushCmap = { range, cmap: thresholdedDiverging(range, 0) };
-  return brushCmap;
+/** Brushed-parcel mark: cyan (below 0) – grey – violet (above 0), symmetric about 0 up to the largest |value|. */
+function brushColour(v: number, range: number): string {
+  return DIVERGING((Math.max(-range, Math.min(range, v)) / range + 1) / 2).hex();
 }
 
 /** The parcellation, once loaded (null until then or when the data has none). */
@@ -615,6 +669,15 @@ function ensureAtlas(): void {
   atlasRequested = true;
   void V3.loadSpaceAtlas().then((sa) => {
     atlasNow = sa;
+    // A brushed parcel from a link must exist in this parcellation.
+    if (opts.colour.startsWith('parcel:')) {
+      const id = Number(opts.colour.slice(7));
+      if (!sa || !sa.atlas.regions.get(id)) {
+        announce(sa ? `no parcel ${id} in ${sa.name} → marks off` : `parcel marks need a parcellation, and none is served → marks off`);
+        opts.colour = '';
+        if (M.state.mode === 'space') syncToolbar();
+      }
+    }
     M.scheduleDraw();
   });
 }
@@ -625,12 +688,13 @@ function channelLegendHtml(a: M.Analysis): string {
   if (opts.colour === 'rel' || opts.colour.startsWith('parcel:')) {
     const sw = (c: string, label: string): string => `<span><i style="background:${c}"></i>${label}</span>`;
     if (opts.colour === 'rel')
-      return `<section><h3>Marks</h3><p class="note">Reliability ρ: the share of each map's spatial variance that is not noise (${M.state.stat === 't' ? 't-maps: noise variance ≈ 1 per voxel' : 'β-maps: noise variance = SE²'}). Maps with low ρ correlate weakly with everyone and drift to the edge of a layout for that reason alone.</p><div class="chan-legend">${[0, 0.25, 0.5, 0.75, 1].map((t) => sw(SEQUENTIAL(t).hex(), t.toFixed(2))).join('')}</div></section>`;
+      return `<section><h3>Marks</h3><p class="note">Reliability ρ: the share of each map's spatial variance that is not noise (${M.state.stat === 't' ? 't-maps: noise variance ≈ 1 per voxel' : 'β-maps: noise variance = SE²'}). Maps with low ρ correlate weakly with everyone and drift to the edge of a layout for that reason alone.</p><div class="chan-legend">${[0, 0.25, 0.5, 0.75, 1].map((t) => sw(SEQUENTIAL(t).hex(), M.fmtR(t))).join('')}</div></section>`;
     const pz = brushedValues(a);
     const id = Number(opts.colour.slice(7));
     if (!pz) return '';
-    const { cmap, range } = brushScale(pz.range);
-    return `<section><h3>Marks</h3><p class="note">Each map's mean z in <b>${atlasNow?.label(id) ?? `parcel ${id}`}</b> (z: the map standardised over the compared voxels). Positions do not change.</p><div class="chan-legend">${[-range, -range / 2, 0, range / 2, range].map((v) => sw(rgb(cmap.getColor(v)), fmt(v, 1))).join('')}</div></section>`;
+    const range = pz.range;
+    const digits = range >= 10 ? 0 : range >= 1 ? 1 : 2;
+    return `<section><h3>Marks</h3><p class="note">Each map's mean z in <b>${atlasNow?.label(id) ?? `parcel ${id}`}</b> (z: the map standardised over the compared voxels), on a scale symmetric about 0 up to the largest |mean z| observed. Positions do not change.</p><div class="chan-legend">${[-range, -range / 2, 0, range / 2, range].map((v) => sw(brushColour(v, range), fmt(v, digits))).join('')}</div></section>`;
   }
   const st = M.STAT_LABEL[M.state.stat];
   const sw = (c: string, label: string): string => (c === 'missing' ? `<span><i class="miss"></i>${label}</span>` : `<span><i style="background:${c}"></i>${label}</span>`);
@@ -953,9 +1017,20 @@ function drawNoiseYardstick(ctx: CanvasRenderingContext2D, info: LayerInfo): voi
     }
   const len = units * pxPerUnit(info);
   if (!(len > 1)) return;
-  const x = info.plot.x + 8;
-  const y = info.plot.y + info.plot.h - 10;
   ctx.save();
+  ctx.font = `11px ${FONT.sans}`;
+  // Below the smallest observed pair the length is a straight-line extrapolation to zero, not a reading of the fit: say so.
+  const lo = ds[idx[0]];
+  const label =
+    d0 < lo
+      ? `noise alone: 1 − r ≈ ${M.fmtR(d0)}, below every pair (min ${M.fmtR(lo)}); length extrapolated`
+      : `noise alone: two copies of one map, 1 − r ≈ ${M.fmtR(d0)}, would sit about this far apart`;
+  // Label above the bar, as one block placed where it covers no picture, mark or ID.
+  const box = placeCaption(info.plot, Math.max(len, ctx.measureText(label).width) + 8, 26);
+  const x = box.x + 4;
+  const y = box.y + 20;
+  ctx.fillStyle = 'rgba(13,14,20,0.82)';
+  ctx.fillRect(box.x, box.y, box.w, 15);
   ctx.strokeStyle = `rgba(${NEUTRAL},0.9)`;
   ctx.lineWidth = 2;
   ctx.beginPath();
@@ -966,17 +1041,35 @@ function drawNoiseYardstick(ctx: CanvasRenderingContext2D, info: LayerInfo): voi
   ctx.moveTo(x + len, y - 4);
   ctx.lineTo(x + len, y + 4);
   ctx.stroke();
-  ctx.font = `11px ${FONT.sans}`;
   ctx.fillStyle = THEME.muted;
   ctx.textBaseline = 'bottom';
-  // Below the smallest observed pair the length is a straight-line extrapolation to zero, not a reading of the fit: say so.
-  const lo = ds[idx[0]];
-  const label =
-    d0 < lo
-      ? `noise alone: 1 − r ≈ ${M.fmtR(d0)}, below every pair (min ${M.fmtR(lo)}); length extrapolated`
-      : `noise alone: two copies of one map, 1 − r ≈ ${M.fmtR(d0)}, would sit about this far apart`;
-  ctx.fillText(label, x, y - 6);
+  ctx.fillText(label, x, box.y + 14);
   ctx.restore();
+}
+
+/**
+ * A free spot for a w × h caption inside the plot (see captionCandidates for the order of preference): it
+ * avoids every picture, exact-position mark, ID label and earlier caption, and is recorded so later captions
+ * and the floating preview avoid it too.
+ */
+function placeCaption(plot: PlotRect, w: number, h: number, near: LabelBox[] | null = null): LabelBox {
+  const g = SV.spaceGeom;
+  const obstacles: LabelBox[] = [...(g?.marks.map((mk) => mk.box) ?? []), ...(g?.captions ?? [])];
+  const candidates = near ?? captionCandidates(plot, w, h);
+  const box = candidates[Math.max(0, freeSpot(candidates, obstacles))];
+  g?.captions?.push(box);
+  return box;
+}
+
+/** Label beside a point (right, left, above, below), kept inside the plot. */
+function besidePoint(plot: PlotRect, px: number, py: number, w: number, h: number): LabelBox[] {
+  const fit = (x: number, y: number): LabelBox => ({
+    x: Math.max(plot.x, Math.min(plot.x + plot.w - w, x)),
+    y: Math.max(plot.y, Math.min(plot.y + plot.h - h, y)),
+    w,
+    h,
+  });
+  return [fit(px + 8, py - h / 2), fit(px - 8 - w, py - h / 2), fit(px - w / 2, py - 10 - h), fit(px - w / 2, py + 10)];
 }
 
 /** envfit-style arrows (numeric covariates) or centroids (categories) for the Marked covariate. */
@@ -1029,11 +1122,11 @@ function drawCovariateArrows(ctx: CanvasRenderingContext2D, info: LayerInfo): vo
     ctx.closePath();
     ctx.fill();
     const label = `${field} ↑  R² ${M.fmtR(fit.r2)}, p ${fit.p < 0.001 ? '< .001' : M.fmtR(fit.p)}`;
-    const w = ctx.measureText(label).width;
+    const lb = placeCaption(info.plot, 0, 0, besidePoint(info.plot, tx, ty, ctx.measureText(label).width + 8, 16));
     ctx.fillStyle = 'rgba(13,14,20,0.85)';
-    ctx.fillRect(tx + 6, ty - 8, w + 8, 16);
+    ctx.fillRect(lb.x, lb.y, lb.w, lb.h);
     ctx.fillStyle = THEME.text;
-    ctx.fillText(label, tx + 10, ty);
+    ctx.fillText(label, lb.x + 4, lb.y + 8);
   } else if (fit.centroids) {
     for (const cen of fit.centroids) {
       const [x, y] = toScreen(cen.x, cen.y);
@@ -1046,11 +1139,11 @@ function drawCovariateArrows(ctx: CanvasRenderingContext2D, info: LayerInfo): vo
       ctx.lineTo(x, y + 6);
       ctx.stroke();
       const label = `${cen.level} (${cen.n})`;
-      const w = ctx.measureText(label).width;
+      const lb = placeCaption(info.plot, 0, 0, besidePoint(info.plot, x, y, ctx.measureText(label).width + 8, 16));
       ctx.fillStyle = 'rgba(13,14,20,0.85)';
-      ctx.fillRect(x + 8, y - 8, w + 8, 16);
+      ctx.fillRect(lb.x, lb.y, lb.w, lb.h);
       ctx.fillStyle = THEME.text;
-      ctx.fillText(label, x + 12, y);
+      ctx.fillText(label, lb.x + 4, lb.y + 8);
     }
   }
   ctx.restore();
@@ -1285,21 +1378,41 @@ function currentExplain(a: M.Analysis): V3.ExplainResult | null {
   return V3.explain(a, b, explainScope(a, b), atlasNow);
 }
 
-const pictureScale = new Map<string, number>();
+/** Explain colours: never red/blue, which mean the t/β statistic. Violet ramp from the page ground for amounts. */
+const EXPLAIN_SEQ = chroma.scale([THEME.bg, '#9b86ff', '#f4f1ff']).mode('lab');
+/** Signed departures: cyan (below) ↔ neutral dark ↔ violet (above), symmetric. */
+const EXPLAIN_DIV = chroma.scale(['#22d3ee', '#1c1d27', '#9b86ff']).domain([-1, 0, 1]).mode('lab');
+/** Signed pictures hide |value| below this fraction of the scale. */
+const EXPLAIN_DIV_HIDE = 0.08;
 
-/** The Explain picture in the dock: the signed difference map, or the per-voxel share (beyond noise when known). */
+/** Per Explain picture: the colour scale end (99.5th percentile of |value| over the support) and the mean value. */
+const pictureScale = new Map<string, { range: number; mean: number }>();
+
+function explainPictureScale(ex: V3.ExplainResult): { range: number; mean: number } {
+  let s = pictureScale.get(ex.key);
+  if (!s) {
+    const abs: number[] = [];
+    let sum = 0;
+    for (let m = 0; m < ex.picture.length; m++) {
+      const v = ex.picture[m];
+      if (!Number.isFinite(v)) continue;
+      abs.push(Math.abs(v));
+      sum += v;
+    }
+    abs.sort((x, y) => x - y);
+    s = { range: abs[Math.min(abs.length - 1, Math.floor(abs.length * 0.995))] || 1e-9, mean: abs.length ? sum / abs.length : NaN };
+    if (pictureScale.size > 24) pictureScale.clear();
+    pictureScale.set(ex.key, s);
+  }
+  return s;
+}
+
+/** The Explain picture in the dock: the signed difference map, or the per-voxel term (beyond noise when known). */
 function drawExplainDock(ctx: CanvasRenderingContext2D, g: SV.SpaceGeom): boolean {
   const a = g.a;
   const ex = currentExplain(a);
   if (!ex || !g.dock) return false;
-  let range = pictureScale.get(ex.key);
-  if (range === undefined) {
-    const abs: number[] = [];
-    for (let m = 0; m < ex.picture.length; m += 2) if (Number.isFinite(ex.picture[m])) abs.push(Math.abs(ex.picture[m]));
-    abs.sort((x, y) => x - y);
-    range = abs[Math.floor(abs.length * 0.995)] || 1e-9;
-    pictureScale.set(ex.key, range);
-  }
+  const { range, mean } = explainPictureScale(ex);
   const asp = M.sliceAspect(a.set);
   const w = g.dock.w;
   const h = Math.round(w / asp);
@@ -1320,23 +1433,23 @@ function drawExplainDock(ctx: CanvasRenderingContext2D, g: SV.SpaceGeom): boolea
   ctx.fillRect(v.dest.x, v.dest.y, v.dest.w, v.dest.h);
   const slice = a.set.slice(ex.picture, M.state.orient, M.sliceIndex());
   const img = new ImageData(slice.width, slice.height);
-  const cm = ex.signed ? thresholdedDiverging(range, range * 0.08) : null;
   for (let q = 0; q < slice.data.length; q++) {
     const val = slice.data[q];
     if (!Number.isFinite(val)) continue;
     let c: number[];
     let alpha: number;
-    if (cm) {
-      if (Math.abs(val) < range * 0.08) continue;
-      c = cm.getColor(Math.max(-range, Math.min(range, val)));
+    if (ex.signed) {
+      const t = Math.max(-1, Math.min(1, val / range));
+      if (Math.abs(t) < EXPLAIN_DIV_HIDE) continue;
+      c = EXPLAIN_DIV(t).rgb();
       alpha = 1;
     } else {
       const t = Math.max(0, Math.min(1, val / range));
       if (t < 0.04) continue;
-      c = SEQUENTIAL(t).rgb().map((u) => u / 255);
+      c = EXPLAIN_SEQ(t).rgb();
       alpha = 0.35 + 0.65 * t;
     }
-    img.data.set([c[0] * 255, c[1] * 255, c[2] * 255, alpha * 255], q * 4);
+    img.data.set([c[0], c[1], c[2], alpha * 255], q * 4);
   }
   const oc = document.createElement('canvas');
   oc.width = slice.width;
@@ -1344,16 +1457,39 @@ function drawExplainDock(ctx: CanvasRenderingContext2D, g: SV.SpaceGeom): boolea
   oc.getContext('2d')!.putImageData(img, 0, 0);
   drawCellImage(ctx, M.underSilhouette(a), oc, v);
   y = v.dest.y + v.dest.h + 6;
-  ctx.font = `10.5px ${FONT.sans}`;
+  // Legend bar drawn from the same ramp as the picture, with its end values.
+  const bar = ctx.createLinearGradient(x0, 0, x0 + w, 0);
+  for (let s = 0; s <= 8; s++) bar.addColorStop(s / 8, (ex.signed ? EXPLAIN_DIV(-1 + s / 4) : EXPLAIN_SEQ(s / 8)).hex());
+  ctx.fillStyle = bar;
+  ctx.fillRect(x0, y, w, 7);
+  y += 9;
+  ctx.font = `10px ${FONT.mono}`;
   ctx.fillStyle = THEME.muted;
+  if (ex.signed) {
+    ctx.fillText(`−${fmt(range)}`, x0, y);
+    ctx.textAlign = 'center';
+    ctx.fillText('0', x0 + w / 2, y);
+    ctx.textAlign = 'right';
+    ctx.fillText(`+${fmt(range)}`, x0 + w, y);
+  } else {
+    ctx.fillText('0', x0, y);
+    ctx.textAlign = 'right';
+    ctx.fillText(Number.isFinite(mean) && mean > 0 ? `${(range / mean).toFixed(1)}× average voxel` : fmt(range, 3), x0 + w, y);
+  }
+  ctx.textAlign = 'left';
+  y += 14;
+  ctx.font = `10.5px ${FONT.sans}`;
   const legend = ex.signed
     ? ex.scope.kind === 'focused'
-      ? 'warm: higher than the rest · cool: lower (z)'
-      : 'warm: group higher · cool: group lower (z)'
+      ? `z difference, not t. Violet: ${a.ids[ex.scope.member]} above the others' mean; cyan: below.`
+      : "z difference, not t. Violet: group mean above the rest's; cyan: below."
     : ex.noiseShare !== null
-      ? 'brighter: more divergence beyond noise'
-      : 'brighter: more divergence';
+      ? 'Brighter: more of the total pairwise 1 − r beyond noise.'
+      : 'Brighter: more of the total pairwise 1 − r.';
+  // The dock's caption room is small; drop lines that would fall off the canvas (the panel repeats them).
+  const bottom = ctx.canvas.clientHeight - 2;
   for (const line of wrapLines(ctx, legend, w)) {
+    if (y + 12 > bottom) break;
     ctx.fillText(line, x0, y);
     y += 13;
   }
@@ -1583,7 +1719,34 @@ function layersSection(a: M.Analysis): string {
   return lines.length ? `<section><h3>Layers</h3>${lines.map((l) => `<p class="note">${l}</p>`).join('')}</section>` : '';
 }
 
-const pct = (x: number | null): string => (x === null || !Number.isFinite(x) ? '–' : `${Math.round(x * 100)}%`);
+/** Shares as percent: one decimal, two below 1% (parcel shares are mostly 0.05–3%). */
+const pct = (x: number | null): string => (x === null || !Number.isFinite(x) ? '–' : `${(x * 100).toFixed(Math.abs(x) < 0.00995 ? 2 : 1)}%`);
+/** Ratios to a reference (×size, ×typical): two decimals below 10. */
+const times = (x: number): string => (Number.isFinite(x) ? `${x < 10 ? x.toFixed(2) : x.toFixed(1)}×` : '–');
+
+/** Open/closed state of the panel's "What this shows" disclosures, kept across panel rebuilds. */
+const foldOpen = new Set<string>();
+let foldWired = false;
+
+function fold(key: string, body: string): string {
+  if (!foldWired) {
+    foldWired = true;
+    // `toggle` does not bubble; listen in the capture phase on the panel that is rebuilt underneath.
+    M.side.addEventListener(
+      'toggle',
+      (e) => {
+        const d = e.target;
+        if (d instanceof HTMLDetailsElement && d.dataset.fold) (d.open ? foldOpen.add(d.dataset.fold) : foldOpen.delete(d.dataset.fold));
+      },
+      true
+    );
+  }
+  return `<details class="fit-details" data-fold="${key}"${foldOpen.has(key) ? ' open' : ''}><summary>What this shows</summary>${body}</details>`;
+}
+
+/** Parcel cell: one-line abbreviation, full name in the tooltip. */
+const parcelCell = (p: { id: number; name: string; short: string }, extra = ''): string =>
+  `<td><button data-parcel="${p.id}" title="${p.name}${extra}. Click to mark maps by this parcel and go to it.">${p.short}</button></td>`;
 
 function explainSection(a: M.Analysis): string {
   if (!opts.explain || opts.trajectories) return '';
@@ -1592,35 +1755,84 @@ function explainSection(a: M.Analysis): string {
   const scopeBtn = (v: 'all' | 'focused' | 'group', label: string, disabled: boolean): string =>
     `<button class="ghost" data-scope="${v}" aria-pressed="${opts.explain === v}"${disabled ? ' disabled title="Select a map (focused) or Shift-drag a group first"' : ''}>${label}</button>`;
   const hasFocus = M.selectedMember(a) !== undefined && b.eligible.includes(M.selectedMember(a)!);
-  const scopes = `<div id="space-actions">${scopeBtn('all', 'All maps', false)}${scopeBtn('focused', 'Focused map', !hasFocus)}${scopeBtn('group', 'Group vs rest', opts.subset.size === 0)}</div>`;
+  const scopes = `<div id="space-actions">${scopeBtn('all', 'All maps', false)}${scopeBtn('focused', 'Focused', !hasFocus)}${scopeBtn('group', 'Group', opts.subset.size === 0)}</div>`;
   if (!ex)
     return `<section><h3>Explain</h3>${scopes}<p class="note">${b.eligible.length > V3.EXPLAIN_MAX_MAPS ? `Explain runs on up to ${V3.EXPLAIN_MAX_MAPS} maps in this browser view (${b.eligible.length} placed).` : 'Needs at least two comparable maps.'}</p></section>`;
-  const noise =
-    ex.noiseShare !== null
-      ? `<p class="note">About <b>${pct(ex.noiseShare)}</b> of the total is what independent measurement noise alone would produce (${M.state.stat === 't' ? 'unit noise per voxel in a t-map' : 'from each map’s SE'}); the picture shows the part beyond it. Maps that differ in reliability add a little more on top of that, so treat the remainder as an upper bound on true pattern differences.</p>`
-      : '';
-  let parcels = '';
-  if (!atlasNow) parcels = '<p class="note">No parcellation is available for this template, so only the voxel picture is shown.</p>';
-  else if (ex.parcels) {
+  const k = b.eligible.length;
+  const focusId = ex.scope.kind === 'focused' ? a.ids[ex.scope.member] : '';
+  const formula =
+    ex.scope.kind === 'all'
+      ? '(k/2N)·Σᵢ(zᵢ − z̄)², the spread of the maps at the voxel,'
+      : ex.scope.kind === 'focused'
+        ? `(1/2N)·mean over the other maps j of (z<sub>${focusId}</sub> − zⱼ)²`
+        : '(1/2N)·mean over group map a and other map b of (z<sub>a</sub> − z<sub>b</sub>)²';
+  const prose: string[] = [
+    `The per-voxel term ${formula} sums exactly to the ${ex.totalLabel} (${ex.total.toFixed(3)}) over the ${b.support.length.toLocaleString()} compared voxels (N); a parcel's share is its part of that sum. Maps are z-scored over those voxels, so this explains differences in spatial pattern, not overall amplitude. Descriptive: voxels are spatially correlated, and the layout was built from these same voxels.`,
+  ];
+  if (ex.noiseShare !== null)
+    prose.push(
+      `About <b>${pct(ex.noiseShare)}</b> of the total is what independent measurement noise alone would produce (${M.state.stat === 't' ? 'unit noise per voxel in a t-map' : 'from each map’s SE'}); the picture and the &gt;noise column show the part beyond it (hover a parcel for its share of the voxels and ×size, share ÷ that). Maps that differ in reliability add a little more on top of that, so treat the remainder as an upper bound on true pattern differences.`
+    );
+  const sc = explainPictureScale(ex);
+  prose.push(
+    ex.signed
+      ? `Picture: ${ex.scope.kind === 'focused' ? `z<sub>${focusId}</sub> − the mean z of the other maps` : 'the group’s mean z − the rest’s'} on this slice, in z units (each map z-scored over the compared voxels), not a t statistic. Violet above, cyan below; the scale ends at ±${fmt(sc.range)}, the 99.5th percentile of |value|, and |value| under ${fmt(sc.range * EXPLAIN_DIV_HIDE)} is not drawn.${ex.scope.kind === 'focused' ? ' It includes divergence that every map shows; the ×typical column corrects for that, the picture does not.' : ''}`
+      : `Picture: the per-voxel term${ex.noiseShare !== null ? ' minus the noise floor' : ''} on this slice; the scale ends at the 99.5th percentile, ${Number.isFinite(sc.mean) && sc.mean > 0 ? `${(sc.range / sc.mean).toFixed(1)}× the average voxel` : fmt(sc.range, 3)}.`
+  );
+  let tables = '';
+  let key = '';
+  if (!atlasNow) tables = '<p class="note">No parcellation is available for this template, so only the voxel picture is shown.</p>';
+  else if (ex.focus) {
+    const f = ex.focus;
+    const rows = f.rows
+      .slice(0, 8)
+      .map((r) => `<tr>${parcelCell(r)}<td class="num">${pct(r.share)}</td><td class="num">${times(r.excess)}</td><td class="num">${r.rank}</td></tr>`)
+      .join('');
+    tables = `<table class="nb-table" style="white-space:nowrap"><tr><th>parcel</th><th title="${focusId}'s share of its own mean 1 − r to the others">share</th><th title="share ÷ the median share of all ${f.of} maps in this parcel">×typical</th><th title="${focusId}'s share among the ${f.of} maps (1 = largest)">rank/${f.of}</th></tr>${rows}</table>`;
+    key = `<p class="note">Ranked by ×typical: ${focusId}'s share ÷ the median of all ${f.of} maps' own shares in that parcel. rank: 1 = the largest share of the ${f.of}.</p>`;
+    prose.push(
+      `Every map's share is largest where all maps diverge from one another, so raw shares rank nearly the same parcels for every map. ×typical corrects for that common part: each of the ${f.of} maps' focused terms is summed in the parcel and divided by that map's own total; ×typical is ${focusId}'s value ÷ the median of the ${f.of} values (1× = like the typical map, 2× = twice its share). Parcels with fewer than ${f.minN} compared voxels show –.`
+    );
+  } else if (ex.parcels) {
+    // Four columns fit the panel: with a noise floor, the beyond-noise share replaces ×size (kept in the tooltip).
+    const withNoise = ex.noiseShare !== null;
+    const size = (p: { share: number; sizeShare: number }): string => (p.sizeShare > 0 ? times(p.share / p.sizeShare) : '–');
     const rows = ex.parcels
       .slice(0, 8)
       .map(
         (p) =>
-          `<tr><td><button data-parcel="${p.id}" title="Mark maps by this parcel and go to it">${p.name}</button></td><td class="num">${pct(p.share)}</td><td class="num">${p.sizeShare > 0 ? (p.share / p.sizeShare).toFixed(1) : '–'}×</td>${ex.noiseShare !== null ? `<td class="num">${pct(p.beyondNoise)}</td>` : ''}<td class="num">${p.i2 === null ? '…' : M.fmtR(p.i2)}</td></tr>`
+          `<tr>${parcelCell(p, `: ${pct(p.sizeShare)} of the compared voxels, share ÷ that = ${size(p)}`)}<td class="num">${pct(p.share)}</td><td class="num">${withNoise ? pct(p.beyondNoise) : size(p)}</td><td class="num">${p.i2 === null ? '…' : M.fmtR(p.i2)}</td></tr>`
       )
       .join('');
+    tables = `<table class="nb-table" style="white-space:nowrap"><tr><th>parcel</th><th title="share of the ${ex.totalLabel}">share</th>${withNoise ? '<th title="share of the part beyond the noise floor">&gt;noise</th>' : `<th title="share ÷ the parcel's share of the compared voxels (1× = proportional to size)">×size</th>`}<th title="heterogeneity of the parcel-mean β across maps">I²</th></tr>${rows}</table>`;
+    key = `<p class="note">${withNoise ? '&gt;noise: share of the part beyond the noise floor.' : '×size: share ÷ share of voxels (1× = proportional to size).'} I²: β heterogeneity.</p>`;
+    prose.push(ex.heterogeneityNote ?? 'I² loads with β and SE…');
+  }
+  if (atlasNow && (ex.focus || ex.parcels)) {
     const c = ex.concentration;
-    parcels = `<table class="nb-table"><tr><th>parcel</th><th>share</th><th>density</th>${ex.noiseShare !== null ? '<th>beyond noise</th>' : ''}<th>I²</th></tr>${rows}</table>
-      <p class="note">${c ? `The top ${c.topK} parcels carry <b>${pct(c.topShare)}</b> of it while holding ${pct(c.sizeShare)} of the voxels${c.randomSplit !== null ? `; random splits of the same sizes give ${pct(c.randomSplit)}, so compare against that, not against zero` : ''}. ` : ''}${pct(ex.outsideShare)} falls outside the parcellation${(atlasNow?.name ?? '').startsWith('Schaefer') ? ' (Schaefer covers cortex only)' : ''}. Density = share ÷ share of voxels (1× = proportional to size). ${ex.heterogeneityNote ?? 'I² loads with β and SE…'}</p>`;
-    if (ex.influence?.length)
-      parcels += `<h3 style="margin-top:10px">Layout depends most on</h3><table class="nb-table"><tr><th>parcel</th><th>similarity kept without it</th></tr>${ex.influence
-        .slice(0, 5)
-        .map((x) => `<tr><td><button data-parcel="${x.id}">${x.name}</button></td><td class="num">${M.fmtR(x.mantel)}</td></tr>`)
-        .join('')}</table><p class="note">Correlation between all pairwise 1 − r with and without the parcel (exact recomputation, no refit). Lower means the layout leans on that parcel more. Share and influence differ: a parcel can carry variance without changing who resembles whom.</p>`;
+    prose.push(
+      `${c ? `The ${c.topK} parcels with the largest share carry <b>${pct(c.topShare)}</b> of the total while holding ${pct(c.sizeShare)} of the voxels${c.randomSplit !== null ? `; random splits of the same sizes give ${pct(c.randomSplit)}, so compare against that, not against zero` : ''}. ` : ''}${pct(ex.outsideShare)} falls outside the parcellation${(atlasNow?.name ?? '').startsWith('Schaefer') ? ' (Schaefer covers cortex only)' : ''}.`
+    );
+  }
+  if (atlasNow && ex.influence?.length) {
+    tables += `${key}<h3 style="margin-top:10px">Layout depends most on</h3><table class="nb-table" style="white-space:nowrap"><tr><th>parcel</th><th title="(1 − Mantel r) × 1000">change ‰</th></tr>${ex.influence
+      .slice(0, 5)
+      .map((x) => `<tr>${parcelCell(x)}<td class="num">${fmtPermille(1 - x.mantel)}</td></tr>`)
+      .join('')}</table>`;
+    key = '<p class="note">change: 1 − r between all pairwise 1 − r with and without the parcel, in thousandths.</p>';
+    prose.push(
+      'Layout dependence: every pairwise 1 − r is recomputed exactly without the parcel (no refit) and correlated with the full set; the table shows 1 − that correlation in thousandths. Larger means the layout leans on the parcel more. Share and dependence differ: a parcel can carry variance without changing who resembles whom.'
+    );
   }
   return `<section><h3>Explain <span class="sub">${ex.totalLabel}</span></h3>${scopes}
-    <p class="note">${ex.title}. Every voxel's term below sums exactly to the ${ex.totalLabel} (${ex.total.toFixed(3)}). Maps are z-scored over the compared voxels, so this explains differences in spatial pattern, not overall amplitude. Descriptive: voxels are spatially correlated, and the layout was built from these same voxels.</p>
-    ${noise}${parcels}</section>`;
+    ${tables}${key}${fold('explain', prose.map((p) => `<p class="note">${p}</p>`).join(''))}</section>`;
+}
+
+/** A small positive fraction in thousandths, with enough digits to tell neighbours apart. */
+function fmtPermille(x: number): string {
+  if (!Number.isFinite(x)) return '–';
+  const v = x * 1000;
+  return Math.abs(v) < 10 ? v.toFixed(2) : v.toFixed(1);
 }
 
 function reliabilitySection(a: M.Analysis): string {
@@ -1630,11 +1842,17 @@ function reliabilitySection(a: M.Analysis): string {
   if (!rel) return '<section><h3>Reliability</h3><p class="note">Loading β and SE…</p></section>';
   const order = base.eligible.map((i, p) => ({ id: a.ids[i], rho: rel.rho[p] })).sort((x, y) => x.rho - y.rho);
   const low = order.filter((x) => x.rho < 0.1).map((x) => x.id);
+  const rows = order
+    .slice(0, 6)
+    .map((x) => `<tr><td class="id">${x.id}</td><td class="num">${M.fmtR(x.rho)}</td></tr>`)
+    .join('');
   return `<section><h3>Reliability <span class="sub">ρ</span></h3>
-    <p class="note">Least reliable first: ${order
-      .slice(0, 6)
-      .map((x) => `<span class="nb">${x.id} ${M.fmtR(x.rho)}</span>`)
-      .join(', ')}. Median ${M.fmtR(order[order.length >> 1]?.rho ?? NaN)}. ρ = 1 − noise variance ÷ spatial variance (${rel.noise}); this assumes the first-level noise estimates are calibrated. Two maps with one true pattern correlate at most √(ρᵢρⱼ).${opts.noiseCorrected ? ` Noise-corrected layout: r ÷ √(ρᵢρⱼ), clamped to ±1${low.length ? `; set aside as too unreliable: ${low.join(', ')}` : ''}. The transition shows which maps moved once noise was accounted for.` : ''}</p></section>`;
+    <table class="nb-table" style="white-space:nowrap"><tr><th>Least reliable first</th><th>ρ</th></tr>${rows}</table>
+    <p class="note">Median ρ ${M.fmtR(order[order.length >> 1]?.rho ?? NaN)} over ${order.length} maps.${opts.noiseCorrected && low.length ? ` Set aside from the noise-corrected layout as too unreliable (ρ &lt; .10): ${low.join(', ')}.` : ''}</p>
+    ${fold(
+      'reliability',
+      `<p class="note">ρ = 1 − noise variance ÷ spatial variance (${rel.noise}); this assumes the first-level noise estimates are calibrated. Two maps with one true pattern correlate at most √(ρᵢρⱼ).${opts.noiseCorrected ? ' Noise-corrected layout: r ÷ √(ρᵢρⱼ), clamped to ±1. The transition shows which maps moved once noise was accounted for.' : ''}</p>`
+    )}</section>`;
 }
 
 function covariateSection(): string {
@@ -2002,10 +2220,14 @@ function acrossContrastsSection(a: M.Analysis): string {
       const subs = s ? [s] : P.subjects;
       const own = med(subs.map((x) => r(`${x}·${c1}`, `${x}·${c2}`)));
       const others = med(subs.flatMap((x) => P.subjects.filter((o) => o !== x).map((o) => r(`${x}·${c1}`, `${o}·${c2}`))));
-      rows.push(`<tr><td>${c1} × ${c2}</td><td class="num">${M.fmtR(own)}</td><td class="num">${M.fmtR(others)}</td></tr>`);
+      const short = shortContrastNames(P.contrasts);
+      rows.push(`<tr><td title="${c1} × ${c2}">${short[p]}–${short[q]}</td><td class="num">${M.fmtR(own)}</td><td class="num">${M.fmtR(others)}</td></tr>`);
     }
-  return `<section><h3>Across contrasts <span class="sub">${s ?? 'median over subjects'}</span></h3>
-    <table class="nb-table"><tr><th>pair</th><th>same subject r</th><th>vs other subjects (median)</th></tr>${rows.join('')}</table>
+  const sameTip = s ? `r between ${s}'s maps of the two contrasts` : "median over subjects of r between a subject's maps of the two contrasts";
+  const otherTip = `median r between ${s ? `${s}'s` : "a subject's"} map of the first contrast and other subjects' maps of the second`;
+  return `<section><h3>Across contrasts <span class="sub">${s ?? 'medians'}</span></h3>
+    <table class="nb-table" style="white-space:nowrap"><tr><th>pair</th><th title="${sameTip}">same subj.</th><th title="${otherTip}">other subj.</th></tr>${rows.join('')}</table>
+    <p class="note">Same subj.: r between ${s ? `${s}'s` : "one subject's"} maps of the two contrasts; other subj.: r with other subjects' maps of the second contrast${s ? ' (median)' : ' (medians over subjects)'}.</p>
     <p class="note">Each panel draws one contrast at the ${a.contrast} layout's positions, so a map that changes between contrasts shows a different picture in the same place. Across all ${total} subject × contrast maps, the most similar other map is the same subject's other contrast for <b>${same}</b>. (r on the ${b.support.length.toLocaleString()} voxels every contrast shares.)</p>
   </section>`;
 }

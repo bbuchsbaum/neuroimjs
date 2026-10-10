@@ -21,8 +21,10 @@ import {
   type LabelBox,
   type Lod,
   declutter,
+  positionMarkers,
+  overlapArea,
 } from './space';
-import { THEME, FONT, placeCrop, drawCellImage, drawCrosshair, hidpi } from './render';
+import { THEME, FONT, fmt, placeCrop, drawCellImage, drawCrosshair, hidpi } from './render';
 import * as M from './main';
 import * as SX from './space-extras';
 import * as V3 from './space-v3';
@@ -152,8 +154,14 @@ export interface SpaceGeom {
   zoomBox: { member: number; box: LabelBox } | null;
   /** Fixed place for the enlarged preview in the reference column, so it never covers a map; null if no room. */
   dock: PlotRect | null;
-  /** Number of pictures drawn away from their exact positions. */
+  /** Number of pictures moved far enough from their exact positions to be marked (each keeps a marker). */
   nudged?: number;
+  /** Pictures moved too little to mark (at most px from their exact position, so still near the centre). */
+  slightNudge?: { n: number; px: number };
+  /** Exact-position markers of nudged pictures: a dot, or a ring where the position lies inside another picture. */
+  markers?: { member: number; kind: 'dot' | 'ring'; x: number; y: number; nudge: number }[];
+  /** Captions drawn over the layout (yardstick, covariate labels), so floating previews can avoid them. */
+  captions?: LabelBox[];
 }
 
 /** Nudged picture centres, computed once per layout and screen geometry in a stable order (not per selection). */
@@ -250,16 +258,17 @@ export async function drawSpace(light = false): Promise<void> {
   ctx.fillStyle = THEME.muted;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
+  // Wrapped to the column, so a narrow window never runs the legend into the layout.
+  const nb = (s: string): string => s.replace(/ /g, ' ');
   const legend = [
-    'Reference only: average of all',
-    `${a.set.size} ${st}-maps; not placed.`,
+    `Reference only: average of all ${a.set.size} ${st}-maps; not placed.`,
     '',
-    ...(SX.trajectoryMode()
-      ? [`Position: the ${a.contrast} layout,`, 'shared by every contrast panel.']
-      : [`Position: ${scopeShort(a)}`, `(1 − ${rName(a)}, ${layout.kind === 'ready' ? methodShort(layout.out.result.method) : 'nonmetric MDS'}).`]),
+    SX.trajectoryMode()
+      ? `Position: the ${a.contrast} layout, shared by every contrast panel.`
+      : `Position: ${scopeShort(a)} (${nb(`1 − ${rName(a)}`)}, ${layout.kind === 'ready' ? methodShort(layout.out.result.method) : 'nonmetric MDS'}).`,
     `Pictures: ${M.state.orient} slice ${M.sliceIndex() + 1}.`,
     'Axes and gaps are not results.',
-  ];
+  ].flatMap((p) => (p ? wrapText(ctx, p, colW) : ['']));
   legend.forEach((line, i) => ctx.fillText(line, pad, meanRect.y + meanRect.h + 10 + i * 15));
   const dockY = meanRect.y + meanRect.h + 10 + legend.length * 15 + 14;
 
@@ -268,9 +277,11 @@ export async function drawSpace(light = false): Promise<void> {
   const stripH = strip.length ? Math.round(Math.max(78, Math.min(120, H * 0.17))) : 0;
   // A strip at the top is reserved for the Space toolbar, so it never covers a map.
   const toolbarH = 34;
-  const plot: PlotRect = { x: colW + 2 * pad, y: pad + toolbarH, w: W - colW - 3 * pad, h: H - 2 * pad - toolbarH - (stripH ? stripH + 8 : 0) };
+  // With a strip, the caption under the layout gets its own line above it, so it never runs into a picture.
+  const footH = stripH ? 14 : 0;
+  const plot: PlotRect = { x: colW + 2 * pad, y: pad + toolbarH, w: W - colW - 3 * pad, h: H - 2 * pad - toolbarH - (stripH ? stripH + 8 + footH : 0) };
   if (strip.length) {
-    const y0 = plot.y + plot.h + 8;
+    const y0 = plot.y + plot.h + 8 + footH;
     ctx.strokeStyle = THEME.line;
     ctx.beginPath();
     ctx.moveTo(plot.x, y0 + 0.5);
@@ -319,7 +330,7 @@ export async function drawSpace(light = false): Promise<void> {
     lod === 'thumbs'
       ? { x: plot.x + thumbW / 2, y: plot.y + thumbH / 2, w: Math.max(1, plot.w - thumbW), h: Math.max(1, plot.h - thumbH) }
       : { x: plot.x + 40, y: plot.y + 16, w: Math.max(1, plot.w - 80), h: Math.max(1, plot.h - 32) };
-  const geom: SpaceGeom = { a, key: b.key, t: null, inner, plot, lod, thumbW, thumbH, points: [], marks: [], layout, strip: strip.map((e) => e.index), zoomBox: null, dock: null };
+  const geom: SpaceGeom = { a, key: b.key, t: null, inner, plot, lod, thumbW, thumbH, points: [], marks: [], layout, strip: strip.map((e) => e.index), zoomBox: null, dock: null, captions: [] };
   {
     // The preview docks under the legend when the column has room for a picture plus its caption.
     const room = plot.y + plot.h + (stripH ? stripH : 0) - dockY - 62; // caption: ID + up to three caveat lines
@@ -352,12 +363,16 @@ export async function drawSpace(light = false): Promise<void> {
     const res = layout.out.result;
     // Presentation alignment to the previously shown layout (canonical pose on first show).
     const disp = SX.displayCoords(layoutKey(a), res.ids, Float64Array.from(res.coords));
+    const fromUrl = M.takeUrlViewport();
     if (M.state.space) {
       // A viewport centred far outside the layout (e.g. a hand-edited sv) falls back to fit.
       const bx = bounds(disp.coords);
       const span = Math.max(bx.x1 - bx.x0, bx.y1 - bx.y0, 1e-9);
       const { cx, cy } = M.state.space;
-      if (cx < bx.x0 - span || cx > bx.x1 + span || cy < bx.y0 - span || cy > bx.y1 + span) M.state.space = null;
+      if (cx < bx.x0 - span || cx > bx.x1 + span || cy < bx.y0 - span || cy > bx.y1 + span) {
+        if (fromUrl) M.announceUrl(`layout viewport centred at ${fmt(cx, 2)}, ${fmt(cy, 2)}, outside the layout → fit`);
+        M.state.space = null;
+      }
     }
     const t = spaceTransform(disp.coords, inner, M.state.space);
     geom.t = t;
@@ -393,8 +408,8 @@ export async function drawSpace(light = false): Promise<void> {
     ctx.rect(plot.x - 4, plot.y - 4, plot.w + 8, plot.h + 8);
     ctx.clip();
     if (lod === 'thumbs' && !settling) {
-      // Pictures are nudged apart so none hides another or another map's exact position; each moved
-      // picture keeps a dot at its exact position and a leader. Positions (dots, links, keyboard steps)
+      // Pictures are nudged apart so none hides another or (where room allows) another map's exact position;
+      // each moved picture keeps a mark at its exact position and a leader. Positions (dots, links, keyboard steps)
       // remain the fitted configuration. Computed in eligible order and cached, so selecting or hovering
       // a map never reshuffles the pictures.
       const vp = M.state.space;
@@ -450,6 +465,7 @@ export async function drawSpace(light = false): Promise<void> {
           : { x: pt.sx + 7, y: pt.sy - 7, w: tw, h: 14 }
       );
     }
+    const markers: { pt: SpacePoint; kind: 'dot' | 'ring'; nudge: number }[] = [];
     if (lod === 'thumbs') {
       for (const pt of shown) {
         if (!visible(pt)) continue;
@@ -467,13 +483,25 @@ export async function drawSpace(light = false): Promise<void> {
         if (mc) SX.drawMemberColour(ctx, mc, M.hits[M.hits.length - 1]?.view.dest ?? cell, null);
         geom.marks.push({ member: pt.member, box: { x: tx - tw / 2, y: ty - th / 2, w: tw, h: th }, kind: 'thumb' });
       }
-      // Leaders and exact-position dots on top of every picture (with a dark halo), and only for pictures
-      // that were moved: an unmoved picture is centred on its position, and a dot there would read as a cursor.
-      // A picture counts as moved only when the nudge is noticeable; a dot that would land inside another
-      // picture is not drawn (it would read as a mark on that map), and neither is its leader.
-      const boxes = shown.filter(visible).map((pt) => ({ m: pt.member, x: pt.tx ?? pt.sx, y: pt.ty ?? pt.sy }));
-      const inOther = (pt: SpacePoint): boolean => boxes.some((bx) => bx.m !== pt.member && Math.abs(pt.sx - bx.x) < thumbW / 2 + 2 && Math.abs(pt.sy - bx.y) < thumbH / 2 + 2);
-      const movedPts = shown.filter((pt) => visible(pt) && Math.hypot((pt.tx ?? pt.sx) - pt.sx, (pt.ty ?? pt.sy) - pt.sy) > Math.max(4, thumbW * 0.2) && !inOther(pt));
+      // Every picture moved by a noticeable amount keeps a mark at its exact position and a leader, drawn on
+      // top of every picture (with a dark halo); an unmoved picture is centred on its position, and a dot there
+      // would read as a cursor. A position that lies inside another map's picture gets a ring in the map's ID
+      // colour instead of a dot, so it never reads as a mark on that map; no exact position is ever hidden.
+      const vis = shown.filter(visible);
+      const found = positionMarkers(
+        vis.map((pt) => ({ x: pt.sx, y: pt.sy })),
+        vis.map((pt) => ({ x: pt.tx ?? pt.sx, y: pt.ty ?? pt.sy })),
+        thumbW + 4,
+        thumbH + 4,
+        Math.max(4, thumbW * 0.2)
+      );
+      for (const f of found) markers.push({ pt: vis[f.index], kind: f.kind, nudge: f.nudge });
+      // Nudges too small to mark (the position is still near the picture's centre) are counted, not hidden.
+      geom.slightNudge = { n: 0, px: Math.round(Math.max(4, thumbW * 0.2)) };
+      for (const pt of vis) {
+        const d = Math.hypot((pt.tx ?? pt.sx) - pt.sx, (pt.ty ?? pt.sy) - pt.sy);
+        if (d > 2 && d <= Math.max(4, thumbW * 0.2)) geom.slightNudge.n++;
+      }
       for (const [width, color] of [
         [3, 'rgba(13,14,20,0.85)'],
         [1, 'rgba(200,202,220,0.8)'],
@@ -481,28 +509,22 @@ export async function drawSpace(light = false): Promise<void> {
         ctx.strokeStyle = color;
         ctx.lineWidth = width;
         ctx.beginPath();
-        for (const pt of movedPts) {
-          // From the dot to the nearest edge of its picture.
+        for (const { pt, kind } of markers) {
+          // From the mark to the nearest edge of its picture; a ring's leader starts at its rim, so the
+          // ring stays hollow and its centre (the exact position) is not hidden by the line.
           const cx = Math.max(pt.tx! - thumbW / 2, Math.min(pt.tx! + thumbW / 2, pt.sx));
           const cy = Math.max(pt.ty! - thumbH / 2, Math.min(pt.ty! + thumbH / 2 - 16, pt.sy));
-          ctx.moveTo(pt.sx, pt.sy);
+          const len = Math.hypot(cx - pt.sx, cy - pt.sy);
+          const r0 = kind === 'ring' ? (pt.member === sel ? 6 : 5) : 0;
+          if (len <= r0) continue;
+          ctx.moveTo(pt.sx + ((cx - pt.sx) * r0) / len, pt.sy + ((cy - pt.sy) * r0) / len);
           ctx.lineTo(cx, cy);
         }
         ctx.stroke();
       }
-      for (const pt of movedPts) {
-        const isSel = pt.member === sel;
-        ctx.fillStyle = isSel ? THEME.brand : spaceNeighborIds.has(a.ids[pt.member]) ? THEME.accent : THEME.text;
-        ctx.strokeStyle = THEME.bg;
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.arc(pt.sx, pt.sy, isSel ? 4 : 2.75, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
-        // A visible dot is its own target and wins over any picture beneath it.
-        geom.marks.push({ member: pt.member, box: { x: pt.sx - 6, y: pt.sy - 6, w: 12, h: 12 }, kind: 'dot' });
-      }
-      geom.nudged = movedPts.length;
+      // A visible mark is its own target and wins over any picture beneath it.
+      for (const { pt } of markers) geom.marks.push({ member: pt.member, box: { x: pt.sx - 6, y: pt.sy - 6, w: 12, h: 12 }, kind: 'dot' });
+      geom.nudged = markers.length;
     } else {
       for (const pt of shown) {
         if (!visible(pt)) continue;
@@ -523,6 +545,7 @@ export async function drawSpace(light = false): Promise<void> {
         geom.marks.push({ member: pt.member, box: { x: pt.sx - 11, y: pt.sy - 11, w: 22, h: 22 }, kind: 'dot' });
       }
     }
+    const idColour = (pt: SpacePoint): string => (pt.member === sel ? THEME.brand : pt.group ? THEME.warn : spaceNeighborIds.has(a.ids[pt.member]) ? THEME.accent : THEME.text);
     // Labels: focused, hovered and neighbours first; the rest only where they fit.
     const prio = shown.map((_, i) => i);
     const rank = (i: number): number => {
@@ -540,11 +563,34 @@ export async function drawSpace(light = false): Promise<void> {
       const isSel = pt.member === sel;
       ctx.fillStyle = isSel ? 'rgba(30,27,52,0.95)' : 'rgba(13,14,20,0.82)';
       ctx.fillRect(bx.x, bx.y, bx.w, bx.h);
-      ctx.fillStyle = isSel ? THEME.brand : pt.group ? THEME.warn : spaceNeighborIds.has(a.ids[pt.member]) ? THEME.accent : THEME.text;
+      ctx.fillStyle = idColour(pt);
       ctx.font = `${isSel ? '600 ' : ''}10.5px ${FONT.mono}`;
       ctx.fillText(labelText[i], bx.x + bx.w / 2, bx.y + bx.h / 2 + 0.5);
       geom.marks.push({ member: pt.member, box: bx, kind: 'label' });
     }
+    // Exact-position marks go above the labels, so no ID box can hide one.
+    for (const { pt, kind } of markers) {
+      const isSel = pt.member === sel;
+      ctx.beginPath();
+      if (kind === 'dot') {
+        ctx.fillStyle = isSel ? THEME.brand : spaceNeighborIds.has(a.ids[pt.member]) ? THEME.accent : THEME.text;
+        ctx.strokeStyle = THEME.bg;
+        ctx.lineWidth = 1.5;
+        ctx.arc(pt.sx, pt.sy, isSel ? 4 : 2.75, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        continue;
+      }
+      // A hollow ring with a dark halo (the position is its centre): reads on top of any picture.
+      ctx.arc(pt.sx, pt.sy, isSel ? 6 : 5, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(13,14,20,0.92)';
+      ctx.lineWidth = 5;
+      ctx.stroke();
+      ctx.strokeStyle = idColour(pt);
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+    geom.markers = markers.map(({ pt, kind, nudge }) => ({ member: pt.member, kind, x: pt.sx, y: pt.sy, nudge }));
     ctx.restore();
     SX.drawForeground(ctx, { a, b, out: layout.out, key: layoutKey(a), d: disp, t, points: shown, plot, thumbW, thumbH, lod });
     // Caption: what the picture is and is not.
@@ -555,8 +601,13 @@ export async function drawSpace(light = false): Promise<void> {
     const zoomNote = M.state.space ? ` · layout zoom ${M.state.space.s.toFixed(1)}×` : '';
     const cropNote = M.state.zoom ? ` · anatomy crop ${M.state.zoom.s.toFixed(1)}× (set in Montage)` : '';
     const stressNote = Number.isFinite(res.stress1) ? `${res.method === 'metric-smacof' ? 'metric ' : ''}Stress-1 ${fmtStress(res.stress1)} · ` : '';
-    const nudgeNote = geom.nudged ? ` · ${geom.nudged} pictures nudged apart (dots = exact positions)` : '';
-    ctx.fillText(`${stressNote}${m} placed${nudgeNote}${zoomNote}${cropNote}`, plot.x + plot.w, plot.y + plot.h + (stripH ? 4 : pad - 2));
+    const rings = geom.markers?.filter((mk) => mk.kind === 'ring').length ?? 0;
+    const slight = geom.slightNudge?.n ?? 0;
+    const moved = (geom.nudged ?? 0) + slight;
+    const nudgeNote = moved
+      ? ` · ${moved} ${moved === 1 ? 'picture' : 'pictures'} nudged apart${geom.nudged ? `: dots mark exact positions${rings ? ', rings those inside another picture' : ''}` : ''}${slight ? `; ${slight} moved ≤ ${geom.slightNudge!.px} px ${slight === 1 ? 'is' : 'are'} unmarked` : ''}`
+      : '';
+    ctx.fillText(M.truncate(ctx, `${stressNote}${m} placed${nudgeNote}${zoomNote}${cropNote}`, plot.w), plot.x + plot.w, plot.y + plot.h + (stripH ? footH + 4 : pad - 2));
   }
   M.drawOverlay();
   if (!light) M.drawSide(a, order);
@@ -651,6 +702,8 @@ function spaceOverlayBody(ctx: CanvasRenderingContext2D, W: number, H: number): 
       const oy = Math.min(c.y + h + capH, mk.box.y + mk.box.h) - Math.max(c.y, mk.box.y);
       if (ox > 0 && oy > 0) area += ox * oy * (spaceNeighborIds.has(a.ids[mk.member]) ? 3 : 1);
     }
+    // Captions over the layout (the noise yardstick, covariate labels) are text a reader needs: avoid them hard.
+    for (const cb of g.captions ?? []) area += 4 * overlapArea({ x: c.x, y: c.y, w, h: h + capH }, cb);
     return area;
   };
   const best = dock ? { x: dock.x, y: dock.y } : candidates.reduce((p, c) => (covered(c) < covered(p) ? c : p));
@@ -821,6 +874,27 @@ export function exposeSpaceProbe(): void {
     get neighbors() {
       return [...spaceNeighborIds];
     },
+    /** Exact-position markers of nudged pictures (dots and rings), with each picture's nudge in px. */
+    get markers() {
+      const g = spaceGeom;
+      return g?.markers?.map((mk) => ({ id: g.a.ids[mk.member], kind: mk.kind, x: mk.x, y: mk.y, nudge: mk.nudge })) ?? [];
+    },
+    get nudged() {
+      return spaceGeom?.nudged ?? 0;
+    },
+    /** The enlarged preview's box (canvas px), or null. */
+    get preview() {
+      return spaceGeom?.zoomBox?.box ?? null;
+    },
+    /** Captions drawn over the layout (canvas px). */
+    get captions() {
+      return spaceGeom?.captions ?? [];
+    },
+    /** Every click target drawn in the layout: pictures, exact-position marks and ID labels. */
+    get marks() {
+      const g = spaceGeom;
+      return g ? g.marks.map((mk) => ({ id: g.a.ids[mk.member], kind: mk.kind, ...mk.box })) : [];
+    },
   };
 }
 
@@ -962,7 +1036,7 @@ export function spaceSection(a: M.Analysis): string {
     <section>
       <h3>Layout <span class="sub">${placedN} of ${a.set.size} placed</span></h3>
       ${layout?.kind === 'ready' ? `<p class="trust">${trustLine(a)}</p>` : fit}
-      <p class="note">Positions summarise ${scopeLong(a)} and stay fixed while you change slice, threshold, smoothing or cluster filter. Pictures are nudged apart to avoid overlap; dots mark exact positions. Neither axis has a meaning; for who resembles whom, use the Neighbours table.</p>
+      <p class="note">Positions summarise ${scopeLong(a)} and stay fixed while you change slice, threshold, smoothing or cluster filter. Pictures are nudged apart to avoid overlap; a dot marks each moved picture's exact position, or a ring where that position falls inside another picture. Neither axis has a meaning; for who resembles whom, use the Neighbours table.</p>
       <details class="fit-details"${layout?.kind === 'ready' ? '' : ' open'}><summary>How the layout was fitted</summary>
         <dl class="fx">
           <dt>Similarity</dt><dd>signed Pearson r of raw ${M.STAT_LABEL[M.state.stat]}-maps on the common support (${support}); dissimilarity 1 − r</dd>
@@ -1146,6 +1220,11 @@ export function disposeSpaceJobs(): void {
 
 export function readSpaceParams(q: URLSearchParams): void {
   SX.readParams(q);
+}
+
+/** Space URL corrections collected before the app was up (announced with the main viewer's). */
+export function takeSpaceUrlNotes(): string[] {
+  return SX.takeUrlNotes();
 }
 
 export function writeSpaceParams(q: URLSearchParams): void {

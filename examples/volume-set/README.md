@@ -84,6 +84,11 @@ similar whole-volume patterns.
 
 The anatomical crop (zoom inside each picture) is set in Montage or Facet and shared by Space.
 
+**Positions.** Pictures are nudged apart so none overlaps another. Every picture moved by more than a fifth of
+its width keeps a mark at its exact fitted position, joined by a faint line: a dot, or a ring when that
+position falls inside another map's picture. The caption under the layout counts every moved picture.
+On a narrow window the toolbar switches to short labels ("Halos", "Side by side").
+
 **Peek.** A small slice viewer for one map, placed where it covers the fewest pictures (never the side
 panel). It has its own plane (A/C/S) and slice (slider or wheel), reads the raw value under the pointer
 in mm, and uses the shared threshold, range, smoothing and cluster filter. It follows the focused map
@@ -119,8 +124,8 @@ though they are each other's most similar maps.
 
 | Control | URL | What it shows |
 |---|---|---|
-| Explain | `sx=all\|focused\|group` | the layout's dissimilarity split by voxel: what separates all maps (beyond the noise floor), where the focused map differs from the rest, or where a lasso group differs from the others. Each voxel's term sums exactly to the dissimilarity named. The panel ranks parcels by share, density (share ÷ share of voxels), share beyond noise and per-parcel I², reports how concentrated the top parcels are (against size, and against random splits for groups) and the mass outside the parcellation, and lists the parcels the layout depends on most (exact leave-one-parcel-out correlation, no refit). Clicking a parcel marks every map by its mean z there (`sc=parcel:<id>`) and goes to it. |
-| Mark: reliability | `sc=rel` | ρ per map: 1 − noise variance ÷ spatial variance (t-maps: noise ≈ 1 per voxel; β-maps: SE², loaded on demand). Low-ρ maps correlate weakly with everyone and sit at the edge for that reason alone. A yardstick on the layout shows how far apart two noisy copies of one map would sit. |
+| Explain | `sx=all\|focused\|group` | the layout's dissimilarity split by voxel: what separates all maps (beyond the noise floor), where the focused map differs from the rest, or where a lasso group differs from the others. Each voxel's term sums exactly to the dissimilarity named. For a focused map the panel ranks parcels by **×typical**: the map's share of its own divergence in the parcel ÷ the median, over all placed maps, of each map's own share there (parcels under 20 voxels show –), with the map's rank among all maps beside it; raw shares would list the same parcels for every map, because every map diverges most where the signal is. ×typical has no noise model, so a large ratio on a tiny share (or in a low-signal parcel) deserves caution. For all maps the panel ranks parcels by share, density (share ÷ share of voxels), share beyond noise and per-parcel I², reports how concentrated the top parcels are (against size, and against random splits for groups) and the mass outside the parcellation, and lists the parcels the layout depends on most (exact leave-one-parcel-out correlation, no refit). Clicking a parcel marks every map by its mean z there (`sc=parcel:<id>`) and goes to it. |
+| Mark: reliability | `sc=rel` | ρ per map: 1 − noise variance ÷ spatial variance (t-maps: noise ≈ 1 per voxel; β-maps: SE², loaded on demand). Low-ρ maps correlate weakly with everyone and sit at the edge for that reason alone. A yardstick on the layout shows how far apart two noisy copies of one map would sit; when that 1 − r is below every observed pair (the usual case), the caption says its length is extrapolated. |
 | Correct for noise | `sn=1` | lays out by r ÷ √(ρᵢρⱼ) (Spearman's correction, clamped to ±1; maps with ρ < .1 are set aside), animating from the uncorrected layout so you can see which maps moved |
 | Mark: a covariate | `sc=cov:<column>` | also fits the covariate to the layout (envfit: a gradient arrow for numbers, centroids for categories) with a permutation p-value; valid because the covariate did not build the layout |
 
