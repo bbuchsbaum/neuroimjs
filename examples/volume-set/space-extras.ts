@@ -20,7 +20,7 @@ import type { NmdsOptions } from '../../src/volumeset/nmds';
 import { THEME, FONT, fmt, hidpi, placeCrop, drawCellImage, drawCrosshair, thresholdedDiverging } from './render';
 import { fetchCovariates, type Covariates } from './data';
 import type { EmbedOutput } from './embed-runner';
-import { spaceTransform, thumbSize, declutter, maxOverlap, type SpaceTransform, type PlotRect } from './space';
+import { spaceTransform, thumbSize, declutter, maxOverlap, zoomAbout, type SpaceTransform, type PlotRect, type Lod } from './space';
 import * as M from './main';
 import * as SV from './space-view';
 import * as V3 from './space-v3';
@@ -927,7 +927,8 @@ function pxPerUnit(info: LayerInfo): number {
 
 /**
  * The noise yardstick: how far apart two noisy copies of the same map would sit (median pair), read off the
- * fit's own monotone (or metric) relation between 1 − r and layout distance.
+ * fit's own monotone (or metric) relation between 1 − r and layout distance. When that 1 − r is below every
+ * observed pair (typical: real maps differ by far more than noise), the length is extrapolated and labelled so.
  */
 function drawNoiseYardstick(ctx: CanvasRenderingContext2D, info: LayerInfo): void {
   if (!(opts.explain || opts.colour === 'rel' || opts.noiseCorrected)) return;
@@ -968,7 +969,13 @@ function drawNoiseYardstick(ctx: CanvasRenderingContext2D, info: LayerInfo): voi
   ctx.font = `11px ${FONT.sans}`;
   ctx.fillStyle = THEME.muted;
   ctx.textBaseline = 'bottom';
-  ctx.fillText(`noise: two copies of one map would sit about this far apart (1 − r ≈ ${M.fmtR(d0)})`, x, y - 6);
+  // Below the smallest observed pair the length is a straight-line extrapolation to zero, not a reading of the fit: say so.
+  const lo = ds[idx[0]];
+  const label =
+    d0 < lo
+      ? `noise alone: 1 − r ≈ ${M.fmtR(d0)}, below every pair (min ${M.fmtR(lo)}); length extrapolated`
+      : `noise alone: two copies of one map, 1 − r ≈ ${M.fmtR(d0)}, would sit about this far apart`;
+  ctx.fillText(label, x, y - 6);
   ctx.restore();
 }
 
@@ -1126,6 +1133,7 @@ function canvasXY(e: MouseEvent): [number, number] {
 }
 
 export function onPointer(type: string, e: MouseEvent): boolean {
+  if (type === 'wheel' && opts.trajectories && (e.ctrlKey || e.metaKey)) return trajectoryZoom(e as WheelEvent);
   if (type === 'pointerdown' && profileClick(...canvasXY(e))) return true;
   if (type === 'pointerdown' && e.shiftKey && !opts.trajectories) {
     lasso = { pts: [canvasXY(e)], remove: e.altKey };
@@ -1747,6 +1755,10 @@ interface Pooled {
 }
 
 let pooled: Pooled | null = null;
+/** Smallest picture (px, before the aspect split) side by side draws before falling back to dots. */
+const TRAJ_MIN_PICTURE = 26;
+/** Panel grid of the last side-by-side draw (canvas px), for zooming about the pointer in any panel. */
+let trajPanels: { x: number; y: number; pw: number; ph: number; gap: number; cols: number; n: number } | null = null;
 let pooledPending: Promise<Pooled> | null = null;
 
 /** Kept for callers: the side-by-side view uses the current contrast's own layout options. */
@@ -1829,30 +1841,51 @@ export async function drawTrajectories(ctx: CanvasRenderingContext2D, g: SV.Spac
   const pw = (plot.w - gap * (cols - 1)) / cols;
   const ph = (plot.h - gap * (rows - 1)) / rows;
   const asp = M.sliceAspect(a.set);
-  let { size, lod } = thumbSize(ids.length, { x: 0, y: 0, w: pw, h: ph - titleH }, M.state.space?.s ?? 1);
+  // Every panel shares the same positions, so dots alone show nothing side by side: keep pictures down to
+  // TRAJ_MIN_PICTURE px rather than thumbSize's single-view threshold.
+  let { size } = thumbSize(ids.length, { x: 0, y: 0, w: pw, h: ph - titleH }, M.state.space?.s ?? 1);
+  let lod: Lod = size >= TRAJ_MIN_PICTURE ? 'thumbs' : 'marks';
   let tw = Math.round(size * Math.sqrt(asp));
   let th = Math.round(size / Math.sqrt(asp));
   const sel = M.state.subject;
-  // Positions within a panel: identical in every panel (same transform, same nudges).
+  // Positions within a panel: identical in every panel (same transform, same nudges). The transform is
+  // built in canvas coordinates for the first panel, so it doubles as the Space transform that drag-pan,
+  // +/- and Ctrl/Cmd+wheel zoom act on (other panels are the same transform shifted by their offset).
   const inner0 = lod === 'thumbs' ? { x: tw / 2, y: titleH + th / 2, w: Math.max(1, pw - tw), h: Math.max(1, ph - titleH - th) } : { x: 12, y: titleH + 10, w: pw - 24, h: ph - titleH - 20 };
-  const t0 = spaceTransform(d.coords, inner0, M.state.space);
-  const local = ids.map((_, i) => t0.toScreen(d.coords[2 * i], d.coords[2 * i + 1]));
-  // Narrow panels: shrink the pictures until decluttering removes every overlap (then fall back to dots).
+  const innerAbs = { x: plot.x + inner0.x, y: plot.y + inner0.y, w: inner0.w, h: inner0.h };
+  const t0 = spaceTransform(d.coords, innerAbs, M.state.space);
+  const local = ids.map((_, i) => {
+    const [x, y] = t0.toScreen(d.coords[2 * i], d.coords[2 * i + 1]);
+    return [x - plot.x, y - plot.y] as [number, number];
+  });
+  g.t = t0;
+  g.inner = innerAbs;
+  trajPanels = { x: plot.x, y: plot.y, pw, ph, gap, cols, n: K };
+  // A map is drawn only when its exact position is in view (zoomed panels never show detached pictures),
+  // and only maps in view take part in decluttering.
+  const inView = local.map(([x, y]) => x >= 0 && x <= pw && y >= titleH && y <= ph);
+  const view = ids.map((_, i) => i).filter((i) => inView[i]);
+  // Narrow panels: shrink the pictures until no picture (with its ID label below it, LBL px) overlaps
+  // another, and fall back to dots only when they would be smaller than TRAJ_MIN_PICTURE px.
   const LBL = 12;
+  const area = { x: 0, y: titleH, w: pw, h: ph - titleH };
   let placed = local.map(([x, y]) => ({ x, y }));
-  for (let attempt = 0; lod === 'thumbs' && attempt < 8; attempt++) {
-    // Each box holds the picture and its ID label below it (LBL px), so labels never run into a neighbour.
-    placed = declutter(local.map(([x, y]) => ({ x, y })), tw + 4, th + LBL + 4, { x: 0, y: titleH, w: pw, h: ph - titleH }, 300, 4);
-    if (maxOverlap(placed, tw + 4, th + LBL + 4) === 0) break;
-    size *= 0.85;
-    tw = Math.round(size * Math.sqrt(asp));
-    th = Math.round(size / Math.sqrt(asp));
-    if (size < 40) {
+  for (let attempt = 0; lod === 'thumbs' && attempt < 12; attempt++) {
+    // Pad the boxes while separating so pictures keep a small gap; accept once the drawn boxes are clear.
+    const sub = declutter(view.map((i) => ({ x: local[i][0], y: local[i][1] })), tw + 4, th + LBL + 4, area, 300, 4);
+    placed = local.map(([x, y]) => ({ x, y }));
+    view.forEach((i, k) => (placed[i] = sub[k]));
+    if (maxOverlap(sub, tw + 1, th + LBL + 1) === 0) break;
+    if (size * 0.88 < TRAJ_MIN_PICTURE) {
       lod = 'marks';
       placed = local.map(([x, y]) => ({ x, y }));
+      break;
     }
+    size *= 0.88;
+    tw = Math.round(size * Math.sqrt(asp));
+    th = Math.round(size / Math.sqrt(asp));
   }
-  g.t = null;
+  g.lod = lod;
   list.forEach((ak, k) => {
     const ox = plot.x + (k % cols) * (pw + gap);
     const oy = plot.y + Math.floor(k / cols) * (ph + gap);
@@ -1868,6 +1901,7 @@ export async function drawTrajectories(ctx: CanvasRenderingContext2D, g: SV.Spac
     ctx.rect(ox, oy, pw, ph);
     ctx.clip();
     ids.forEach((id, i) => {
+      if (!inView[i]) return;
       const [sx, sy] = [ox + local[i][0], oy + local[i][1]];
       const [px, py] = [ox + placed[i].x, oy + placed[i].y];
       const m = ak.ids.indexOf(id);
@@ -1908,6 +1942,27 @@ export async function drawTrajectories(ctx: CanvasRenderingContext2D, g: SV.Spac
     });
     ctx.restore();
   });
+}
+
+/**
+ * Ctrl/Cmd+wheel side by side: zoom every panel about the layout point under the pointer. The shared
+ * transform is the first panel's, so the pointer is shifted back by its own panel's offset first.
+ */
+function trajectoryZoom(e: WheelEvent): boolean {
+  const g = SV.spaceGeom;
+  const P = trajPanels;
+  if (!g?.t || !P) return true;
+  let [x, y] = canvasXY(e);
+  const col = Math.floor((x - P.x) / (P.pw + P.gap));
+  const row = Math.floor((y - P.y) / (P.ph + P.gap));
+  if (col >= 0 && col < P.cols && row >= 0 && row * P.cols + col < P.n) {
+    x -= col * (P.pw + P.gap);
+    y -= row * (P.ph + P.gap);
+  } else [x, y] = [g.inner.x + g.inner.w / 2, g.inner.y + g.inner.h / 2];
+  M.state.space = zoomAbout(g.t, g.inner, x, y, Math.exp(-e.deltaY * 0.0025));
+  if (M.state.space.s <= 1.0001) M.state.space = null;
+  M.scheduleDraw();
+  return true;
 }
 
 /** For the focused subject: r between its own contrast maps, beside the typical r between subjects. */

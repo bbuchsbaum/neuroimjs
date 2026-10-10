@@ -837,6 +837,43 @@ test.describe('Space v3: what drives the layout', () => {
     expect(new URL(page.url()).searchParams.get('sx')).toBeNull();
   });
 
+  for (const vp of [
+    { width: 1440, height: 900 },
+    { width: 1280, height: 800 },
+  ])
+    test(`side by side draws a picture of every map in every panel, and Ctrl+wheel zooms them (${vp.width}x${vp.height})`, async ({ page }) => {
+      // Regression: one failed declutter pass used to drop every panel to dots (no pictures, no IDs), and
+      // the side-by-side view had no Space transform, so Ctrl/Cmd+wheel could not zoom out of it.
+      await page.setViewportSize(vp);
+      await open(page, `${SPACE}&st=1`);
+      await expect(page.locator('#side')).toContainText('Across contrasts', { timeout: 60_000 });
+      const placed = (await probe(page)).placed.length;
+      const counts = async (): Promise<{ lod: string | null; by: Record<string, number>; w: number }> => {
+        const p = await probe(page);
+        const by: Record<string, number> = {};
+        for (const t of p.thumbs) if (t.id !== 'mean') by[t.contrast] = (by[t.contrast] ?? 0) + 1;
+        // Picture width in a non-current panel (the current contrast also draws the not-placed strip).
+        return { lod: p.lod, by, w: Math.max(0, ...p.thumbs.filter((t) => t.contrast === 'delayearly').map((t) => t.dest.w)) };
+      };
+      const before = await counts();
+      expect(before.lod).toBe('thumbs');
+      expect(Object.keys(before.by).sort()).toEqual(['cue', 'delayearly', 'delaylate']);
+      for (const n of Object.values(before.by)) expect(n).toBeGreaterThanOrEqual(placed);
+      // Ctrl+wheel over a non-first panel zooms the shared layout: pictures grow and the viewport is in the URL.
+      const box = (await page.locator('canvas.montage').boundingBox())!;
+      const thumbs = (await probe(page)).thumbs.filter((t) => t.contrast === 'delayearly');
+      const t = thumbs[Math.floor(thumbs.length / 2)].dest;
+      await page.mouse.move(box.x + t.x + t.w / 2, box.y + t.y + t.h / 2);
+      await page.keyboard.down('Control');
+      await page.mouse.wheel(0, -300);
+      await page.keyboard.up('Control');
+      await page.waitForFunction(() => new URL(location.href).searchParams.has('sv'), null, { timeout: 10_000 });
+      await settle(page);
+      const after = await counts();
+      expect(after.lod).toBe('thumbs');
+      expect(after.w).toBeGreaterThan(before.w);
+    });
+
   test('side by side without a focused map reports cohort medians and keeps pictures apart', async ({ page }) => {
     await open(page, `${SPACE}&st=1`);
     const section = page.locator('#side section', { hasText: 'Across contrasts' });

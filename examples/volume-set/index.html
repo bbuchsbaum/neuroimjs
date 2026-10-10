@@ -68,7 +68,9 @@
       #peek .peek-img { display: block; align-self: center; border-radius: 4px; cursor: crosshair; }
       #peek .peek-slice { display: flex; align-items: center; gap: 8px; }
       #peek .peek-slice input { flex: 1; min-width: 0; accent-color: var(--brand); }
-      #peek .peek-slice-label, #peek .peek-read { color: var(--muted); font-size: 11px; white-space: nowrap; }
+      #peek .mono { font-family: var(--mono); }
+      #peek .peek-slice-label, #peek .peek-read { color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      #peek .peek-slice-label { flex: 0 1 auto; min-width: 0; }
       #peek .peek-read { min-height: 14px; }
       #readout .muted, .muted { color: var(--muted); }
       #readout .mono { font-family: var(--mono); font-size: 11.5px; }

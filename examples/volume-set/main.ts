@@ -331,9 +331,11 @@ export function getAnalysis(model: string, contrast: string, stat: StatName): Pr
       .filter((m) => m.model === model && m.contrast === contrast)
       .sort((a, b) => a.subject.localeCompare(b.subject));
     if (members.length === 0) return Promise.reject(new Error(`no maps for ${model} / ${contrast}`));
-    p = loadSet(members, stat, template.mask, (d, t) => setStatus(`Loading ${contrast} ${d}/${t}`)).then((set) =>
-      analyse(key, contrast, set)
-    );
+    p = loadSet(members, stat, template.mask, (d, t) => setStatus(`Loading ${contrast} ${d}/${t}`)).then((set) => {
+      // Background loads (e.g. other contrasts' panels) finish outside render(), which is what normally clears this.
+      if (statusEl.textContent?.startsWith(`Loading ${contrast} `)) setStatus('');
+      return analyse(key, contrast, set);
+    });
     analyses.set(key, p);
   }
   return p;
@@ -1379,7 +1381,7 @@ function updateReadout(): void {
     return;
   }
   if (!hover && state.mode === 'space') {
-    text.innerHTML = `<span class="muted">Click: cursor · ID: select · Enter: open · Arrows: maps · Wheel/PgUp: slice · ⌘+wheel: zoom</span>`;
+    text.innerHTML = `<span class="muted">Click: cursor + peek (P) · ID: select · Enter: open · Arrows: maps · Wheel/PgUp: slice · ⌘+wheel: zoom</span>`;
     text.title = 'Click map: cursor · Click ID: select · Double-click or Enter: open in Ortho · Arrows: move between maps · Wheel, PgUp/PgDn: slice · ⌘/Ctrl+wheel: zoom layout · Drag: pan · 0: fit';
     return;
   }
@@ -2177,6 +2179,11 @@ async function main(): Promise<void> {
       }
       if (e.key === 'r' || e.key === 'R') {
         SV.retryLayout();
+        return;
+      }
+      if ((e.key === 'p' || e.key === 'P') && state.subject) {
+        // Keyboard route to the peek: the focused map at the shared cursor (or its plane's centre).
+        P.togglePeekFor(state.subject);
         return;
       }
     }

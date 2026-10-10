@@ -40,6 +40,16 @@ export function basisOf(a: M.Analysis): SimilarityBasis {
   return SX.opts.noiseCorrected ? (V3.correctedBasis(a, b) ?? b) : b;
 }
 
+/** True when Space is showing noise-corrected similarity r ÷ √(ρᵢρⱼ) rather than plain r. */
+export function isCorrected(a: M.Analysis): boolean {
+  return SX.opts.noiseCorrected && basisOf(a) !== (SX.regionBasis(a) ?? a.basis);
+}
+
+/** Name of the similarity Space shows: "r", or "corrected r" under noise correction. */
+function rName(a: M.Analysis): string {
+  return isCorrected(a) ? 'corrected r' : 'r';
+}
+
 export function layoutKeyFor(b: SimilarityBasis, opts: NmdsOptions = M.layoutOpts(b.eligible.length)): string {
   return `${b.key}|${M.LAYOUT.id}|${JSON.stringify(opts)}|${NMDS_SOLVER.name}@${NMDS_SOLVER.version}`;
 }
@@ -246,7 +256,7 @@ export async function drawSpace(light = false): Promise<void> {
     '',
     ...(SX.trajectoryMode()
       ? [`Position: the ${a.contrast} layout,`, 'shared by every contrast panel.']
-      : [`Position: ${scopeShort(a)}`, `(1 − r, ${layout.kind === 'ready' ? methodShort(layout.out.result.method) : 'nonmetric MDS'}).`]),
+      : [`Position: ${scopeShort(a)}`, `(1 − ${rName(a)}, ${layout.kind === 'ready' ? methodShort(layout.out.result.method) : 'nonmetric MDS'}).`]),
     `Pictures: ${M.state.orient} slice ${M.sliceIndex() + 1}.`,
     'Axes and gaps are not results.',
   ];
@@ -853,7 +863,7 @@ function trustLine(a: M.Analysis): string {
   const parts = [
     `${res.method === 'metric-smacof' ? 'metric ' : ''}Stress-1 <b>${fmtStress(res.stress1)}</b>`,
     `3 nearest kept: dots <b>${pct(pres.mean)}</b>${Number.isFinite(picPres) ? `, pictures as drawn <b>${pct(picPres)}</b>` : ''}`,
-    `r ${M.fmtR(Math.min(...rRange(a)))} to ${M.fmtR(Math.max(...rRange(a)))}`,
+    `${rName(a)} ${M.fmtR(Math.min(...rRange(a)))} to ${M.fmtR(Math.max(...rRange(a)))}`,
     `best of ${res.starts.length} starts (${res.bestHits} reached it)${nearTie ? `; another start came within ${((100 * (runnerUp - best)) / best).toFixed(2)}%, so a somewhat different layout fits almost as well` : ''}`,
   ];
   return parts.join(' · ');
@@ -918,9 +928,9 @@ export function spaceSection(a: M.Analysis): string {
         : '';
       nb = `<section>
         <h3>Neighbours <span class="sub">${a.ids[sel]}</span></h3>
-        <table class="nb-table"><tr><th>rank</th><th>map</th><th>r</th><th>screen rank</th></tr>${rows}</table>
+        <table class="nb-table"><tr><th>rank</th><th>map</th><th${isCorrected(a) ? ' title="Noise-corrected: r ÷ √(ρᵢρⱼ)"' : ''}>${isCorrected(a) ? 'corr. r' : 'r'}</th><th>screen rank</th></tr>${rows}</table>
         ${mismatch}
-        <p class="note">Nearest by 1 − r over ${basisOf(a).scope === 'subset' ? `the ${basisOf(a).support.length.toLocaleString()} voxels of the region (${basisOf(a).params.region})` : 'the whole common support'} (ties share a rank). Local preservation: <b>${Number.isFinite(pv) ? `${Math.round(pv * 100)}%` : 'n/a'}</b> — ${pres.definition}</p>
+        <p class="note">Nearest by 1 − ${rName(a)}${isCorrected(a) ? ' (r ÷ √(ρᵢρⱼ), Spearman’s correction for each map’s reliability ρ)' : ''} over ${basisOf(a).scope === 'subset' ? `the ${basisOf(a).support.length.toLocaleString()} voxels of the region (${basisOf(a).params.region})` : 'the whole common support'} (ties share a rank). Local preservation: <b>${Number.isFinite(pv) ? `${Math.round(pv * 100)}%` : 'n/a'}</b> — ${pres.definition}</p>
       </section>`;
     } else if (sel !== undefined) {
       const ex = b.excluded.find((e) => e.index === sel);
@@ -1050,7 +1060,7 @@ export function wireSpaceSection(a: M.Analysis): void {
   ctx.font = `10px ${FONT.mono}`;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'bottom';
-  ctx.fillText(`1 − r ${M.fmtR(xmin)}`, L, H - 2);
+  ctx.fillText(`1 − ${isCorrected(g.a) ? 'corr. r' : 'r'} ${M.fmtR(xmin)}`, L, H - 2);
   ctx.textAlign = 'right';
   ctx.fillText(M.fmtR(xmax), W - 4, H - 2);
   const s1 = g.layout.out.result.stress1;
@@ -1090,12 +1100,15 @@ function wrapText(ctx: CanvasRenderingContext2D, text: string, width: number): s
 /** What the positions are computed from, in a few words (whole volume or the applied region). */
 function scopeShort(a: M.Analysis): string {
   const b = basisOf(a);
-  return b.scope === 'subset' ? `similarity in a ${SX.opts.region?.radiusMm ?? ''} mm sphere` : 'whole-volume similarity';
+  const what = isCorrected(a) ? 'noise-corrected similarity' : 'similarity';
+  // Short enough for the reference column: the corrected form drops "whole-volume" (the panel says it).
+  return b.scope === 'subset' ? `${what} in a ${SX.opts.region?.radiusMm ?? ''} mm sphere` : isCorrected(a) ? what : `whole-volume ${what}`;
 }
 
 function scopeLong(a: M.Analysis): string {
   const b = basisOf(a);
-  return b.scope === 'subset' ? `similarity within ${b.params.region} (${b.support.length.toLocaleString()} voxels)` : 'whole-volume similarity';
+  const what = isCorrected(a) ? 'noise-corrected similarity (r ÷ √(ρᵢρⱼ))' : 'similarity';
+  return b.scope === 'subset' ? `${what} within ${b.params.region} (${b.support.length.toLocaleString()} voxels)` : `whole-volume ${what}`;
 }
 
 /**
@@ -1103,7 +1116,12 @@ function scopeLong(a: M.Analysis): string {
  * similarity matrix); null when they agree.
  */
 export function spaceBasisNote(a: M.Analysis): string | null {
-  return M.state.mode === 'space' && basisOf(a).scope === 'subset' ? `Space currently uses similarity within ${basisOf(a).params.region}; this matrix is whole-brain.` : null;
+  if (M.state.mode !== 'space') return null;
+  const sub = basisOf(a).scope === 'subset';
+  const corr = isCorrected(a);
+  if (!sub && !corr) return null;
+  const what = `${corr ? 'noise-corrected similarity (r ÷ √(ρᵢρⱼ))' : 'similarity'}${sub ? ` within ${basisOf(a).params.region}` : ''}`;
+  return `Space currently uses ${what}; this matrix shows ${sub ? 'whole-brain ' : ''}raw r.`;
 }
 
 /** Stress written like r elsewhere in the app (no leading zero), to three decimals. */

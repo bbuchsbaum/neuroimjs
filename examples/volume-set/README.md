@@ -70,7 +70,8 @@ similar whole-volume patterns.
 
 | Action | Effect |
 |---|---|
-| click a map | set the cursor at that voxel and focus the map |
+| click a map | set the cursor at that voxel, focus the map and open it in the **peek** |
+| P | open (or close) the peek for the focused map |
 | click an ID, a dot or a list entry | focus the map without moving the cursor (IDs and dots win over pictures beneath them) |
 | hover (or keyboard focus) | enlarge the map after a short pause; a line joins it to its true position |
 | double-click, Enter, or "Open in Ortho" | open the focused map in Ortho; Esc / Back returns with the viewport |
@@ -82,6 +83,13 @@ similar whole-volume patterns.
 | R | retry a failed layout |
 
 The anatomical crop (zoom inside each picture) is set in Montage or Facet and shared by Space.
+
+**Peek.** A small slice viewer for one map, placed where it covers the fewest pictures (never the side
+panel). It has its own plane (A/C/S) and slice (slider or wheel), reads the raw value under the pointer
+in mm, and uses the shared threshold, range, smoothing and cluster filter. It follows the focused map
+(arrow keys, IDs, the Maps list); a picture clicked in another contrast's side-by-side panel shows that
+contrast. A click inside it places the shared cursor; a double-click or "Ortho" opens Ortho at that voxel.
+Close it with ×, Esc, P, a click on empty space, or by leaving Space; drag its header to move it.
 
 ### Layers (toolbar above the layout)
 

@@ -42,11 +42,7 @@ export function openPeek(subject: string, contrast: string, ijk: readonly number
   peek = { subject, contrast: contrast === M.state.contrast ? null : contrast, orient, slice: ijk[M.AXIS[orient]] };
   hoverIjk = null;
   const box = ensureEl();
-  void draw().then(() => {
-    // Keep the panel where it is when retargeting, so it does not jump about while browsing maps.
-    if (!wasOpen) place(box, anchor);
-    else clampToViewport(box);
-  });
+  void draw().then(() => place(box, anchor, wasOpen));
 }
 
 export function closePeek(): void {
@@ -57,11 +53,45 @@ export function closePeek(): void {
   el = null;
 }
 
-/** Redraw after a shared-state change (display settings, contrast, mode); closes when no longer applicable. */
+/** Client-space centre of a subject's picture in the current Space drawing (null if it is not drawn). */
+function pictureCentre(subject: string): { x: number; y: number } | null {
+  const cv = document.querySelector('#view canvas')?.getBoundingClientRect();
+  if (!cv) return null;
+  const h = M.hits.find((q) => q.member !== 'mean' && q.analysis.contrast === M.state.contrast && String(q.analysis.set.members[q.member].meta.subject) === subject);
+  return h ? { x: cv.left + h.view.dest.x + h.view.dest.w / 2, y: cv.top + h.view.dest.y + h.view.dest.h / 2 } : null;
+}
+
+/** P key: open the peek on a subject (at the shared cursor's plane), or close it if it already shows that subject. */
+export function togglePeekFor(subject: string): void {
+  if (peek?.subject === subject) {
+    closePeek();
+    return;
+  }
+  const c = M.state.cursor;
+  const anchor = pictureCentre(subject) ?? { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+  openPeek(subject, M.state.contrast, c ?? [-1, -1, -1], anchor);
+}
+
+/**
+ * Redraw after a shared-state change (display settings, contrast, mode); closes when no longer applicable.
+ * Follows the focused map: selecting another subject (arrow keys, ID labels, the Maps list) retargets it.
+ */
 export function syncPeek(): void {
   if (!peek) return;
   if (M.state.mode !== 'space') {
     closePeek();
+    return;
+  }
+  const s = M.state.subject;
+  if (s && s !== peek.subject) {
+    peek.subject = s;
+    peek.contrast = null;
+    hoverIjk = null;
+    const box = el;
+    const anchor = pictureCentre(s);
+    void draw().then(() => {
+      if (box && anchor) place(box, anchor, true);
+    });
     return;
   }
   void draw();
@@ -197,19 +227,30 @@ async function draw(): Promise<void> {
   el.querySelectorAll<HTMLButtonElement>('[data-peek-orient]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.peekOrient === p.orient)));
 
   // Picture: the whole brain box at a whole number of screen pixels per voxel, physical aspect kept.
-  const crop = M.brainBox(set, p.orient);
-  const ps = M.planePixelSize(set, p.orient);
-  const m = Math.min(ps[0], ps[1]);
-  const rel: [number, number] = m > 0 ? [ps[0] / m, ps[1] / m] : [1, 1];
-  const s = Math.max(1, Math.floor(Math.min(MAX_SIDE / (crop.w * rel[0]), MAX_SIDE / (crop.h * rel[1]))));
-  const W = Math.round(crop.w * rel[0] * s);
-  const H = Math.round(crop.h * rel[1] * s);
+  // One scale and one canvas box for all three planes, so switching plane never resizes or moves the panel.
+  const planes = ORIENT_KEYS.map(([o]) => {
+    const ps = M.planePixelSize(set, o);
+    const m = Math.min(ps[0], ps[1]);
+    const rel: [number, number] = m > 0 ? [ps[0] / m, ps[1] / m] : [1, 1];
+    const crop = M.brainBox(set, o);
+    return { o, crop, rel, w: crop.w * rel[0], h: crop.h * rel[1] };
+  });
+  const s = Math.max(1, Math.floor(Math.min(...planes.map((q) => Math.min(MAX_SIDE / q.w, MAX_SIDE / q.h)))));
+  const W = Math.round(Math.max(...planes.map((q) => q.w)) * s);
+  const H = Math.round(Math.max(...planes.map((q) => q.h)) * s);
+  const pl = planes.find((q) => q.o === p.orient)!;
+  const crop = pl.crop;
+  const pw = Math.round(pl.w * s);
+  const ph = Math.round(pl.h * s);
   const cv = el.querySelector<HTMLCanvasElement>('.peek-img')!;
+  // Fixed panel width: long readouts truncate rather than resize the panel.
+  el.style.width = `${W + 18}px`; // 8 px padding + 1 px border each side (border-box)
   const ctx = hidpi(cv, W, H);
-  const v = placeCrop(crop, { x: 0, y: 0, w: W, h: H }, rel);
+  ctx.clearRect(0, 0, W, H);
+  const v = placeCrop(crop, { x: Math.floor((W - pw) / 2), y: Math.floor((H - ph) / 2), w: pw, h: ph }, pl.rel);
   view = v;
   ctx.fillStyle = '#000';
-  ctx.fillRect(0, 0, W, H);
+  ctx.fillRect(v.dest.x, v.dest.y, v.dest.w, v.dest.h);
   drawCellImage(ctx, M.underImage(a, p.orient, p.slice), M.overImage(a, member, p.orient, p.slice), v);
   const c = M.state.cursor;
   if (c) {
@@ -239,21 +280,53 @@ async function draw(): Promise<void> {
 }
 
 /**
- * Beside the anchor, vertically centred on it, inside the Space stage so it never covers the side panel:
- * right of the anchor if it fits there, else left, else whichever side has more room.
+ * Where the panel covers the fewest pictures: never the one it shows (weighted heavily), then other maps,
+ * with a mild pull towards the source and, when retargeting, towards where it already is. Always inside the
+ * Space stage, so it never covers the side panel.
  */
-function place(box: HTMLDivElement, anchor: { x: number; y: number }): void {
+function place(box: HTMLDivElement, anchor: { x: number; y: number }, retarget: boolean): void {
   const r = box.getBoundingClientRect();
   const st = document.querySelector('#view')?.getBoundingClientRect() ?? new DOMRect(0, 0, window.innerWidth, window.innerHeight);
-  const gap = 28;
-  const right = anchor.x + gap;
-  const left = anchor.x - gap - r.width;
-  let x = right;
-  if (right + r.width > st.right - 8) x = left >= st.left + 8 ? left : st.right - anchor.x > anchor.x - st.left ? right : left;
-  x = Math.max(st.left + 8, Math.min(st.right - r.width - 8, x));
-  const y = Math.max(st.top + 8, Math.min(st.bottom - r.height - 8, anchor.y - r.height / 2));
-  box.style.left = `${x}px`;
-  box.style.top = `${y}px`;
+  const cv = document.querySelector('#view canvas')?.getBoundingClientRect() ?? st;
+  const obstacles = M.hits.map((h) => {
+    const d = h.view.dest;
+    const rect = { x: cv.left + d.x, y: cv.top + d.y, w: d.w, h: d.h };
+    const isSource = anchor.x >= rect.x && anchor.x < rect.x + rect.w && anchor.y >= rect.y && anchor.y < rect.y + rect.h;
+    return { ...rect, weight: isSource ? 6 : h.member === 'mean' ? 0.5 : 1 };
+  });
+  const cost = (x: number, y: number): number => {
+    let c = 0;
+    for (const o of obstacles) {
+      const ox = Math.max(0, Math.min(x + r.width, o.x + o.w) - Math.max(x, o.x));
+      const oy = Math.max(0, Math.min(y + r.height, o.y + o.h) - Math.max(y, o.y));
+      c += ox * oy * o.weight;
+    }
+    const dx = Math.max(0, x - anchor.x, anchor.x - (x + r.width));
+    const dy = Math.max(0, y - anchor.y, anchor.y - (y + r.height));
+    return c + 12 * Math.hypot(dx, dy);
+  };
+  const x0 = st.left + 8;
+  const y0 = st.top + 8;
+  const x1 = Math.max(x0, st.right - r.width - 8);
+  const y1 = Math.max(y0, st.bottom - r.height - 8);
+  const clamp = (x: number, y: number): [number, number] => [Math.max(x0, Math.min(x1, x)), Math.max(y0, Math.min(y1, y))];
+  let best = clamp(anchor.x + 28, anchor.y - r.height / 2);
+  let bestCost = cost(...best);
+  const consider = (x: number, y: number, bias = 0): void => {
+    const [cx, cy] = clamp(x, y);
+    const c = cost(cx, cy) + bias;
+    if (c < bestCost) {
+      best = [cx, cy];
+      bestCost = c;
+    }
+  };
+  // Staying put wins unless moving clearly uncovers pictures (≈ half a thumbnail), so browsing does not make it jump.
+  if (retarget) consider(r.left, r.top, -4000);
+  consider(anchor.x - 28 - r.width, anchor.y - r.height / 2);
+  const step = 16;
+  for (let y = y0; y <= y1; y += step) for (let x = x0; x <= x1; x += step) consider(x, y);
+  box.style.left = `${best[0]}px`;
+  box.style.top = `${best[1]}px`;
   clampToViewport(box);
 }
 
