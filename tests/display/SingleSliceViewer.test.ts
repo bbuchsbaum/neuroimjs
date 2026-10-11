@@ -80,6 +80,18 @@ describe('SingleSliceViewer', () => {
     viewer.dispose();
   });
 
+  test('sets markers and updates the drawn-marker query when the slice changes', async () => {
+    const viewer = await SingleSliceViewer.createAxial(container, volStack);
+    viewer.setMarkers([{ id: 'focus-3', xyz: [3, 3, 3] }, { id: 'focus-4', xyz: [3, 3, 4] }]);
+    expect(viewer.worldToSliceIndex([3, 3, 4])).toBe(4);
+    expect(viewer.markersOnSlice()).toEqual(['focus-3']);
+    viewer.getViewer().model.setCurrentSliceIndex(4);
+    expect(viewer.markersOnSlice()).toEqual(['focus-4']);
+    viewer.setMarkers([]);
+    expect(viewer.markersOnSlice()).toEqual([]);
+    viewer.dispose();
+  });
+
   test('forwards pointer move/down events from SliceView listeners', async () => {
     let capturedMove: ((e: any) => void) | undefined;
     let capturedDown: ((e: any) => void) | undefined;

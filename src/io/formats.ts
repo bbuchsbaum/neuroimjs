@@ -187,5 +187,8 @@ export function getFormat(formatName: string): FileFormat {
   if (upperName in FILE_FORMATS) {
     return FILE_FORMATS[upperName as keyof typeof FILE_FORMATS];
   }
-  throw new ValueError(`Unknown file format: ${formatName}`);
+  throw new ValueError(`Unknown file format: ${formatName}`, {
+    code: 'UNSUPPORTED_FORMAT',
+    details: { format: formatName },
+  });
 }

@@ -1,6 +1,7 @@
 import { NeuroSpace } from '../geometry/NeuroSpace';
 import { NeuroVol } from '../volume/NeuroVol';
 import { TypedArray, NumericType } from '../types';
+import { NeuroimError } from '../errors';
 import { AxisSet3D } from '../geometry/Axis';
 import { NeuroSlice } from '../volume/NeuroSlice';
 import { createNeuroSlice } from '../volume/NeuroIm';
@@ -30,6 +31,8 @@ export class SparseNeuroVol implements NeuroVol {
   ) {
     this.space = space;
     this.dataType = dataType;
+    // Fail at construction, not on first slice: there is no uint32 slice class.
+    this.getDataConstructor();
     this.defaultValue = defaultValue;
     this.sparseData = new Map<number, number>();
 
@@ -248,7 +251,7 @@ export class SparseNeuroVol implements NeuroVol {
     }
 
     const slice = createNeuroSlice(
-      this.dataType as 'float32' | 'uint8' | 'int16' | 'float64' | 'int32' | 'int8' | 'uint16',
+      this.dataType,
       dropped as NeuroSpace,
       sliceData
     );
@@ -378,7 +381,9 @@ export class SparseNeuroVol implements NeuroVol {
       case 'uint8':
         return Uint8Array;
       default:
-        throw new Error(`Unsupported data type: ${this.dataType}`);
+        throw new NeuroimError('UNSUPPORTED_DATATYPE', `Unsupported data type: ${this.dataType}`, {
+          details: { type: this.dataType },
+        });
     }
   }
 

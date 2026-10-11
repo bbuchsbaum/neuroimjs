@@ -4,27 +4,30 @@
 # io
 
 ## Purpose
-File I/O for neuroimaging formats. Primary support for NIfTI-1/NIfTI-2 with gzip compression. Includes format detection and a higher-level API for reading volumes, vectors, and headers.
+NIfTI I/O. Reads NIfTI-1 and NIfTI-2 (`.nii`, `.nii.gz`) and writes single-file NIfTI-1. Includes file-format descriptors and a header reader.
 
 ## Key Files
 
 | File | Description |
 |------|-------------|
-| `nifti.ts` | Low-level NIfTI read/write: `read_vol`, `write_vol` with pako gzip support |
-| `io.ts` | High-level API: `readVol`, `writeVol`, `readHeader`, `readVolList`, `readVec`, `writeVec` |
-| `formats.ts` | Format detection (`findDescriptor`, `getFormat`) and format adapters (`NIFTIFormat`, `AFNIFormat`) |
+| `io.ts` | Node decoder and writer: `readVol`, `writeVol`, `readHeader`, `readVolList`, `readVec`, `writeVec` (Node entry) |
+| `browserNifti.ts` | Browser decoder: `readNiftiArrayBuffer` (browser entry only; `nifti-reader-js` is ESM-only) |
+| `niftiGeometry.ts` | Helpers shared by both decoders: `niftiScaling` (scl_slope/scl_inter rules) and `affineVoxelSizes`. Internal |
+| `nifti.ts` | Legacy aliases `read_vol` / `write_vol` (thin wrappers over `readVol` / `writeVol`) and re-exports |
+| `formats.ts` | File-format descriptors by extension (`NIFTIFormat`, `NIFTIDualFormat`, `AFNIFormat`, `findDescriptor`, `getFormat`) |
 
 ## For AI Agents
 
 ### Working In This Directory
-- `nifti.ts` uses `nifti-reader-js` for parsing and `pako` for gzip compression/decompression.
-- `io.ts` wraps `nifti.ts` with a friendlier API and adds support for multiple formats via `formats.ts`.
-- NIfTI files can be `.nii` (uncompressed) or `.nii.gz` (gzip). Both are handled transparently.
-- In browser context, file reading uses `fetch` + `ArrayBuffer`. In Node, uses `fs.readFileSync`.
-- AFNI format support is partial — NIfTI is the primary target.
+- There are two decoders, `io.ts` and `browserNifti.ts`. Any change to how headers are interpreted (scaling, voxel sizes, orientation) must go in `niftiGeometry.ts` or be made in both, and the conformance suite (`npm run test:conformance`) must keep passing.
+- Gzip is detected from the bytes for `ArrayBuffer` input, and from the extension for paths. `writeVol`/`writeVec` gzip a `.nii.gz` path and not a `.nii` path (`resolveGzip`); `compress`/`format` that contradict a NIfTI extension throw `INVALID_ARGUMENT`. For other extensions, `compress` or `format: 'NIFTI_GZ'` decides.
+- `readVec` returns a `BigNeuroVec` with the legacy time-first shape (`dim = [T, X, Y, Z]`); the 3D geometry is on `volumeSpace`.
+- `writeVec` dispatches on the class (`niftiVecLayout`): `BigNeuroVec` time-first, `DenseNeuroVec`/`SparseNeuroVec` time-last, anything else `INVALID_ARGUMENT`. Never infer the layout from `dim`. Both writers go through `encodeNifti1` (qform + sform, `pixdim` from the affine; `qform_code` 0 for sheared affines, which a qform cannot represent).
+- `NIFTIDualFormat` and `AFNIFormat` are descriptors only: there is no reader for `.hdr`/`.img` pairs or AFNI, and `writeVol` rejects them.
 
 ### Testing Requirements
-- Tests in `tests/io.test.ts` — round-trip read/write with the MNI152 template.
-- Test both compressed and uncompressed NIfTI files.
+- `tests/io.test.ts`, `tests/io.nifti.golden.test.ts`, `tests/io.readVec.geometry.test.ts`, `tests/io.write.compression.test.ts`, `tests/io.writeVec.layout.test.ts`.
+- `npm run conformance:writers` (opt-in, needs uv) loads files written by `writeVol`/`writeVec` with nibabel.
+- `tests/conformance/` compares both decoders with nibabel-generated fixtures (`npm run conformance:generate` regenerates them).
 
 <!-- MANUAL: -->

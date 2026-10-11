@@ -133,6 +133,24 @@ describe('SliceView resize after dispose', () => {
     expect(view.isDisposed).toBe(true);
   });
 
+  test('mounting keeps caller host styles and contains canvas and slider in its own wrapper', async () => {
+    container.style.height = '300px';
+    container.style.position = 'static';
+    const { space, stack } = makeStack();
+    const imageLayer = new ImageLayer(stack);
+    imageLayer.initialize();
+    const axes = AxisSet3D.AXIAL_LPI;
+    const model = new SliceModel(16, space.gridToCoord([8, 8, 8]), space, axes);
+    const view = await SliceView.create(container, imageLayer, space, axes, model, { showSlider: true });
+    expect(container.style.height).toBe('300px');
+    expect(container.style.position).toBe('static');
+    expect(container.style.width).toBe('');
+    expect(container.firstElementChild?.contains(container.querySelector('canvas'))).toBe(true);
+    expect(container.firstElementChild?.contains(view.slider)).toBe(true);
+    view.dispose();
+    expect(container.children).toHaveLength(0);
+  });
+
   test('dispose does not release PIXI global resources shared with other views', async () => {
     // Application.destroy(true) sets releaseGlobalResources, which clears the
     // page-wide TexturePool; another live view then throws when it returns a

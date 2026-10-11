@@ -10,6 +10,7 @@ export type {
 } from './display/OrthogonalImageViewer';
 export { SliceViewer } from './display/SliceViewer';
 export { SingleSliceViewer } from './display/SingleSliceViewer';
+export type { PointMarker, PointMarkerOptions } from './display/PointMarkerLayer';
 export { ViewSynchronizer } from './display/ViewSynchronizer';
 export type { ViewSynchronizerOptions } from './display/ViewSynchronizer';
 
@@ -36,6 +37,10 @@ export type {
 } from './display/ColorMap';
 export { ColorMapFactory } from './display/ColorMapFactory';
 export type { PresetConfig } from './display/ColorMapFactory';
+
+// Typed errors: branch on `error.code` via isNeuroimError(error, code).
+export { NeuroimError, NeuroimTypeError, isNeuroimError, NEUROIM_ERROR_CODES } from './errors';
+export type { NeuroimErrorCode, NeuroimErrorOptions } from './errors';
 
 export { AxisSet1D, AxisSet2D, AxisSet3D, NamedAxis } from './geometry/Axis';
 export { NeuroSpace } from './geometry/NeuroSpace';
@@ -100,7 +105,9 @@ export {
   clusteredSearchlight,
   bootstrapSearchlight,
 } from './searchlight/searchlight';
-export type { SearchlightOptions } from './searchlight/searchlight';
+export type { SearchlightOptions, RandomSearchlightOptions } from './searchlight/searchlight';
+export { createRng } from './utils/rng';
+export type { Rng, RandomOptions } from './utils/rng';
 
 // Overlay review / subject consistency helpers
 export {

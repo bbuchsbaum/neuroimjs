@@ -64,6 +64,9 @@ examples/output/
 *.nii.gz
 # ...except the small sample volume the docs site ships for its live demos.
 !docs/public/data/*.nii.gz
+# ...and the tiny nibabel conformance fixtures (npm run conformance:generate).
+!tests/conformance/fixtures/nifti/*.nii
+!tests/conformance/fixtures/nifti/*.nii.gz
 
 # Playwright snapshots: only the Linux baselines are committed (CI renders on
 # ubuntu-latest); other platforms' baselines stay local.

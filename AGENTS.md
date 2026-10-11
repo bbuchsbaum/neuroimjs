@@ -25,7 +25,7 @@ A comprehensive neuroimaging library for JavaScript/TypeScript providing volumet
 |-----------|---------|
 | `src/` | All source code (see `src/AGENTS.md`) |
 | `tests/` | Unit and integration tests (see `tests/AGENTS.md`) |
-| `docs/` | Design docs and migration guides (see `docs/AGENTS.md`) |
+| `docs/` | VitePress documentation site and contributor notes (see `docs/AGENTS.md`) |
 | `e2e/` | Playwright end-to-end tests (see `e2e/AGENTS.md`) |
 | `examples/` | Usage examples and demo HTML pages (see `examples/AGENTS.md`) |
 | `output/` | Generated slice images from demos (not source-controlled) |

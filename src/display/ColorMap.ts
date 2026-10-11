@@ -74,6 +74,22 @@ export type NumericTypedArray =
   | Float32Array
   | Float64Array;
 
+const NUMERIC_TYPED_ARRAYS = [
+  Int8Array,
+  Uint8Array,
+  Uint8ClampedArray,
+  Int16Array,
+  Uint16Array,
+  Int32Array,
+  Uint32Array,
+  Float32Array,
+  Float64Array,
+] as const;
+
+function isNumericTypedArray(value: unknown): value is NumericTypedArray {
+  return NUMERIC_TYPED_ARRAYS.some(Ctor => value instanceof Ctor);
+}
+
 /**
  * Range validation result
  */
@@ -215,6 +231,56 @@ export class ColorMap {
    */
   getColorMap(): Color[] {
     return this.colors;
+  }
+
+  /** Sample the current lookup table across its data range for a legend. */
+  toStops(n: number = 9): { value: number; color: string }[] {
+    if (!Number.isInteger(n) || n < 2) {
+      throw new RangeError('Legend stop count must be an integer of at least 2');
+    }
+    const [min, max] = this.range;
+    return Array.from({ length: n }, (_, i) => {
+      const value = min + (max - min) * i / (n - 1);
+      return { value, color: this.legendColor(value) };
+    });
+  }
+
+  /** CSS gradient built from every LUT entry, including the transparent threshold band. */
+  toCSSGradient(direction: string = '90deg'): string {
+    const [min, max] = this.range;
+    const [low, high] = this.threshold;
+    const stops = this.colors.map((color, i) => {
+      const pct = this.colors.length === 1 ? 0 : 100 * i / (this.colors.length - 1);
+      const value = min + (max - min) * pct / 100;
+      return { pct, color: this.formatLegendColor(color, low < high && value > low && value < high) };
+    });
+    if (low < high) {
+      for (const boundary of [low, high]) {
+        if (boundary < min || boundary > max) continue;
+        const pct = 100 * (boundary - min) / (max - min);
+        const opaque = this.legendColor(boundary, false);
+        const transparent = this.legendColor(boundary, true);
+        stops.push({ pct, color: boundary === low ? opaque : transparent });
+        stops.push({ pct, color: boundary === low ? transparent : opaque });
+      }
+      stops.sort((a, b) => a.pct - b.pct);
+    }
+    return `linear-gradient(${direction}, ${stops.map(s => `${s.color} ${s.pct}%`).join(', ')})`;
+  }
+
+  private legendColor(value: number, forceTransparent?: boolean): string {
+    const [min, max] = this.range;
+    const index = Math.max(0, Math.min(this.colors.length - 1,
+      Math.floor((value - min) / (max - min) * (this.colors.length - 1))));
+    const color = this.colors[index];
+    const [low, high] = this.threshold;
+    const transparent = forceTransparent === true || (forceTransparent !== false && low < high && value > low && value < high);
+    return this.formatLegendColor(color, transparent);
+  }
+
+  private formatLegendColor(color: Color, transparent: boolean): string {
+    const alpha = transparent ? 0 : (color[3] ?? 1);
+    return `rgba(${Math.round(color[0] * 255)}, ${Math.round(color[1] * 255)}, ${Math.round(color[2] * 255)}, ${alpha})`;
   }
 
   /**
@@ -457,12 +523,14 @@ export class ColorMap {
   /**
    * Maps a numeric array to a Float32Array of color components (RGB or RGBA).
    * This is often used for GPU-based rendering or custom shader pipelines.
-   * @param values An array or Float32Array of scalar values.
+   * @param values An array or numeric TypedArray (any voxel datatype) of scalar values.
    * @returns A Float32Array of length = values.length * (3 or 4).
    */
-  getColorArray(values: number[] | Float32Array): Float32Array {
-    if (!(Array.isArray(values) || values instanceof Float32Array) || values.length === 0) {
-      throw new TypeError('Values must be a non-empty array or Float32Array');
+  getColorArray(values: number[] | NumericTypedArray): Float32Array {
+    // Accept every numeric TypedArray, as fillImageData() does, so slices of
+    // integer volumes (uint8/int16/uint16/...) can be colour-mapped directly.
+    if (!(Array.isArray(values) || isNumericTypedArray(values)) || values.length === 0) {
+      throw new TypeError('Values must be a non-empty array or numeric TypedArray');
     }
 
     const componentsPerColor = this._hasAlpha ? 4 : 3;

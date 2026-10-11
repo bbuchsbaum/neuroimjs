@@ -8,7 +8,7 @@ This guide goes from `npm install` to a brain rendered in the browser, then show
 npm install neuroimjs
 ```
 
-That is all you need. The rendering and parsing libraries (`pixi.js`, `mobx`, `chroma-js`, `lit`, `nifti-reader-js`, `pako`, …) are regular **dependencies** of the package, so npm installs them with it. You don't need any peer dependencies or extra install steps.
+That is all you need. The rendering and parsing libraries (`pixi.js`, `mobx`, `chroma-js`, `lit`, `nifti-reader-js`, `pako`, …) are regular **dependencies** of the package, so npm installs them with it. You don't need any peer dependencies or extra install steps. The Node entry requires Node.js 22 or later.
 
 There are two entry points:
 
@@ -20,7 +20,7 @@ There are two entry points:
 ::: warning Pick one entry per app
 `neuroimjs/browser` is a separate prebuilt bundle with its own copies of every class. Don't import from both entries in one app: a `ColorMap` or volume created from one entry fails the `instanceof` checks in the other (for example in `resolveColorMap`). Browser code should import everything from `neuroimjs/browser`. The main `neuroimjs` entry statically imports Node's `fs` and `path`, so it doesn't bundle for the browser without shims.
 
-The browser entry covers viewers, layers, colormaps, the dense and sparse volume classes, `readNiftiArrayBuffer`, searchlights and the [group statistics](/guide/group-stats) helpers. Filtering, resampling, volume arithmetic, connected components, `StatFunctions`, the 4D `split*`/`concat` helpers and the ROI factories are exported only from `neuroimjs`.
+The browser entry covers viewers, layers, colormaps, the dense and sparse volume classes, `readNiftiArrayBuffer`, searchlights, the ROI classes (`ROICoords`, `ROIVol`, `ROIVec`) and the [group statistics](/guide/group-stats) helpers. Filtering, resampling, volume arithmetic, connected components, `StatFunctions`, the 4D `split*`/`concat` helpers and the ROI factories are exported only from `neuroimjs`.
 :::
 
 ## Hello, brain (browser)
@@ -79,10 +79,6 @@ const viewer = await SingleSliceViewer.createAxial(
 viewer.onCoordChange((coord) => console.log('world coord (mm):', coord))
 ```
 
-::: warning `UINT16` images
-`readNiftiArrayBuffer` keeps the stored datatype. For `UINT16` data that is a `UInt16NeuroVol`, and slicing one currently throws, so the viewer cannot display it. Convert the volume first: `new FloatNeuroVol(vol.space, Float32Array.from(vol.getData()))`. See [Volumes & Slices](/guide/volumes#dense-volumes).
-:::
-
 Want all three planes at once? Swap `SingleSliceViewer.createAxial` for [`SimpleOrthogonalViewer.create`](/guide/viewers). The **[Single Slice View example](/examples/single-view)** has a complete page.
 
 ## Hello, volume (Node.js)
@@ -105,7 +101,7 @@ vol.space.gridToCoord([98, 134, 72]) // [0, 0, 0]
 vol.space.coordToGrid([0, 0, 0]) // [98, 134, 72]
 ```
 
-`readVol` applies NIfTI intensity scaling (`scl_slope` / `scl_inter`) and byte-swaps big-endian data, so the values you read are the scaled intensities. When scaling is active, the result is a `FloatNeuroVol`. The file above ships with the repository as `tests/data/volumes/tpl-MNI152NLin2009aAsym_res-1_T1w.nii.gz`.
+`readVol` applies NIfTI intensity scaling (`scl_slope` / `scl_inter`) and byte-swaps big-endian data, so the values you read are the scaled intensities. When scaling is active, the result is a `FloatNeuroVol` (Float32; the browser loader uses Float64). Unscaled `UINT32` files are not supported by `readVol` ([details](/guide/io)). The file above ships with the repository as `tests/data/volumes/tpl-MNI152NLin2009aAsym_res-1_T1w.nii.gz`.
 
 ## Where to go next
 

@@ -1,224 +1,79 @@
-# NPM Scripts Quick Reference
+# npm Scripts and Testing
 
-This document lists all available npm scripts for the neuroimjs project.
+Contributor reference for the scripts in `package.json`. Releases are covered in [`RELEASING.md`](../RELEASING.md).
 
 ## Building
 
-### Production Builds
-
 ```bash
-npm run build              # Full build (CJS + ESM + Types)
-npm run build:cjs          # CommonJS build only
-npm run build:esm          # ES modules build only
-npm run build:types        # TypeScript declarations only
-npm run build:vite         # Vite browser build (dist/neuroimjs.es.js)
-npm run build:quick        # Quick CJS build for testing
+npm run build              # Full build: CJS + ESM + type declarations
+npm run build:cjs          # CommonJS only
+npm run build:esm          # ES modules only
+npm run build:types        # Type declarations only
+npm run build:vite         # Browser bundles (dist/neuroimjs.es.js, UMD)
+npm run build:quick        # Quick CJS build during development
 ```
 
 ## Testing
 
 ```bash
-npm test                   # Run all tests with Vitest
-npm run test:watch         # Run tests in watch mode
-npm run test:types         # TypeScript type checking
-npm run test:specific      # Run specific test with verbose output
-npm run test:alignment     # Run alignment integration tests
-npm run test:debug         # Run tests with verbose output, no coverage
+npm test                   # Vitest (jsdom); watch mode in a terminal
+npm test -- --run --silent # One pass, quiet (what CI runs)
+npm run test:watch         # Watch mode
+npm run test:types         # tsc --noEmit
+npm run test:specific -- tests/io.test.ts   # One file, verbose reporter
+npm run test:debug         # Verbose, no coverage
+npm run test:alignment     # Multi-layer alignment integration tests
+npm run test:conformance   # NIfTI decoders vs nibabel-generated fixtures
+npm run conformance:generate   # Regenerate those fixtures (needs uv; pins Python + nibabel)
+npm run test:e2e           # Playwright browser tests (starts `npm run dev`)
+npm run test:e2e:update    # Refresh Playwright screenshot baselines
+npm run test:package       # Check the packed tarball
+npm run test:consumers     # Downstream consumer contract tests against the tarball
 ```
 
-## Demos & Examples
+Unit tests live in `tests/` and in `src/**/__tests__/`; Playwright tests in `e2e/`. PIXI.js and canvas are mocked in `tests/setup.ts`. Only Linux Playwright baselines are committed, because CI renders on Ubuntu.
 
-### Composable Views Demos (NEW!)
+A filter narrows a run to matching test names:
 
 ```bash
-npm run demo:composable    # View all composable views demos (index page)
-npm run demo:single-view   # Single axial view example
-npm run demo:two-view      # Two synchronized views example
-npm run demo:multi-panel   # Multi-panel custom layout example
+npm run test:specific -- -t "should cache alignment"
 ```
 
-### Classic Viewer Demos
+When a test builds layers on volumes of different sizes, choose slice indices that are valid for every volume in the stack: the pinned axis of the view (k for axial, j for coronal, i for sagittal) bounds the index.
+
+## Checks run before a release
 
 ```bash
-npm run demo:simple-ortho  # SimpleOrthogonalViewer (3-view layout)
+npm run verify:release     # types, lint, unit tests, builds, bundle size,
+                           # package and consumer checks, API docs, npm audit
+npm run lint               # ESLint on src and tests
+npm run lint:ci            # ESLint with the CI warning budget
+npm run check:bundle-size
+npm run audit:prod         # npm audit of runtime dependencies
 ```
 
-### Command-Line Demos
+`prepublishOnly` runs `verify:release`.
+
+## Documentation site
 
 ```bash
-npm run demo:ortho         # Orthogonal slice demo (Node.js)
-npm run demo:extract       # Extract orthogonal slices (Node.js)
-npm run demo:test-ortho    # Test orthogonal slicing (Node.js)
-npm run demo:load          # Load image example (Node.js)
-npm run demo:thumbs        # Generate thumbnails (Node.js)
+npm run docs:dev           # TypeDoc API + VitePress dev server
+npm run docs:build         # Static site in docs/.vitepress/dist
+npm run docs:preview       # Serve the built site
+npm run docs:api           # Regenerate docs/api only
 ```
 
-### Development Server
+## Demos
 
 ```bash
-npm run serve:examples     # Serve examples directory at http://localhost:8080
+npm run demo:composable    # Index of the composable-view demos (Vite dev server)
+npm run demo:single-view   # Single axial view
+npm run demo:two-view      # Two synchronized views
+npm run demo:multi-panel   # Custom multi-panel layout
+npm run demo:multi-layer   # Multi-layer viewer
+npm run demo:overlay-review    # Group overlay review with synthetic data
+npm run demo:simple-ortho  # Builds the UMD bundle, then serves the classic 3-view page
+npm run serve:examples     # Static server for the repository (http-server)
 ```
 
-## Development Tools
-
-```bash
-npm run dev                # Start Vite dev server
-npm run lint               # Run ESLint
-npm run format             # Format code with Prettier
-```
-
-## Publishing
-
-```bash
-npm run prepublishOnly     # Runs automatically before npm publish (builds library)
-```
-
-## Script Patterns
-
-### Demo Scripts Pattern
-
-All `demo:*` scripts follow this pattern:
-1. Build the library with `npm run build:vite`
-2. Start http-server
-3. Automatically open the example in your browser
-
-**Example:**
-```bash
-npm run demo:single-view
-# Equivalent to:
-# 1. npm run build:vite
-# 2. npx http-server -c-1 . -o examples/single-axial-view.html
-```
-
-### Test Scripts Pattern
-
-Test scripts use Vitest:
-- `npm test` - Run all tests once
-- `npm run test:watch` - Continuous testing during development
-- `npm run test:specific` - Run with verbose reporter for debugging
-
-## Common Workflows
-
-### Development Workflow
-
-```bash
-# 1. Start with a clean build
-npm run build
-
-# 2. Run tests to ensure everything works
-npm test
-
-# 3. Start dev server for live development
-npm run dev
-
-# 4. Run tests in watch mode in another terminal
-npm run test:watch
-```
-
-### Demo Development Workflow
-
-```bash
-# 1. Build the library
-npm run build:vite
-
-# 2. Serve examples
-npm run serve:examples
-
-# 3. Open http://localhost:8080/examples/your-demo.html
-```
-
-### Pre-commit Workflow
-
-```bash
-# 1. Type check
-npm run test:types
-
-# 2. Run tests
-npm test
-
-# 3. Lint code
-npm run lint
-
-# 4. Format code (optional)
-npm run format
-```
-
-### Release Workflow
-
-```bash
-# 1. Ensure all tests pass
-npm test
-
-# 2. Type check
-npm run test:types
-
-# 3. Build everything
-npm run build
-
-# 4. Test examples work
-npm run demo:composable
-
-# 5. Update version in package.json
-npm version [major|minor|patch]
-
-# 6. Publish (prepublishOnly runs automatically)
-npm publish
-```
-
-## Troubleshooting
-
-### "Cannot find module" errors in demos
-
-Run the build first:
-```bash
-npm run build:vite
-```
-
-### Tests fail with type errors
-
-Run type checking separately:
-```bash
-npm run test:types
-```
-
-### Browser doesn't open automatically
-
-The `-o` flag in http-server may not work on all systems. Run the command and manually open the URL shown in the terminal.
-
-### Port 8080 already in use
-
-Kill the existing server or use a different port:
-```bash
-npx http-server -p 8081 -c-1 . -o examples/your-demo.html
-```
-
-## Adding New Scripts
-
-To add a new npm script:
-
-1. Add to `package.json` under `"scripts"`:
-   ```json
-   "demo:my-new-demo": "npm run build:vite && npx http-server -c-1 . -o examples/my-demo.html"
-   ```
-
-2. Document it in this file
-
-3. Update the examples README if it's a demo
-
-## Script Flags Explained
-
-### http-server flags
-- `-c-1` - Disable caching (always serve latest files)
-- `-o` - Open browser automatically
-- `-p PORT` - Use specific port
-
-### Vitest flags
-- `--watch` - Watch mode (re-run on file changes)
-- `--reporter=verbose` - Detailed test output
-- `--no-coverage` - Skip coverage collection
-- `run` - Run once and exit (vs watch mode)
-
-### TypeScript flags
-- `--noEmit` - Type check without generating files
-- `-p FILE` - Use specific tsconfig file
-- `--outDir DIR` - Output directory for compiled files
+The Vite demos import the library from `src/` and need no build. Node demos (`demo:ortho`, `demo:extract`, `demo:test-ortho`, `demo:load`, `demo:thumbs`) run TypeScript under `tsx`; some need local data files, and those that write images use the `canvas` dev dependency.

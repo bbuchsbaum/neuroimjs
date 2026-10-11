@@ -7,6 +7,248 @@ in the pull request that makes the change.
 
 ## Unreleased
 
+Upgrading: `readVol` now takes `space.spacing` from the affine rather than
+from `pixdim`. Callers that need the raw `pixdim[1..3]` should use
+`readHeader().spacing`. See Changed. The `TypeError` export is removed; import
+`NeuroimTypeError` instead. See Removed. `writeVol`/`writeVec` now reject
+`compress`/`format` options that contradict a `.nii` or `.nii.gz` path, for
+example `{ compress: true }` with a `.nii` path. See Changed.
+
+### Added
+
+- `SingleSliceViewer.setMarkers()` draws world-coordinate ring, cross, or dot
+  markers at a constant screen size; `markersOnSlice()` returns the IDs drawn
+  in the current viewport. `slabMm` is the full slab thickness. (#29)
+- `ColorMap.toStops()` and `toCSSGradient()` derive legends from the current
+  lookup table and transparent threshold band. (#30)
+- `npm run conformance:writers` (opt-in, needs uv) loads files written by
+  `writeVol` and `writeVec` with nibabel and checks shape, datatype, qform,
+  sform, zooms and voxel values.
+- `toInt32Labels()` converts a label volume (or its voxel data) to an
+  `Int32Array` by value, for every typed-array datatype. It rejects
+  non-finite, non-integer and out-of-range values with an error naming the
+  voxel. (#13)
+- `createRng(seed)` returns a seeded generator (mulberry32) of numbers in
+  [0, 1); `Rng` and `RandomOptions` are exported.
+- `randomSearchlight(mask, radius, { seed, rng })` and
+  `bootstrapSearchlight(mask, radius, iter, { seed, rng })` take an options
+  argument for reproducible centers. Without one, each call still draws a
+  fresh seed, so successive calls give different searchlights as before.
+- `NeuroAtlas.loadGlasserAtlas({ useCache, seed, rng })` chooses the random
+  region colours from a seeded generator. By default it uses
+  `GLASSER_DEFAULT_COLOR_SEED`, so colours are now the same on every load;
+  `loadGlasserAtlas(useCache)` still works.
+- Downstream consumer contract tests (`npm run test:consumers`, part of
+  `verify:release` and CI): the call surfaces of neuromosaic, FROIAtlas,
+  neuroimjs-vscode and xnat2bids, run against the packed tarball.
+- Viewer-free subpath exports `neuroimjs/io` (readVol, writeVol, readHeader,
+  readVolList, readVec, writeVec, read_vol, write_vol, format descriptors,
+  DenseNeuroVol and its concrete subclasses), `neuroimjs/slices`
+  (extractOrthogonalSlices and the slice helpers, NeuroSlice) and
+  `neuroimjs/geometry` (NeuroSpace, axes, volume geometry). `io` and
+  `geometry` also export the typed-error API (NeuroimError,
+  NeuroimTypeError, isNeuroimError, NEUROIM_ERROR_CODES). Each subpath has
+  `types`/`import`/`require` conditions, plus a `typesVersions` mapping for
+  `moduleResolution: node10`, and never loads pixi.js, mobx, lit or display
+  code. `npm run test:package` enforces this with a static import-graph
+  check (dependency allowlist), a runtime check against the packed tarball,
+  and type checks under NodeNext, Bundler and node10.
+  Node consumers such as Electron main processes no longer need deep
+  `dist/esm/...` imports. `readNiftiArrayBuffer` stays browser-only.
+- `BigNeuroVec` accepts `storage: 'memory'` (no backing file), `volumeSpace`
+  and `shareData` options, and exposes `storage` and `volumeSpace`.
+- Typed errors. `NeuroimError` (base class) carries a stable `code` of type
+  `NeuroimErrorCode`, which is one of `INVALID_ARGUMENT`, `OUT_OF_RANGE`,
+  `GEOMETRY_MISMATCH`, `UNSUPPORTED_FORMAT`, `UNSUPPORTED_DATATYPE`,
+  `CORRUPT_FILE`, `NOT_IMPLEMENTED` or `IO_ERROR`. It may also carry a `details`
+  object and an ES2022 `cause`. `isNeuroimError(error, code?)` narrows an
+  unknown error, including one from a second copy of the library (for example
+  the CJS and ESM builds loaded together). `NEUROIM_ERROR_CODES` lists the
+  codes. The TypeScript modules in `src/io` and `src/geometry` throw only
+  coded errors, with messages unchanged; other modules are not yet migrated.
+  `NeuroimError`, `NeuroimTypeError` and `isNeuroimError` are also exported
+  from `neuroimjs/browser`. `ValueError`, `NotImplementedError` and
+  `IOError` are now subclasses of `NeuroimError` and keep their `name`s. See
+  the Errors section of the I/O guide.
+
+### Changed
+
+- `ColorMapFactory.createDiverging()` now interpolates in RGB by default,
+  avoiding a green hue between blue and a light neutral. Existing callers will
+  see different intermediate colors; pass `{ mode: 'lch' }` to retain the old
+  interpolation. `lab` and `oklab` are also available. (#27)
+- **Breaking:** `writeVol`, `writeVec` and `write_vol` throw a `NeuroimError`
+  with code `INVALID_ARGUMENT`, and write nothing, when `compress` or
+  `format` contradicts a NIfTI extension: `{ compress: true }` or
+  `format: 'NIFTI_GZ'` with a `.nii` path, or `{ compress: false }` with a
+  `.nii.gz` path. Previously `{ compress: true }` with a `.nii` path wrote
+  gzip bytes that `readVol` could not open. Rename the file or drop the
+  option.
+- `readVec` sets the time spacing of its 4D `space` (`space.spacing[0]`) to
+  the header's `pixdim[4]` when that is finite and positive, instead of
+  always 1, so `writeVec(await readVec(path), out)` keeps the TR.
+
+- The `SparseNeuroVol` constructor rejects `dataType: 'uint32'` up front with
+  a `NeuroimError` (code `UNSUPPORTED_DATATYPE`). Previously construction
+  succeeded and `getAt`/`setAt` worked, but slicing or densifying failed later
+  with a plain `Error`.
+
+- `readVol` sets `space.spacing` to the voxel sizes of the selected transform,
+  that is, the column norms of `space.trans`, instead of `pixdim[1..3]`. These
+  are the values nibabel returns from `nibabel.affines.voxel_sizes(img.affine)`
+  (not `header.get_zooms()`, which returns pixdim). `readNiftiArrayBuffer`
+  already used them.
+  - **Who is affected:** files whose sform scaling differs from pixdim, such
+    as an oblique or rescaled sform.
+  - **Before:** `readVol` reported a spacing that contradicted the affine,
+    and the two decoders disagreed.
+  - **Now:** `readHeader().spacing` still returns the raw `pixdim[1..3]`.
+    Callers that want pixdim should read it there.
+- `partition(x, k, method, mask, seed)` throws `RangeError` for a NaN or
+  infinite `seed`; such seeds were previously coerced to 0.
+- The label map of a Glasser or Schaefer `NeuroAtlas` (`atlas.atlas.labelMap`,
+  and the labels returned by `getClusterInfo`/`getClusterLabel`) is keyed by
+  the hemisphere-qualified names from the label file, e.g. `Right_V1` /
+  `Left_V1` and `7Networks_LH_Vis_1`. `loadGlasserAtlas` now sets
+  `origLabels` to those names; `labels` still holds the bare region names.
+  `getROI({ label })` accepts either form, but a bare name shared by both
+  hemispheres (`V1`) now throws an ambiguity error instead of returning the
+  left-hemisphere region.
+- `bigNeuroVecSeq` returns an in-memory `BigNeuroVec` that keeps the first
+  volume's space (including its affine) as `volumeSpace`; it previously wrote
+  an untracked `.dat` file to `$TMPDIR` and dropped the affine.
+- `BigNeuroVec.subVector` on an in-memory vector stays in memory and keeps
+  `volumeSpace`; an empty selection throws a `ValueError`.
+- Flushing a file-backed `BigNeuroVec` after `close()` throws instead of
+  failing with `EBADF`; a second `close()` is a no-op.
+- Releases are published from CI by the `Release` workflow, triggered by a
+  GitHub release, using npm Trusted Publishing (OIDC) with a provenance
+  attestation; `scripts/verify-published.mjs` checks that the registry
+  tarball matches the CI build file for file. See `RELEASING.md`.
+
+### Deprecated
+
+- `ValueError`. Catch library errors with `isNeuroimError(error, code)`.
+  Functions that threw `ValueError` still throw instances of it (now with a
+  specific `code`, e.g. `CORRUPT_FILE` for a non-NIfTI buffer), so existing
+  `instanceof ValueError` checks keep working until 1.0.
+
+### Removed
+
+- The `TypeError` export. `export * from './types'` exposed it, so
+  `import * as nij from 'neuroimjs'` and `import { TypeError } from 'neuroimjs'`
+  shadowed the global `TypeError`. No library function threw it. Use
+  `NeuroimTypeError` (a `NeuroimError` with code `INVALID_ARGUMENT`) or the
+  global `TypeError`.
+
+### Fixed
+
+- `VolLayer.replaceVolume()` now invalidates render and texture versions, so
+  mounted slices show the replacement without moving the crosshair. (#26)
+- Viewer mounting preserves host sizing styles. Fixed-height grid cells stay
+  stable, and auto-height hosts still grow to show the canvas. (#28)
+- `writeVol`, `writeVec` and `write_vol` gzip a path ending in `.nii.gz`.
+  Previously they gzipped only with `{ compress: true }` or
+  `format: 'NIFTI_GZ'`, so `writeVol(vol, 'x.nii.gz')` wrote uncompressed
+  bytes that `readVol` then failed to read ("incorrect header check").
+  Compression now follows the extension (`.nii.gz` gzipped, `.nii` not), and
+  a `compress` or `format` option that contradicts a NIfTI extension throws a
+  `NeuroimError` with code `INVALID_ARGUMENT` before anything is written. For
+  other extensions the options decide as before.
+- `writeVec` writes time-last vecs and oblique geometry correctly.
+  - **Affected:** it assumed the time-first `[T, X, Y, Z]` layout of
+    `BigNeuroVec`, so a time-last `Float32NeuroVec` (or any `DenseNeuroVec`)
+    was written with header dims `[Y, Z, T, X]` over unchanged bytes. It wrote
+    only an axis-aligned sform built from spacing and origin, dropping
+    rotations and flips, and no qform. Without `dataType` the header always
+    said FLOAT32 whatever the bytes were, so an `Int16NeuroVec` could not be
+    read back. A `SparseNeuroVec` could not be written at all.
+  - **Now:** the layout comes from the class: `BigNeuroVec` is time-first
+    with geometry from `volumeSpace`; `DenseNeuroVec` subclasses and
+    `SparseNeuroVec` are time-last with geometry from their 4D `space`. Any
+    other `NeuroVec` throws `INVALID_ARGUMENT`. The full affine is written as
+    qform and sform, as `writeVol` does, the datatype follows the data, and
+    `pixdim[4]` is the time spacing if the space has one (units mm and
+    seconds), else 1 (units mm).
+- `writeVol` sets `pixdim[1..3]` to the voxel sizes implied by the affine
+  (its column norms), which the qform needs to reproduce the affine.
+  Previously it wrote `space.spacing`, which can disagree with the affine.
+  The datatype code now always matches the bytes written.
+- `writeVol` and `writeVec` no longer write an approximate qform for a
+  sheared affine, which a qform cannot represent (nibabel read
+  `[[2, .5, 0], [0, 2, 0], [0, 0, 2]]` back as a 7° rotation). They set
+  `qform_code` to 0 and keep the exact sform. Dimensions above 32767, the
+  NIfTI-1 limit, throw `INVALID_ARGUMENT` instead of wrapping.
+
+- uint16 volumes can be sliced and displayed. `createNeuroVol` accepted
+  `'uint16'` but `createNeuroSlice` did not, so a UINT16 NIfTI loaded through
+  `readVol` or `readNiftiArrayBuffer` threw `Unsupported TypedArray type:
+  uint16` from `getSlice`, `getSliceAt`, `extractOrthogonalSlices` and every
+  viewer. Slices of a uint16 volume are now `Uint16Array`-backed, and the
+  display path maps the full 0..65535 range across the colour map.
+  `SparseNeuroVol` with `dataType: 'uint16'` and `Resampler` output of a uint16
+  volume slice the same way.
+- `createNeuroSlice` and `createNeuroVol` throw a `NeuroimError` with code
+  `UNSUPPORTED_DATATYPE` (message unchanged) for a type with no class, which
+  is now only `'uint32'`. `Resampler` raises the same code for an unsupported
+  data array.
+- `ColorMap.getColorArray()` accepts every numeric TypedArray, as
+  `fillImageData()` already did. It used to reject anything but `number[]`
+  and `Float32Array`, including the slices of integer volumes.
+
+- `readVol` and `readNiftiArrayBuffer` no longer add `scl_inter` when
+  `scl_slope` is 0 or non-finite. Such a slope means "no scaling" (NIfTI-1
+  spec, nibabel), so voxel values are now returned exactly as stored.
+  Previously every voxel was offset by `scl_inter`. A valid slope still yields
+  `value * scl_slope + scl_inter`. A non-finite `scl_inter` with a valid
+  slope is read as 0, following nifti1_io's `FIXED_FLOAT` rule. nibabel
+  instead refuses to load such a file.
+- `nearestAnatomy()` reports the correct axis codes for non-orthogonal
+  (sheared) affines. Its Gram-Schmidt step scaled the i column in place by
+  `dot(i, j)`, so a sheared RAS image could be reported as LAS.
+  - **Affected:** `readVol`, `readNiftiArrayBuffer` and any `NeuroSpace` built
+    from such an affine got the wrong `axes`, and `reorient()` picked the
+    wrong frame.
+  - **Now:** it orthonormalises copies of the columns, as NIfTI's
+    `nifti_mat44_to_orientation` does. The result agrees with nibabel's
+    `aff2axcodes` for near-orthogonal affines but can differ for strongly
+    sheared ones.
+- `NeuroAtlas.loadSchaeferAtlas`, `loadGlasserAtlas` and `loadAtlas` accept
+  label volumes stored as int8, uint8, int16, uint16, int32, float32 or float64.
+  Schaefer reinterpreted the bytes of non-float volumes (wrong labels, or a
+  `RangeError` for an odd voxel count) and Glasser threw `Unsupported data type`
+  for int8, uint8 and int16. Labels made non-integer by `scl_slope`/`scl_inter`
+  now raise an error instead of being rounded silently. (#13)
+- Right-hemisphere Glasser and Schaefer regions can be looked up by label.
+  The label map was keyed by region name, which both hemispheres share, so each
+  left-hemisphere entry replaced its right-hemisphere twin.
+- `readVol` reads uint16 NIfTI volumes (datatype 512) as `UInt16NeuroVol`; it
+  threw `Unsupported TypedArray type: uint16`.
+- `loadSchaeferAtlas` no longer writes diagnostics to the console; they go to
+  the display logger at DEBUG.
+- The browser bundles are built with a relative base, so the ES bundle refers
+  to the scatter-field worker chunk relative to itself
+  (`new URL('assets/...', import.meta.url)`) instead of the origin root
+  (`/assets/...`). Apps that re-bundle `dist/neuroimjs.es.js` or
+  `neuroimjs/browser` with Vite failed to build against 0.5.0 because the
+  worker entry could not be resolved.
+- `buildScatterFieldAsync()` now builds the field on the main thread when the
+  worker fails to load or run, returns an unreadable message, or exceeds
+  `workerTimeoutMs`; previously these rejected and the synchronous fallback was
+  used only when the `Worker` constructor threw. This covers UMD hosts that do
+  not serve the bundle's `assets/` directory: the UMD bundle resolves the
+  worker URL against the page, not the bundle, so the worker 404s there.
+- `readVec` kept only spacing and origin from the file, so `getVolume(t)` and
+  `vols()` dropped the rotation of an oblique affine. It also re-read and
+  re-decompressed the whole file once per volume, and above 100 volumes (or
+  with `useBigVec`) it wrote a `<file>.bigvec.tmp` next to the input that was
+  never deleted; otherwise it wrote a `.dat` copy to `$TMPDIR`. `readVec` now
+  decodes the file once, keeps the data in memory, writes nothing to disk, and
+  carries the file's full 3D space on the result as `volumeSpace`.
+  `getVolume(t)` uses that space. The time-first shape (`dim = [T, X, Y, Z]`)
+  is unchanged. `useBigVec` no longer changes behaviour, and `mask` is still
+  ignored.
+
 ## 0.5.0 - 2026-10-03
 
 Upgrading from 0.4.0: Node.js 22 or later is required; `ImageLayer` defaults
@@ -30,6 +272,10 @@ logger is quiet by default. Each is described below.
 
 ### Changed
 
+- The `SparseNeuroVol` constructor rejects `dataType: 'uint32'` up front with
+  a `NeuroimError` (code `UNSUPPORTED_DATATYPE`). Previously construction
+  succeeded and `getAt`/`setAt` worked, but slicing or densifying failed later
+  with a plain `Error`.
 - Require Node.js 22 or later (`engines.node` was `>=20.19`). pixi.js 8, a
   runtime dependency, reads `navigator` when it loads, so `require('neuroimjs')`
   and `import 'neuroimjs'` already threw `ReferenceError: navigator is not

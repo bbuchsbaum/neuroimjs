@@ -1,51 +1,13 @@
-import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { createPackedConsumer, repositoryRoot } from './lib/packed-consumer.mjs';
 
-const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const temporaryRoot = mkdtempSync(join(tmpdir(), 'neuroimjs-package-'));
-const npmCache = join(temporaryRoot, 'npm-cache');
-const environment = { ...process.env, npm_config_cache: npmCache };
-
-function run(command, args, cwd = repositoryRoot) {
-  return execFileSync(command, args, {
-    cwd,
-    env: environment,
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-}
+const { consumerRoot, tarballName, run, cleanup } = createPackedConsumer({
+  prefix: 'neuroimjs-package-',
+  name: 'neuroimjs-package-smoke',
+});
 
 try {
-  const packResult = JSON.parse(run('npm', [
-    'pack',
-    '--json',
-    '--ignore-scripts',
-    '--pack-destination',
-    temporaryRoot,
-  ]));
-  const tarball = join(temporaryRoot, packResult[0].filename);
-  const consumerRoot = join(temporaryRoot, 'consumer');
-
-  writeFileSync(join(temporaryRoot, 'package.json'), JSON.stringify({ private: true }));
-  mkdirSync(consumerRoot);
-  writeFileSync(join(consumerRoot, 'package.json'), JSON.stringify({
-    name: 'neuroimjs-package-smoke',
-    private: true,
-    type: 'module',
-  }));
-
-  run('npm', [
-    'install',
-    tarball,
-    '--ignore-scripts',
-    '--omit=optional',
-    '--no-audit',
-    '--no-fund',
-  ], consumerRoot);
-
   run('node', [
     '-e',
     "const pkg=require('neuroimjs'); const s=new pkg.NeuroSpace([2,2,2]); if(s.size!==8) process.exit(1)",
@@ -60,12 +22,53 @@ try {
     "import {NeuroSpace} from 'neuroimjs'; const s=new NeuroSpace([2,2,2]); if(s.size!==8) process.exit(1)",
   ], consumerRoot);
 
+  // Typed errors survive transpilation: instanceof, code and name hold in both
+  // builds, and neither build exports a TypeError that shadows the global.
+  const errorCheck = (load) => `
+    const fail = (message) => { console.error(message); process.exit(1); };
+    if ('TypeError' in nij) fail('package exports a TypeError that shadows the global');
+    try {
+      new nij.NeuroSpace([2, 2, 2]).extractSliceNeuroSpace(9, 2);
+      fail('out-of-range slice accepted');
+    } catch (error) {
+      if (!(error instanceof nij.NeuroimError) || !(error instanceof Error)) fail('not a NeuroimError');
+      if (error.code !== 'OUT_OF_RANGE' || error.name !== 'NeuroimError') fail('wrong code/name: ' + error.code + ' ' + error.name);
+      if (!nij.isNeuroimError(error, 'OUT_OF_RANGE')) fail('isNeuroimError rejected its own error');
+    }
+    ${load}
+    const legacy = new nij.ValueError('x');
+    if (!(legacy instanceof nij.NeuroimError) || legacy.code !== 'INVALID_ARGUMENT' || legacy.name !== 'ValueError') fail('ValueError back-compat broken');
+    if (!(new nij.NeuroimTypeError('t') instanceof nij.NeuroimError)) fail('NeuroimTypeError not a NeuroimError');
+    if (Object.keys(legacy).includes('name')) fail('name is an own enumerable property');
+    if (String(legacy.stack).split('\\n')[0] !== 'ValueError: x') fail('wrong stack header: ' + String(legacy.stack).split('\\n')[0]);
+  `;
+  run('node', [
+    '-e',
+    `const nij = require('neuroimjs'); (async () => { ${errorCheck(`
+      try { await nij.readVol(new ArrayBuffer(4)); fail('invalid NIfTI accepted'); }
+      catch (error) { if (!(error instanceof nij.ValueError) || error.code !== 'CORRUPT_FILE') fail('readVol: wrong error ' + error); }
+    `)} })().catch((error) => { console.error(error); process.exit(1); });`,
+  ], consumerRoot);
+  run('node', [
+    '--input-type=module',
+    '-e',
+    `import * as nij from 'neuroimjs'; import { createRequire } from 'node:module';
+    ${errorCheck(`
+      // Errors thrown by the CommonJS copy are recognised by the ESM copy.
+      const cjs = createRequire(process.cwd() + '/')('neuroimjs');
+      if (cjs.NeuroimError === nij.NeuroimError) fail('expected distinct CJS and ESM module instances');
+      if (!nij.isNeuroimError(new cjs.NeuroimError('IO_ERROR', 'x'), 'IO_ERROR')) fail('cross-build isNeuroimError failed');
+    `)}`,
+  ], consumerRoot);
+
   writeFileSync(join(consumerRoot, 'root-types.ts'), `
 import {
   ColorMapFactory,
   Float64NeuroVol,
   NeuroSpace,
+  isNeuroimError,
   type Color,
+  type NeuroimErrorCode,
   type OrthogonalImageViewerOptions,
   type ScatterFieldOptions,
   type StatisticalNeuroVec,
@@ -77,11 +80,21 @@ const scatterOptions: ScatterFieldOptions = { space, points: [{ x: 0, y: 0, z: 0
 const volume = new Float64NeuroVol(space, new Float64Array(8));
 const map = ColorMapFactory.createGradient(color, [0, 0, 1]);
 declare const reviewVector: StatisticalNeuroVec;
-void [viewerOptions, scatterOptions, volume, map, reviewVector];
+const code: NeuroimErrorCode = 'CORRUPT_FILE';
+declare const thrown: unknown;
+const thrownCode: NeuroimErrorCode | undefined = isNeuroimError(thrown) ? thrown.code : undefined;
+void [viewerOptions, scatterOptions, volume, map, reviewVector, code, thrownCode];
 `);
 
   writeFileSync(join(consumerRoot, 'browser-types.ts'), `
-import { NeuroSpace, type SimpleOrthogonalViewerOptions } from 'neuroimjs/browser';
+import {
+  NeuroSpace,
+  isNeuroimError,
+  type NeuroimErrorCode,
+  type SimpleOrthogonalViewerOptions,
+} from 'neuroimjs/browser';
+const browserCode: NeuroimErrorCode | false = isNeuroimError(null) && 'OUT_OF_RANGE';
+void browserCode;
 // @ts-expect-error The browser entry must not claim to export Node-only I/O.
 import { readVol } from 'neuroimjs/browser';
 const space = new NeuroSpace([2, 2, 2]);
@@ -114,10 +127,10 @@ void readVol;
     throw new Error('Browser export does not point to browser-specific declarations');
   }
 
-  console.log(`Package smoke test passed: ${packResult[0].filename}`);
+  console.log(`Package smoke test passed: ${tarballName}`);
 } catch (error) {
   if (error?.stderr) process.stderr.write(String(error.stderr));
   throw error;
 } finally {
-  rmSync(temporaryRoot, { recursive: true, force: true });
+  cleanup();
 }

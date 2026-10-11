@@ -9,9 +9,10 @@ export type { ReadVolOptions, WriteVolOptions, HeaderInfo } from './io';
 /**
  * Read a NIfTI file and return a NeuroVol.
  *
- * Thin wrapper over {@link readVol} kept for backward compatibility. The single
- * source of truth for NIfTI parsing (scl_slope/scl_inter scaling, endianness,
- * affine reconstruction, gzip) lives in `io.ts`.
+ * Thin wrapper over {@link readVol} kept for backward compatibility. There are
+ * two NIfTI decoders: `io.ts` (`readVol`, Node entry) and `browserNifti.ts`
+ * (`readNiftiArrayBuffer`, browser entry). Both take intensity scaling and
+ * affine voxel sizes from the shared helpers in `niftiGeometry.ts`.
  *
  * @param input - Path to the NIfTI file or an ArrayBuffer of its bytes.
  */
@@ -22,7 +23,9 @@ export async function read_vol(input: string | ArrayBuffer): Promise<NeuroVol> {
 /**
  * Write a NeuroVol to a NIfTI file.
  *
- * Thin wrapper over {@link writeVol}; see `io.ts` for the implementation.
+ * Thin wrapper over {@link writeVol} with default options; see `io.ts` for
+ * the implementation. Compression follows the extension: a `.nii.gz` path is
+ * gzipped and a `.nii` path is not.
  *
  * @param vol - The volume to write.
  * @param filePath - Destination path.

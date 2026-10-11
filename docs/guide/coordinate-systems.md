@@ -142,7 +142,7 @@ viewer.onCoordChange((coord) => {
 1. **Show world (mm) to users**, not voxel indices.
 2. **Name variables for their space** — `worldCoord`, `voxelCoord`, `sliceCoord`.
 3. **Don't assume axis directions** — the affine may include flips or rotations; read `space.axes` rather than assuming LPI.
-4. **Account for spacing** — anisotropic voxels affect every transform and every radius (this is the root of a known [searchlight caveat](/guide/stability)).
+4. **Account for spacing** — anisotropic voxels affect every transform and every radius. Searchlight and ROI radii are in mm and spacing-aware; `SpatialFilter` sigmas and morphology radii are in voxels.
 
 ## Common pitfalls
 

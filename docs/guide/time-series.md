@@ -13,7 +13,7 @@ Every 4D class implements the same small `NeuroVec` interface (`getAt`, `setAt`,
 | `FileBackedNeuroVec` | `[X, Y, Z, T]` | Frames fetched by your callback, kept in an LRU cache | Large uncompressed files |
 | `MappedNeuroVec` | `[X, Y, Z, T]` | `DataView` over an existing `ArrayBuffer`, no conversion | A decoded NIfTI buffer |
 | `SparseNeuroVec` | `[X, Y, Z, T]` | `Map` from voxel index to series | A few voxels of interest |
-| `BigNeuroVec` | **`[T, X, Y, Z]`** | Staged through a temp file, then held in memory | `readVec`, `bigNeuroVecSeq` |
+| `BigNeuroVec` | **`[T, X, Y, Z]`** | In memory (`readVec`, `bigNeuroVecSeq`), or staged through a temp file when constructed directly | `readVec`, `bigNeuroVecSeq` |
 
 ::: warning Time-first vs. time-last
 `readVec` and `bigNeuroVecSeq` return a `BigNeuroVec`, whose `space.dim` is **`[T, X, Y, Z]`**. All other classes use `[X, Y, Z, T]`. `getAt(i, j, k, t)` and `getSeries(i, j, k)` behave the same on both, but if you read the shape from `vec.dim`, check which family you have. On every class, `vec.length` is the **total element count** (X·Y·Z·T). It is not the number of time points.
@@ -198,7 +198,8 @@ bold.dim[0] // number of time points
 bold.length // T·X·Y·Z — total element count
 bold.getAt(1, 2, 3, 2) // accessors still take (i, j, k, t)
 bold.getSeries(1, 2, 3) // number[] of length T
-bold.getVolume(2) // FloatNeuroVol for frame 2
+bold.getVolume(2) // FloatNeuroVol for frame 2, on the file's 3D space
+(bold as BigNeuroVec).volumeSpace // the file's 3D NeuroSpace, including the affine
 
 // Load a subset of frames:
 const sub = await readVec('bold.nii', { indices: [0, 2] })
@@ -207,43 +208,38 @@ sub.space.dim // [2, 3, 4, 5]
 // Build one from 3D volumes and write it out as a 4D NIfTI:
 const frames = [await readVol('bold.nii', { index: 0 }), await readVol('bold.nii', { index: 1 })]
 const pair = bigNeuroVecSeq(frames)
-await writeVec(pair, 'pair.nii.gz', { compress: true })
+await writeVec(pair, 'pair.nii.gz') // gzipped: compression follows the extension
 
-// Both readVec and bigNeuroVecSeq stage data in a temp file under $TMPDIR:
-pair.cleanup() // close and delete it when done
-if (bold instanceof BigNeuroVec) bold.cleanup()
+// readVec and bigNeuroVecSeq keep everything in memory; cleanup() is harmless
+// and only deletes a backing file when the vec was constructed with one.
+pair.cleanup()
 ```
 
 Things to know before relying on `BigNeuroVec` for large data:
 
-- **It is not memory-mapped.** The class stages data in a backing file, but it also keeps a full in-memory copy (`Buffer.alloc` of the whole array). It does not reduce peak memory.
-- **`readVec` decodes the file once per frame.** Each frame goes through `readVol`, which reads and decompresses the whole file again. For long gzipped runs, decompress once and use `MappedNeuroVec` (above).
-- **More than 100 frames** (or `useBigVec: true`): `readVec` writes `<file>.bigvec.tmp` next to the input file, and `cleanup()` does not delete it.
-- **Geometry is lost, in two different ways.**
-  - Up to 100 frames: the 4D space keeps the voxel spacing and origin (as `[1, sx, sy, sz]` and `[0, ox, oy, oz]`) but drops the affine. `getVolume()` returns volumes on a plain axis-aligned grid, so rotations and flips in the file are lost.
-  - More than 100 frames, or `useBigVec: true`: the space is built from the shape alone, with spacing `[1, 1, 1, 1]` and origin `[0, 0, 0, 0]`. `getVolume()` then maps grid `[i, j, k]` to world `[i, j, k]` mm.
-
-  In both cases, take the geometry from `readVol(path, { index: 0 }).space` (or `readHeader`) rather than from the vec.
+- **It is held fully in memory.** `readVec` reads and decompresses the file once and copies every frame into one `Float32Array`; nothing is written to disk and nothing is memory-mapped. For runs too large for memory, use `FileBackedNeuroVec` or `MappedNeuroVec` (above).
+- **`vec.space` is not the image geometry.** Because the shape is time-first, `NeuroSpace` treats `[T, X, Y]` as the spatial axes. The file's 3D space, including the full affine, is `volumeSpace`, and `getVolume(t)` returns volumes on it (`bigNeuroVecSeq` takes `volumeSpace` from the first input volume). The time axis gets the header's `pixdim[4]` (the TR) as its spacing when that is positive, else 1.
+- **`mask` is ignored**, and `useBigVec` no longer changes anything.
 
 ### Writing 4D data
 
-`writeVec` assumes the time-first layout. If you pass an `[X, Y, Z, T]` vec, it is written with the wrong dimensions in the header. Restack it into a `BigNeuroVec` first:
+`writeVec` writes either layout. It reads the layout from the class: a `BigNeuroVec` is time-first and takes its geometry from `volumeSpace`, while a `DenseNeuroVec` (`Float32NeuroVec`, `Int16NeuroVec`, …) or `SparseNeuroVec` is time-last and takes it from its 4D `space`. The file is always NIfTI `[X, Y, Z, T]`, with the full affine stored as both qform and sform (sform only if the affine is sheared, which a qform cannot represent). Other `NeuroVec` implementations are rejected with `INVALID_ARGUMENT`.
 
 ```ts
-import { NeuroSpace, Float32NeuroVec, bigNeuroVecSeq, writeVec, readHeader } from 'neuroimjs'
+import { NeuroSpace, Float32NeuroVec, writeVec, readHeader, readVol } from 'neuroimjs'
 
-const bold = new Float32NeuroVec(new NeuroSpace([3, 4, 5, 6], [2, 2, 2], [-3, -4, -5]))
+// [X, Y, Z, T] with a 2 mm grid and a 2.5 s TR in the fourth spacing entry.
+const bold = new Float32NeuroVec(new NeuroSpace([3, 4, 5, 6], [2, 2, 2, 2.5], [-3, -4, -5, 0]))
 bold.getData().fill(1)
 
-// writeVec expects the time-first layout; restack an x,y,z,t vec first.
-const T = bold.dim[3]
-const timeFirst = bigNeuroVecSeq(Array.from({ length: T }, (_, t) => bold.getVolume(t)))
-await writeVec(timeFirst, 'bold_out.nii')
-timeFirst.cleanup()
+await writeVec(bold, 'bold_out.nii.gz')
 
-const hdr = await readHeader('bold_out.nii')
+const hdr = await readHeader('bold_out.nii.gz')
 hdr.dim // [4, 3, 4, 5, 6, 1, 1, 1]
+const frame = await readVol('bold_out.nii.gz', { index: 5 }) // same affine as bold.getVolume(5)
 ```
+
+`pixdim[4]` is the vec's time spacing when its space has one (`spacing[3]` here; `spacing[0]` for a `BigNeuroVec`), otherwise 1; the time unit is seconds when the spacing is known. `readVec` reads it back as `space.spacing[0]`.
 
 ## Hypervectors (5D and beyond)
 

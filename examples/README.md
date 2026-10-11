@@ -117,7 +117,7 @@ Then open http://localhost:8080/examples/ in your browser.
 
 ### Building Before Running Demos
 
-All `demo:*` commands automatically build the library first. If you want to build manually:
+The Vite demos (`demo:composable`, `demo:single-view`, `demo:two-view`, `demo:multi-panel`, `demo:multi-layer`, `demo:overlay-review`) import the library from `src/` and need no build. `demo:simple-ortho` builds the UMD bundle first; to build it manually:
 
 ```bash
 npm run build:vite
@@ -127,13 +127,11 @@ npm run build:vite
 
 For detailed documentation on composable views:
 
-- [**Composable Views Guide**](../docs/COMPOSABLE_VIEWS.md) - Complete developer guide
-- [**Implementation Summary**](../docs/COMPOSABLE_VIEWS_SUMMARY.md) - Overview of changes
+- [**Composable Views Guide**](https://bbuchsbaum.github.io/neuroimjs/guide/composable-views) - Complete developer guide (source: [`docs/guide/composable-views.md`](../docs/guide/composable-views.md))
 
 ## Requirements
 
-- Node.js 14+
-- npm 6+
+- Node.js 22+
 - Modern web browser with ES modules support
 
 ## Data Files

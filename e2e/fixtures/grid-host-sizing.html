@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <style>
+    * { box-sizing: border-box; }
+    #grid { display: grid; grid-template-columns: 300px 300px; gap: 8px; }
+    .cell { width: 300px; height: 300px; }
+    #auto-height { width: 300px; }
+  </style>
+</head>
+<body>
+  <div id="grid"><div class="cell"></div><div class="cell"></div><div class="cell"></div></div>
+  <div id="auto-height"></div>
+  <script type="module">
+    import { SingleSliceViewer, VolLayer, VolStack, ColorMapFactory, FloatNeuroVol, NeuroSpace } from '../../src/browser';
+    try {
+      const space = new NeuroSpace([8, 8, 8], [1, 1, 1], [0, 0, 0]);
+      const volume = new FloatNeuroVol(space, new Float32Array(8 * 8 * 8).fill(1));
+      const stack = new VolStack(new VolLayer('image', volume, ColorMapFactory.createGrayscale(), [0, 2]));
+      window.viewers = await Promise.all([...document.querySelectorAll('.cell')].map(cell =>
+        SingleSliceViewer.createAxial(cell, stack)));
+      window.autoHeightViewer = await SingleSliceViewer.createAxial(document.getElementById('auto-height'), stack);
+      window.ready = true;
+    } catch (error) {
+      window.error = String(error);
+    }
+  </script>
+</body>
+</html>

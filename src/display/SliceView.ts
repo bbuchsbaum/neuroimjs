@@ -46,6 +46,7 @@ export class SliceView implements ISliceView {
   public overlayContainer!: PIXI.Container;
   private fitRegion: { x0: number; y0: number; x1: number; y1: number } | null = null;
   private canvas: HTMLCanvasElement | null = null;
+  private wrapper: HTMLDivElement | null = null;
   public slider: HTMLInputElement | null = null;
   public coordinateTransformer!: CoordinateTransformer;
   public domElement: HTMLElement;
@@ -151,8 +152,13 @@ export class SliceView implements ISliceView {
     }
     this.canvas = canvas as HTMLCanvasElement;
 
-    // 3) Append the canvas
-    this.domElement.appendChild(this.canvas);
+    // Keep layout styles on an owned element; the caller controls the host size.
+    this.wrapper = document.createElement('div');
+    Object.assign(this.wrapper.style, {
+      position: 'relative', width: '100%', height: '100%', overflow: 'hidden'
+    });
+    this.domElement.appendChild(this.wrapper);
+    this.wrapper.appendChild(this.canvas);
     this.canvas.style.width = '100%';
     this.canvas.style.height = '100%';
     this.canvas.style.display = 'block';
@@ -167,13 +173,7 @@ export class SliceView implements ISliceView {
     this.overlayContainer = new PIXI.Container();
     this.app.stage.addChild(this.overlayContainer);
 
-    // 5) Container style - position: relative for slider absolute positioning
-    this.domElement.style.position = 'relative';
-    this.domElement.style.width = '100%';
-    this.domElement.style.height = '100%';
-    this.domElement.style.overflow = 'hidden';
-
-    // 6) Optional slice slider
+    // 5) Optional slice slider
     if (this.options.showSlider) {
       this.createSlider(this.model.totalSlices, this.model.currentSliceIndex);
     }
@@ -284,7 +284,7 @@ export class SliceView implements ISliceView {
       accentColor: '#3fb8af'
     });
 
-    this.domElement.appendChild(this.slider);
+    this.wrapper!.appendChild(this.slider);
   }
 
   /**
@@ -812,8 +812,8 @@ export class SliceView implements ISliceView {
     // makes every other live viewer throw when it later returns a text texture.
     this.app.destroy({ removeView: true }, { children: true });
 
-    if (this.canvas && this.domElement.contains(this.canvas)) {
-      this.domElement.removeChild(this.canvas);
+    if (this.canvas?.parentElement) {
+      this.canvas.parentElement.removeChild(this.canvas);
     }
     this.canvas = null;
 
@@ -821,5 +821,7 @@ export class SliceView implements ISliceView {
     if (this.slider && this.slider.parentElement) {
       this.slider.parentElement.removeChild(this.slider);
     }
+    this.wrapper?.remove();
+    this.wrapper = null;
   }
 }

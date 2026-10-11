@@ -1,3 +1,5 @@
+import { ValueError } from './errors';
+
 // Core TypedArray types for neuroimaging data
 export type TypedArray =
   | Float32Array
@@ -63,34 +65,19 @@ export type ROIType = 'coords' | 'volume' | 'vector' | 'surface';
 // Statistical types
 export type StatMethod = 'mean' | 'median' | 'std' | 'var' | 'min' | 'max' | 'sum';
 
-// Error classes following Python pattern
-export class ValueError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'ValueError';
-  }
-}
-
-export class TypeError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'TypeError';
-  }
-}
-
-export class NotImplementedError extends Error {
-  constructor(message: string = 'Method not implemented') {
-    super(message);
-    this.name = 'NotImplementedError';
-  }
-}
-
-export class IOError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'IOError';
-  }
-}
+// Error classes live in ./errors. Only the names below are re-exported here,
+// so `export * from './types'` no longer leaks a class named `TypeError` that
+// shadows the global.
+export {
+  NeuroimError,
+  NeuroimTypeError,
+  ValueError,
+  NotImplementedError,
+  IOError,
+  isNeuroimError,
+  NEUROIM_ERROR_CODES,
+} from './errors';
+export type { NeuroimErrorCode, NeuroimErrorOptions, ValueErrorOptions } from './errors';
 
 // Type guards
 export function isTypedArray(value: any): value is TypedArray {
@@ -129,7 +116,7 @@ export function getTypedArrayConstructor(type: NumericType): new (length: number
     case 'uint32':
       return Uint32Array;
     default:
-      throw new ValueError(`Unsupported numeric type: ${type}`);
+      throw new ValueError(`Unsupported numeric type: ${type}`, { code: 'UNSUPPORTED_DATATYPE' });
   }
 }
 
@@ -143,7 +130,7 @@ export function getNumericType(array: TypedArray): NumericType {
   if (array instanceof Int8Array) return 'int8';
   if (array instanceof Uint8Array) return 'uint8';
   if (array instanceof Uint32Array) return 'uint32';
-  throw new ValueError('Unknown TypedArray type');
+  throw new ValueError('Unknown TypedArray type', { code: 'UNSUPPORTED_DATATYPE' });
 }
 
 // Metadata types

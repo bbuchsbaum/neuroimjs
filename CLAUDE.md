@@ -21,7 +21,13 @@ npm run test:watch         # Watch mode
 npm run test:types         # Type checking only (tsc --noEmit)
 npm run test:specific -- src/path/to/test  # Run specific test file
 npm run test:debug         # Verbose output, no coverage
+npm run test:consumers     # Downstream contract tests vs the packed tarball (needs build + build:vite)
 ```
+
+`tests/consumers/` mirrors the exact calls of known downstream apps (neuromosaic, FROIAtlas,
+neuroimjs-vscode, xnat2bids), including the private internals they reach into. A failure there
+means a downstream app breaks: fix the library, or coordinate the consumer change; do not edit
+the mirror to match.
 
 Tests use Vitest with jsdom environment. PIXI.js and canvas are mocked in `tests/setup.ts`.
 

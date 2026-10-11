@@ -163,7 +163,7 @@ export abstract class NeuroSlice {
 }
 
 /**
- * Concrete NeuroSlice class using Float32Array.
+ * Concrete NeuroSlice class using Int16Array.
  */
 export class Int16NeuroSlice extends NeuroSlice {
   constructor(space: NeuroSpace, data: Int16Array) {
@@ -173,6 +173,19 @@ export class Int16NeuroSlice extends NeuroSlice {
   protected getTypedArrayType(): 'int16' {
     return 'int16';
   } 
+}
+
+/**
+ * Concrete NeuroSlice class using Uint16Array.
+ */
+export class Uint16NeuroSlice extends NeuroSlice {
+  constructor(space: NeuroSpace, data: Uint16Array) {
+    super(space, data);
+  }
+
+  protected getTypedArrayType(): 'uint16' {
+    return 'uint16';
+  }
 }
 
 /**
