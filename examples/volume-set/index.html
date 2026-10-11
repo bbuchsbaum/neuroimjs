@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Volume set · neuroimjs</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --bg: #0d0e14;
+        --bg-alt: #101119;
+        --panel: #15161f;
+        --line: #262838;
+        --line-strong: #3a3d52;
+        --text: #e6e6ef;
+        --muted: #8a8ca3;
+        --brand: #9b86ff;
+        --brand-soft: rgba(155, 134, 255, 0.16);
+        --accent: #22d3ee;
+        --warn: #f5a524;
+        --sans: Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+        --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 13px/1.45 var(--sans); }
+      html { overflow: hidden; }
+      /* minmax(0, …) everywhere: canvases are sized from their containers, so no track may grow to fit a canvas. */
+      body { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) 150px; height: 100vh; overflow: hidden; }
+      header { display: flex; align-items: center; gap: 8px 12px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--bg-alt); flex-wrap: wrap; }
+      .brand { font-weight: 650; letter-spacing: 0.01em; margin-right: 4px; white-space: nowrap; }
+      .brand small { color: var(--muted); font-weight: 400; margin-left: 6px; font-size: 12px; }
+      .group { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+      .group > span { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
+      .group > span#thr-label { text-transform: none; letter-spacing: 0; font-size: 12px; }
+      .sep { width: 1px; height: 22px; background: var(--line); }
+      .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+      .seg button { background: transparent; color: var(--muted); border: 0; padding: 5px 10px; font: inherit; cursor: pointer; }
+      .seg button + button { border-left: 1px solid var(--line); }
+      .seg button[aria-pressed='true'] { background: var(--brand-soft); color: var(--text); }
+      .seg button:hover { color: var(--text); }
+      button:focus-visible, select:focus-visible, input:focus-visible, canvas:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+      select, input { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; font: inherit; }
+      input[type='number'] { width: 58px; font-family: var(--mono); font-size: 12px; }
+      /* Fixed select widths keep the header to one row whatever option is chosen. */
+      #model { width: 84px; } #contrast { width: 150px; } #stat { width: 52px; } #sort { width: 176px; }
+      .ghost { background: transparent; color: var(--muted); border: 1px solid var(--line); border-radius: 6px; padding: 4px 9px; font: 12px var(--mono); cursor: pointer; }
+      .ghost.toggle[aria-pressed='true'] { color: var(--accent); border-color: rgba(34, 211, 238, 0.5); background: rgba(34, 211, 238, 0.08); }
+      .ghost:disabled { opacity: 0.45; cursor: default; }
+      #status { color: var(--accent); font-family: var(--mono); font-size: 11px; white-space: nowrap; }
+      main { display: grid; grid-template-columns: minmax(0, 1fr) 272px; min-height: 0; min-width: 0; }
+      #view-wrap { position: relative; min-height: 0; min-width: 0; overflow: hidden; display: flex; flex-direction: column; }
+      #view { position: relative; flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+      #readout { height: 30px; padding: 0 8px 0 16px; border-top: 1px solid var(--line); color: var(--text); font-size: 12px; display: flex; align-items: center; gap: 12px; }
+      #readout-text { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      #readout .ghost { padding: 2px 9px; }
+      #peek { position: fixed; z-index: 30; background: var(--panel); border: 1px solid var(--line-strong); border-radius: 9px; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55); padding: 8px; display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--text); }
+      #peek .peek-head { display: flex; align-items: center; gap: 8px; cursor: move; user-select: none; }
+      #peek .peek-id { font-weight: 600; color: var(--brand); font-family: var(--mono); }
+      #peek .peek-meta { color: var(--muted); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      #peek .seg button { padding: 2px 7px; font-size: 11px; }
+      #peek .ghost { padding: 2px 7px; }
+      #peek .peek-close { font: 15px/1 var(--sans); padding: 1px 7px 3px; }
+      #peek .peek-img { display: block; align-self: center; border-radius: 4px; cursor: crosshair; }
+      #peek .peek-slice { display: flex; align-items: center; gap: 8px; }
+      #peek .peek-slice input { flex: 1; min-width: 0; accent-color: var(--brand); }
+      #peek .mono { font-family: var(--mono); }
+      #peek .peek-head > * { flex-shrink: 0; }
+      #peek .peek-head > .peek-meta { flex-shrink: 1; min-width: 0; }
+      #peek .peek-ortho .short { display: none; }
+      #peek.narrow .peek-meta { display: none; }
+      #peek.narrow .peek-head { justify-content: space-between; }
+      #peek.narrow .peek-ortho .wide { display: none; }
+      #peek.narrow .peek-ortho .short { display: inline; }
+      #peek.narrow .peek-slice { flex-wrap: wrap; row-gap: 2px; }
+      #peek.narrow .peek-slice input { flex: 1 0 100%; }
+      #peek-tether { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 29; overflow: visible; }
+      #peek .peek-slice-label, #peek .peek-read { color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      #peek .peek-slice-label { flex: 0 1 auto; min-width: 0; }
+      #peek .peek-read { min-height: 14px; }
+      #readout .muted, .muted { color: var(--muted); }
+      #readout .mono { font-family: var(--mono); font-size: 11.5px; }
+      #side { min-width: 0; overflow-x: hidden; border-left: 1px solid var(--line); background: var(--bg-alt); padding: 14px 18px; overflow: auto; }
+      #side section { margin-bottom: 18px; scroll-margin-top: calc(var(--pinned-h, 150px) + 8px); }
+      .stage-msg { margin: auto; max-width: 560px; padding: 32px; text-align: left; }
+      .stage-msg h2 { font-size: 16px; font-weight: 600; margin: 0 0 10px; }
+      .stage-msg p { color: var(--text); line-height: 1.55; margin: 0 0 8px; overflow-wrap: anywhere; }
+      .stage-msg p.muted { color: var(--muted); font-size: 12px; }
+      /* Pinned at the top of the side panel: the controls stay reachable while reading the panel below. */
+      .display-controls { position: sticky; top: -14px; z-index: 2; background: var(--bg-alt); margin: -14px -18px 14px; padding: 14px 18px 10px; border-bottom: 1px solid var(--line); }
+      .display-controls .ctl-grid { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 7px 8px; align-items: center; }
+      .display-controls .ctl-grid > label { color: var(--muted); font-size: 12px; }
+      .display-controls .pair { display: flex; align-items: center; gap: 6px; min-width: 0; }
+      .display-controls .pair label { color: var(--muted); font-size: 12px; }
+      .display-controls .pair input { width: 54px; min-width: 0; }
+      .display-controls select { width: 100% !important; min-width: 0; }
+      .display-controls #thr-label { font-family: var(--mono); font-size: 12px; }
+      #side h3 { margin: 0 0 8px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; display: flex; justify-content: space-between; gap: 8px; }
+      #side h3 .sub { text-transform: none; letter-spacing: 0; font-family: var(--mono); font-weight: 400; color: var(--text); }
+      #side canvas { display: block; }
+      .cbwrap { width: 100%; margin: 6px 0 2px; }
+      #side dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0 0 8px; }
+      #side dt { color: var(--muted); }
+      #side dd { margin: 0; font-family: var(--mono); font-size: 12px; }
+      #side dd.wrap { font-family: var(--sans); }
+      .note { color: var(--muted); font-size: 11.5px; margin: 6px 0 0; }
+      .note .smooth { color: var(--accent); font-weight: 600; }
+      footer { border-top: 1px solid var(--line); min-height: 0; min-width: 0; overflow: hidden; position: relative; }
+      #copy-rail { position: absolute; left: 16px; bottom: 10px; font-size: 11px; padding: 2px 8px; }
+      header.compact .group > span:not(.keep) { display: none; }
+      @media (max-width: 1440px) {
+        header { gap: 8px 8px; padding: 10px 12px; }
+        .seg button { padding: 5px 7px; }
+        #contrast { width: 130px; } #sort { width: 162px; } #model { width: 70px; } #stat { width: 46px; }
+        .brand small { display: none; }
+      }
+      #rail { display: block; }
+      canvas.montage { display: block; touch-action: none; }
+      canvas.montage-overlay { position: absolute; left: 0; top: 0; pointer-events: none; }
+      #goto { width: 150px; font-size: 11.5px; padding: 2px 6px; }
+      #side dl.fx { margin: 6px 0 4px; }
+      #side dl.fx { grid-template-columns: 1fr; gap: 1px; }
+      #side dl.fx dt { margin-top: 5px; }
+      #side dl.fx dd { font-size: 11.5px; font-family: var(--sans); overflow-wrap: normal; white-space: normal; }
+      #side .trust { font-size: 12px; line-height: 1.5; margin: 4px 0 6px; color: var(--text); }
+      #side .trust b { font-family: var(--mono); font-weight: 600; }
+      #side details.fit-details { margin-top: 8px; border-top: 1px solid var(--line); padding-top: 6px; }
+      #side details.fit-details > summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+      #side details.fit-details > summary:hover { color: var(--text); }
+      #side dl.fx dd .nb { white-space: nowrap; }
+      .ortho-head { display: flex; align-items: baseline; gap: 14px; padding: 9px 16px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+      .ortho-head .back { background: transparent; color: var(--muted); border: 1px solid var(--line); border-radius: 6px; padding: 2px 8px; font: inherit; font-size: 12px; cursor: pointer; align-self: center; }
+      .ortho-head .back:hover { color: var(--text); }
+      .ortho-head .subj { font-size: 16px; font-weight: 650; }
+      .ortho-head .kv { color: var(--muted); font-family: var(--mono); font-size: 12px; }
+      .ortho-head b { color: var(--text); font-weight: 600; }
+      .ortho-head .flag { color: var(--warn); font-size: 11px; border: 1px solid var(--warn); border-radius: 10px; padding: 0 7px; }
+      .ortho-head .hint { margin-left: auto; color: var(--muted); font-size: 11px; }
+      .ortho-host { flex: 1; min-height: 0; position: relative; }
+      #slice-ctl { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+      #slice-ctl[hidden] { display: none; }
+      #slice { width: 150px; accent-color: var(--brand); }
+      #slice-label { color: var(--muted); font-size: 11px; min-width: 150px; white-space: nowrap; }
+      .space-members { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0 0; padding: 0; list-style: none; }
+      .space-members button { background: transparent; color: var(--muted); border: 1px solid var(--line); border-radius: 5px; padding: 3px 7px; min-height: 26px; font: 11px var(--mono); cursor: pointer; }
+      .space-members button[aria-current='true'] { color: var(--text); border-color: var(--brand); background: var(--brand-soft); }
+      .space-members button.out { border-style: dashed; }
+      .space-members button.hov { color: var(--text); }
+      .nb-table { width: 100%; border-collapse: collapse; font-size: 11.5px; margin: 4px 0; }
+      .nb-table td, .nb-table th { padding: 1px 4px 1px 0; text-align: left; font-weight: 400; }
+      .nb-table th { color: var(--muted); font-size: 10.5px; }
+      .nb-table td.num { font-family: var(--mono); text-align: right; }
+      .nb-table td.id { font-family: var(--mono); }
+      .nb-table button { background: none; border: 0; color: var(--text); font: inherit; padding: 0; cursor: pointer; text-decoration: underline dotted var(--line-strong); }
+      .warnline { color: var(--warn); }
+      #space-actions { display: flex; gap: 6px; margin-top: 6px; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="brand">neuroimjs <small>volume set</small></div>
+      <div class="seg" role="group" aria-label="View"><button data-mode="montage">Montage</button><button data-mode="ortho">Ortho</button><button data-mode="facet">Facet</button><button data-mode="space" title="Maps placed by whole-volume similarity (nonmetric MDS)">Space</button></div>
+      <div class="seg" role="group" aria-label="Plane" id="orient-group"><button data-orient="axial">Axial</button><button data-orient="coronal">Coronal</button><button data-orient="sagittal">Sagittal</button></div>
+      <span class="sep"></span>
+      <label class="group"><span>Model</span><select id="model"></select></label>
+      <label class="group"><span>Contrast</span><select id="contrast"></select></label>
+      <label class="group"><span>Map</span><select id="stat"></select></label>
+      <label class="group"><span>Order</span><select id="sort"></select></label>
+    </header>
+    <main>
+      <div id="view-wrap">
+        <div id="view"></div>
+        <div id="readout"><label id="slice-ctl" title="Shared slice: every map shows this plane (PageUp/PageDown, wheel)"><span id="slice-label" class="mono"></span><input id="slice" type="range" min="0" max="0" step="1" aria-describedby="slice-label" /></label><span id="readout-text"></span><span id="status" role="status"></span><input id="goto" type="text" placeholder="go to x, y, z (mm)" aria-label="Go to MNI coordinate in millimetres" /><button id="focus" class="ghost toggle" aria-pressed="false" title="Facet focus: enlarge the selected subject and its neighbours (F)">Focus</button><button id="zoom-reset" class="ghost" title="Reset zoom (0)">Fit</button></div>
+      </div>
+      <aside id="side">
+        <section class="display-controls" aria-label="Display">
+          <h3>Display</h3>
+          <div class="ctl-grid">
+            <label for="thr" id="thr-label">|t| ≥</label><div class="pair"><input id="thr" type="number" step="0.1" aria-label="Threshold" /><label for="range">max</label><input id="range" type="number" step="0.5" aria-label="Colour range" /></div>
+            <label for="smooth" title="Display-only, edge-preserving; readouts stay raw">Smoothing</label><select id="smooth" aria-describedby="smooth-hint"></select>
+            <label for="minc" title="Display-only: hide suprathreshold clusters smaller than this">Min cluster</label><select id="minc"></select>
+          </div>
+        </section>
+        <div id="side-body"></div>
+      </aside>
+    </main>
+    <footer><canvas id="rail" aria-label="Value at cursor for every subject"></canvas><button id="copy-rail" class="ghost" title="Copy subject values at the cursor as tab-separated text">Copy values</button></footer>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
