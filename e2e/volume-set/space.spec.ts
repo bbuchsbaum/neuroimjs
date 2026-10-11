@@ -1051,7 +1051,9 @@ test.describe('Space v30: quiet marks, analysis colours, parcel bars, side by si
     await expect(page.locator('#side')).toContainText('Across contrasts', { timeout: 60_000 });
     await settle(page);
     const footer = await page.evaluate(() => (window as unknown as { __vsSpace: { sideFooter: string | null } }).__vsSpace.sideFooter);
-    expect(footer).toMatch(/^Positions from the cue layout: (metric )?Stress-1 \.\d{3}/);
+    // Two lines: what the positions are (with the fit's stress), then what the pictures show.
+    expect(footer).toMatch(/^Positions(: .* of the cue maps, the same in every panel| from the cue layout) · (metric )?Stress-1 \.\d{3}/);
+    expect(footer).toMatch(/\n.*axes and gaps are not results/i);
     const thumbs = (await probe(page)).thumbs.filter((t) => t.id !== 'mean' && t.contrast === 'delayearly');
     // Panels start at the toolbar strip (y 50) with a 20 px header and an 8 px inset: no large empty headroom.
     expect(Math.min(...thumbs.map((t) => t.dest.y)) - 50).toBeLessThan(45);
@@ -1063,4 +1065,49 @@ test.describe('Space v30: quiet marks, analysis colours, parcel bars, side by si
       return l.filter((x) => x[0] === 's09').length === 3 && l.filter((x) => x[0] === 's03').length === 3;
     }, null, { timeout: 5_000 });
   });
+});
+
+test.describe('Space v33: bar and ID apart, caption fits', () => {
+  test('a mark bar sits between the picture and its ID, never under the ID box', async ({ page }) => {
+    await open(page, `${SPACE}&sc=parcel:3`);
+    await expect(page.locator('#side')).toContainText('Bar length', { timeout: 30_000 });
+    await settle(page);
+    const s = await stage(page);
+    const thumbs = (await probe(page)).thumbs.filter((t) => t.id !== 'mean');
+    let checked = 0;
+    for (const t of thumbs) {
+      const bar = { x: t.dest.x, y: t.dest.y + t.dest.h + 2, w: t.dest.w, h: 5 };
+      for (const l of s.marks.filter((m) => m.kind === 'label' && m.id === t.id)) {
+        checked++;
+        expect(overlap(bar, l), `bar of ${t.id} under its ID`).toBe(0);
+      }
+    }
+    expect(checked).toBeGreaterThan(5);
+  });
+
+  test('the caption under the layout fits its width, and a shortened one is given in full in the panel', async ({ page }) => {
+    await page.setViewportSize({ width: 1100, height: 760 });
+    await open(page, SPACE);
+    await settle(page);
+    const f = await page.evaluate(() => (window as unknown as { __vsSpace: { footer: { text: string; full: string; width: number; max: number } } }).__vsSpace.footer);
+    expect(f.width).toBeLessThanOrEqual(f.max);
+    expect(f.text.endsWith('…')).toBe(false);
+    if (f.text !== f.full) await expect(page.locator('#side [data-footer-full]')).toContainText(f.full.split(' · ').slice(-1)[0]);
+  });
+});
+
+test('side by side gives the whole stage width to its panels (no reference column)', async ({ page }) => {
+  await open(page, `${SPACE}&st=1`);
+  await expect(page.locator('#side')).toContainText('Across contrasts', { timeout: 60_000 });
+  await settle(page);
+  const p = await probe(page);
+  // No Mean reference picture in this view, and the panels span the canvas less its 16 px pads.
+  expect(p.thumbs.some((t) => t.id === 'mean')).toBe(false);
+  const w = await page.locator('canvas.montage').evaluate((c) => (c as HTMLCanvasElement).clientWidth);
+  const geom = await page.evaluate(() => {
+    const s = (window as unknown as { __vsSpace: { marks: { x: number; w: number }[] } }).__vsSpace;
+    return { x0: Math.min(...s.marks.map((m) => m.x)), x1: Math.max(...s.marks.map((m) => m.x + m.w)) };
+  });
+  expect(geom.x0).toBeLessThan(16 + 30);
+  expect(geom.x1).toBeGreaterThan(w - 16 - 60);
 });

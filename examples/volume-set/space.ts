@@ -411,10 +411,20 @@ export function shortContrastNames(names: readonly string[]): string[] {
 /**
  * Caption for nudged pictures: how many moved, which are marked (dots, rings) and which are only counted
  * (position still inside the map's own picture, or moved too little to mark). Empty when nothing moved.
+ * 'short' and 'tiny' say the same counts in fewer words, for narrow windows; every moved picture is counted
+ * in every form.
  */
-export function nudgeCaption(n: { dots: number; rings: number; own: number; slight: number; slightPx: number }): string {
+export function nudgeCaption(n: { dots: number; rings: number; own: number; slight: number; slightPx: number }, form: 'full' | 'short' | 'tiny' = 'full'): string {
   const moved = n.dots + n.rings + n.own + n.slight;
   if (!moved) return '';
+  const markedN = n.dots + n.rings;
+  const unmarkedN = n.own + n.slight;
+  if (form === 'tiny') return ` · ${moved} nudged (${markedN} marked, ${unmarkedN} unmarked)`;
+  if (form === 'short') {
+    const how = [n.dots ? 'dots' : '', n.rings ? 'rings' : ''].filter(Boolean).join(', ');
+    const why = [n.own ? `${n.own} over own picture` : '', n.slight ? `${n.slight} ≤ ${n.slightPx} px` : ''].filter(Boolean).join(', ');
+    return ` · ${moved} nudged: ${markedN} marked${how ? ` (${how})` : ''}${unmarkedN ? `, ${unmarkedN} unmarked (${why})` : ''}`;
+  }
   const marked = [n.dots ? 'dots mark exact positions' : '', n.rings ? 'rings those inside another picture' : ''].filter(Boolean).join(', ');
   const unmarked = [n.own ? `${n.own} still over ${n.own === 1 ? 'its' : 'their'} own picture` : '', n.slight ? `${n.slight} moved ≤ ${n.slightPx} px` : ''].filter(Boolean).join(', ');
   return ` · ${moved} ${moved === 1 ? 'picture' : 'pictures'} nudged apart${marked ? `: ${marked}` : ''}${unmarked ? `; unmarked: ${unmarked}` : ''}`;

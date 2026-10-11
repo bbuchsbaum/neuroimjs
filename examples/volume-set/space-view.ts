@@ -159,8 +159,10 @@ export interface SpaceGeom {
   nudged?: number;
   /** Pictures moved too little to mark (at most px from their exact position, so still near the centre). */
   slightNudge?: { n: number; px: number };
+  /** Caption under the layout as drawn (possibly a shorter form), its full wording, and its width vs the room. */
+  footer?: { text: string; full: string; width: number; max: number };
   /** Side by side: the footer naming the layout the positions come from, and where it is drawn. */
-  sideFooter?: { text: string; y: number };
+  sideFooter?: { text: string; full: string; y: number };
   /** Side by side: focused and hovered IDs labelled in every panel by the overlay. */
   panelLabels?: [string, number, number][];
   /** Map whose leader and picture the overlay currently highlights (hover), for the test probe. */
@@ -249,9 +251,17 @@ export function reasonShort(e: SimilarityBasis['excluded'][number], a: M.Analysi
   }
 }
 
+/** Height (px) a picture gives up for its mark bar, so the bar never sits under the ID label. */
+const BAR = 7;
 /** Ring marking an exact position inside another map's picture: radius (px) and its colour for ordinary maps. */
 const RING_R = 3.5;
 const RING_GREY = 'rgba(200,202,220,0.85)';
+
+/** What Space positions are computed from, e.g. "whole-volume similarity (1 − r, nonmetric MDS)". */
+export function positionNote(a: M.Analysis, layout: LayoutState = layoutFor(a)): string {
+  const nb = (s: string): string => s.replace(/ /g, '\u00a0');
+  return `${scopeShort(a)} (${nb(`1 − ${rName(a)}`)}, ${layout.kind === 'ready' ? methodShort(layout.out.result.method) : 'nonmetric MDS'})`;
+}
 
 export async function drawSpace(light = false): Promise<void> {
   const a = await M.getAnalysis(M.state.model, M.state.contrast, M.state.stat);
@@ -266,27 +276,31 @@ export async function drawSpace(light = false): Promise<void> {
   const pad = 16;
 
   const layout = layoutFor(a);
+  // Side by side gives the whole stage width to its panels: no reference column there (its text moves to the
+  // footer under the panels).
+  const traj = SX.trajectoryMode();
   // Reference column (outside the layout's coordinates): the mean map and a legend.
   const colW = Math.round(Math.max(110, Math.min(180, Math.min(W, H) * 0.2)));
-  const meanRect = { x: pad, y: pad, w: colW, h: colW / asp + 18 };
-  M.drawCell(ctx, a, 'mean', meanRect, { left: `Mean ${st}`, right: `all ${a.set.size}` }, true);
-  ctx.font = `11px ${FONT.sans}`;
-  ctx.fillStyle = THEME.muted;
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'top';
-  // Wrapped to the column, so a narrow window never runs the legend into the layout.
-  const nb = (s: string): string => s.replace(/ /g, ' ');
-  const legend = [
-    `Reference only: average of all ${a.set.size} ${st}-maps; not placed.`,
-    '',
-    SX.trajectoryMode()
-      ? `Position: the ${a.contrast} layout, shared by every contrast panel.`
-      : `Position: ${scopeShort(a)} (${nb(`1 − ${rName(a)}`)}, ${layout.kind === 'ready' ? methodShort(layout.out.result.method) : 'nonmetric MDS'}).`,
-    `Pictures: ${M.state.orient} slice ${M.sliceIndex() + 1}.`,
-    'Axes and gaps are not results.',
-  ].flatMap((p) => (p ? wrapText(ctx, p, colW) : ['']));
-  legend.forEach((line, i) => ctx.fillText(line, pad, meanRect.y + meanRect.h + 10 + i * 15));
-  const dockY = meanRect.y + meanRect.h + 10 + legend.length * 15 + 14;
+  let dockY = 0;
+  if (!traj) {
+    const meanRect = { x: pad, y: pad, w: colW, h: colW / asp + 18 };
+    M.drawCell(ctx, a, 'mean', meanRect, { left: `Mean ${st}`, right: `all ${a.set.size}` }, true);
+    ctx.font = `11px ${FONT.sans}`;
+    ctx.fillStyle = THEME.muted;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    // Wrapped to the column, so a narrow window never runs the legend into the layout.
+    const legend = [
+      `Reference only: average of all ${a.set.size} ${st}-maps; not placed.`,
+      '',
+      `Position: ${positionNote(a, layout)}.`,
+      `Pictures: ${M.state.orient} slice ${M.sliceIndex() + 1}.`,
+      'Axes and gaps are not results.',
+    ].flatMap((p) => (p ? wrapText(ctx, p, colW) : ['']));
+    legend.forEach((line, i) => ctx.fillText(line, pad, meanRect.y + meanRect.h + 10 + i * 15));
+    dockY = meanRect.y + meanRect.h + 10 + legend.length * 15 + 14;
+  }
+  const lead = traj ? 0 : colW + pad;
 
   // Members the basis excludes: a strip below the layout, outside its coordinates.
   const strip = [...b.excluded].sort((x, y) => a.ids[x.index].localeCompare(a.ids[y.index]));
@@ -295,7 +309,7 @@ export async function drawSpace(light = false): Promise<void> {
   const toolbarH = 34;
   // With a strip, the caption under the layout gets its own line above it, so it never runs into a picture.
   const footH = stripH ? 14 : 0;
-  const plot: PlotRect = { x: colW + 2 * pad, y: pad + toolbarH, w: W - colW - 3 * pad, h: H - 2 * pad - toolbarH - (stripH ? stripH + 8 + footH : 0) };
+  const plot: PlotRect = { x: lead + pad, y: pad + toolbarH, w: W - lead - 2 * pad, h: H - 2 * pad - toolbarH - (stripH ? stripH + 8 + footH : 0) };
   if (strip.length) {
     const y0 = plot.y + plot.h + 8 + footH;
     ctx.strokeStyle = THEME.line;
@@ -347,7 +361,7 @@ export async function drawSpace(light = false): Promise<void> {
       ? { x: plot.x + thumbW / 2, y: plot.y + thumbH / 2, w: Math.max(1, plot.w - thumbW), h: Math.max(1, plot.h - thumbH) }
       : { x: plot.x + 40, y: plot.y + 16, w: Math.max(1, plot.w - 80), h: Math.max(1, plot.h - 32) };
   const geom: SpaceGeom = { a, key: b.key, t: null, inner, plot, lod, thumbW, thumbH, points: [], marks: [], layout, strip: strip.map((e) => e.index), zoomBox: null, dock: null, captions: [] };
-  {
+  if (!traj) {
     // The preview docks under the legend when the column has room for a picture plus its caption.
     const room = plot.y + plot.h + (stripH ? stripH : 0) - dockY - 62; // caption: ID + up to three caveat lines
     const dw = Math.floor(Math.min(colW, room * asp));
@@ -492,12 +506,14 @@ export async function drawSpace(light = false): Promise<void> {
         const ls = lensScale.get(pt.member) ?? 1;
         const tw = thumbW * ls;
         const th = thumbH * ls;
-        const cell = { x: tx - tw / 2, y: ty - th / 2, w: tw, h: th - 16 * ls };
+        // With a mark channel on, the picture gives up BAR px at its foot so the bar sits between the picture
+        // and its ID, never under the ID box (the thumb box, and so the nudges, do not change).
+        const mc = SX.memberColour(a, pt.member);
+        const cell = { x: tx - tw / 2, y: ty - th / 2, w: tw, h: th - (16 + (mc ? BAR : 0)) * ls };
         M.drawCell(ctx, a, pt.member, cell, null, false, {
           silhouette: true,
           crosshair: tw >= 120,
         });
-        const mc = SX.memberColour(a, pt.member);
         if (mc) SX.drawMemberColour(ctx, mc, M.hits[M.hits.length - 1]?.view.dest ?? cell, null, SX.memberFraction(a, pt.member));
         geom.marks.push({ member: pt.member, box: { x: tx - tw / 2, y: ty - th / 2, w: tw, h: th }, kind: 'thumb' });
       }
@@ -664,14 +680,21 @@ export async function drawSpace(light = false): Promise<void> {
     const zoomNote = M.state.space ? ` · layout zoom ${M.state.space.s.toFixed(1)}×` : '';
     const cropNote = M.state.zoom ? ` · anatomy crop ${M.state.zoom.s.toFixed(1)}× (set in Montage)` : '';
     const stressNote = Number.isFinite(res.stress1) ? `${res.method === 'metric-smacof' ? 'metric ' : ''}Stress-1 ${fmtStress(res.stress1)} · ` : '';
-    const nudgeNote = nudgeCaption({
+    const counts = {
       dots: geom.markers?.filter((mk) => mk.kind === 'dot').length ?? 0,
       rings: geom.markers?.filter((mk) => mk.kind === 'ring').length ?? 0,
       own: geom.inOwn ?? 0,
       slight: geom.slightNudge?.n ?? 0,
       slightPx: geom.slightNudge?.px ?? 0,
-    });
-    ctx.fillText(M.truncate(ctx, `${stressNote}${m} placed${nudgeNote}${zoomNote}${cropNote}`, plot.w), plot.x + plot.w, plot.y + plot.h + (stripH ? footH + 4 : pad - 2));
+    };
+    // The longest wording that fits the plot width (all forms count every moved picture); the full one is
+    // also in the side panel's Layout section.
+    const full = `${stressNote}${m} placed${nudgeCaption(counts)}${zoomNote}${cropNote}`;
+    const text =
+      (['full', 'short', 'tiny'] as const).map((f) => `${stressNote}${m} placed${nudgeCaption(counts, f)}${zoomNote}${cropNote}`).find((x) => ctx.measureText(x).width <= plot.w) ??
+      M.truncate(ctx, `${stressNote}${m} placed${nudgeCaption(counts, 'tiny')}`, plot.w);
+    geom.footer = { text, full, width: ctx.measureText(text).width, max: plot.w };
+    ctx.fillText(text, plot.x + plot.w, plot.y + plot.h + (stripH ? footH + 4 : pad - 2));
   }
   M.drawOverlay();
   if (!light) M.drawSide(a, order);
@@ -1013,9 +1036,17 @@ export function exposeSpaceProbe(): void {
     get inOwn() {
       return spaceGeom?.inOwn ?? 0;
     },
+    /** Caption under the single-view layout: drawn text, full text, drawn width and the room it had. */
+    get footer() {
+      return spaceGeom?.footer ?? null;
+    },
     /** Side by side: footer text naming the layout the positions come from (null in the single view). */
     get sideFooter() {
       return spaceGeom?.sideFooter?.text ?? null;
+    },
+    /** Side by side: the footer's full wording (what is drawn may be shortened to fit). */
+    get sideFooterFull() {
+      return spaceGeom?.sideFooter?.full ?? null;
     },
     /** Side by side: IDs labelled in each panel by the overlay (focused and hovered), as [id, x, y]. */
     get panelLabels() {
@@ -1176,6 +1207,7 @@ export function spaceSection(a: M.Analysis): string {
       <h3>Layout <span class="sub">${placedN} of ${a.set.size} placed</span></h3>
       ${layout?.kind === 'ready' ? `<p class="trust">${trustLine(a)}</p>` : fit}
       <p class="note">Positions summarise ${scopeLong(a)} and stay fixed while you change slice, threshold, smoothing or cluster filter. Pictures are nudged apart to avoid overlap; a dot marks each moved picture's exact position, or a small ring where that position falls inside another picture; a position still inside the map's own picture is not marked (the caption counts these). Neither axis has a meaning; for who resembles whom, use the Neighbours table.</p>
+      ${g?.a === a && g.footer && g.footer.text !== g.footer.full ? `<p class="note" data-footer-full>Under the layout (shortened there): ${g.footer.full}</p>` : ''}
       <details class="fit-details"${layout?.kind === 'ready' ? '' : ' open'}><summary>How the layout was fitted</summary>
         <dl class="fx">
           <dt>Similarity</dt><dd>signed Pearson r of raw ${M.STAT_LABEL[M.state.stat]}-maps on the common support (${support}); ${isCorrected(a) ? 'noise-corrected: r ÷ √(ρᵢρⱼ) (Spearman), clamped to ±1, maps with ρ < .1 set aside; dissimilarity 1 − corrected r' : 'dissimilarity 1 − r'}</dd>

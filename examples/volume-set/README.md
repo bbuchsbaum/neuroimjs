@@ -113,7 +113,7 @@ Each layer is off by default, is written to the URL only while it is on, and nev
 | Density | `sd=on/off` | 50 / 80 / 95% contours of where maps concentrate; on by default for dense sets |
 | Magnifier (`L`) | not stored | a 2.2× loupe under the pointer; nothing moves |
 | Similarity: sphere | `sr=i,j,k,mm` | similarity within a 10, 15 or 25 mm sphere, first applied at the cursor; widening keeps the centre, moving the cursor never refits, re-centring is a panel button; the sphere is outlined on the Mean picture |
-| Contrasts side by side | `st=1` | every contrast drawn at the current layout's positions, one panel each, with same-subject r across contrasts in the panel (no new fit) |
+| Contrasts side by side | `st=1` | every contrast drawn at the current layout's positions, one panel each across the full stage width (the Mean column is hidden; what the positions and pictures are is stated under the panels), with same-subject r across contrasts in the panel (no new fit) |
 | Group (Shift-drag, Shift+Alt-drag removes, Esc clears) | `ss=<ids>` | the selected maps marked in the layout and on the rail, with group mean, others' mean and difference on this slice, and the medoid |
 
 When the displayed fit changes (contrast, statistic or region), the new layout is aligned

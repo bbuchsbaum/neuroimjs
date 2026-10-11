@@ -297,3 +297,13 @@ describe('Nudge caption', () => {
     expect(nudgeCaption({ dots: 0, rings: 0, own: 1, slight: 0, slightPx: 18 })).toBe(' · 1 picture nudged apart; unmarked: 1 still over its own picture');
   });
 });
+
+describe('Nudge caption forms', () => {
+  it('counts every moved picture in the short and tiny forms too', () => {
+    const n = { dots: 6, rings: 3, own: 4, slight: 1, slightPx: 13 };
+    expect(nudgeCaption(n, 'short')).toBe(' · 14 nudged: 9 marked (dots, rings), 5 unmarked (4 over own picture, 1 ≤ 13 px)');
+    expect(nudgeCaption(n, 'tiny')).toBe(' · 14 nudged (9 marked, 5 unmarked)');
+    expect(nudgeCaption(n, 'short').length).toBeLessThan(nudgeCaption(n).length);
+    expect(nudgeCaption({ dots: 2, rings: 0, own: 0, slight: 0, slightPx: 13 }, 'short')).toBe(' · 2 nudged: 2 marked (dots)');
+  });
+});

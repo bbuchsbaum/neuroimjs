@@ -20,7 +20,7 @@ import type { NmdsOptions } from '../../src/volumeset/nmds';
 import { THEME, FONT, fmt, hidpi, placeCrop, drawCellImage, drawCrosshair, thresholdedDiverging } from './render';
 import { fetchCovariates, type Covariates } from './data';
 import type { EmbedOutput } from './embed-runner';
-import { spaceTransform, thumbSize, declutter, maxOverlap, zoomAbout, captionCandidates, freeSpot, shortContrastNames, type SpaceTransform, type PlotRect, type Lod, type LabelBox } from './space';
+import { spaceTransform, thumbSize, declutter, maxOverlap, zoomAbout, captionCandidates, freeSpot, shortContrastNames, nudgeCaption, type SpaceTransform, type PlotRect, type Lod, type LabelBox } from './space';
 import * as M from './main';
 import * as SV from './space-view';
 import * as V3 from './space-v3';
@@ -2181,55 +2181,85 @@ export async function drawTrajectories(ctx: CanvasRenderingContext2D, g: SV.Spac
   // Pictures keep this clearance from a panel's edges (and from its header).
   const inset = 8;
   // A line under the panels holds the stress footer.
-  const footH = 16;
+  const footH = 32;
   const pw = (plot.w - gap * (cols - 1)) / cols;
   let ph = (plot.h - footH - gap * (rows - 1)) / rows;
   const asp = M.sliceAspect(a.set);
   // Every panel shares the same positions, so dots alone show nothing side by side: keep pictures down to
   // TRAJ_MIN_PICTURE px rather than thumbSize's single-view threshold.
   let { size } = thumbSize(ids.length, { x: 0, y: 0, w: pw - 2 * inset, h: ph - titleH - 2 * inset }, M.state.space?.s ?? 1);
-  let lod: Lod = size >= TRAJ_MIN_PICTURE ? 'thumbs' : 'marks';
-  let tw = Math.round(size * Math.sqrt(asp));
-  let th = Math.round(size / Math.sqrt(asp));
   const sel = M.state.subject;
   // Positions within a panel: identical in every panel (same transform, same nudges). The transform is
   // built in canvas coordinates for the first panel, so it doubles as the Space transform that drag-pan,
   // +/- and Ctrl/Cmd+wheel zoom act on (other panels are the same transform shifted by their offset).
   const LBL = 12;
   const top = titleH + inset;
-  const inner0 =
-    lod === 'thumbs'
-      ? { x: inset + tw / 2, y: top + (th + LBL) / 2, w: Math.max(1, pw - 2 * inset - tw), h: Math.max(1, ph - top - inset - th - LBL) }
-      : { x: inset + 12, y: top + 10, w: pw - 2 * inset - 24, h: ph - top - inset - 20 };
-  let innerAbs = { x: plot.x + inner0.x, y: plot.y + inner0.y, w: inner0.w, h: inner0.h };
-  let t0 = spaceTransform(d.coords, innerAbs, M.state.space);
-  let local = ids.map((_, i) => {
-    const [x, y] = t0.toScreen(d.coords[2 * i], d.coords[2 * i + 1]);
-    return [x - plot.x, y - plot.y] as [number, number];
-  });
-  // A map is drawn only when its exact position is in view (zoomed panels never show detached pictures),
-  // and only maps in view take part in decluttering.
-  const inView = local.map(([x, y]) => x >= 0 && x <= pw && y >= titleH && y <= ph);
-  const view = ids.map((_, i) => i).filter((i) => inView[i]);
+  const area = { x: inset, y: top, w: pw - 2 * inset, h: ph - top - inset };
+  /** Lay out pictures of edge `sz` (or marks): transform, exact positions, nudged centres and how they fared. */
+  const fit = (sz: number, kind: Lod) => {
+    const w = Math.round(sz * Math.sqrt(asp));
+    const h = Math.round(sz / Math.sqrt(asp));
+    const in0 =
+      kind === 'thumbs'
+        ? { x: inset + w / 2, y: top + (h + LBL) / 2, w: Math.max(1, pw - 2 * inset - w), h: Math.max(1, ph - top - inset - h - LBL) }
+        : { x: inset + 12, y: top + 10, w: pw - 2 * inset - 24, h: ph - top - inset - 20 };
+    const abs = { x: plot.x + in0.x, y: plot.y + in0.y, w: in0.w, h: in0.h };
+    const t = spaceTransform(d.coords, abs, M.state.space);
+    const loc = ids.map((_, i) => {
+      const [x, y] = t.toScreen(d.coords[2 * i], d.coords[2 * i + 1]);
+      return [x - plot.x, y - plot.y] as [number, number];
+    });
+    // A map is drawn only when its exact position is in view (zoomed panels never show detached pictures),
+    // and only maps in view take part in decluttering.
+    const inV = loc.map(([x, y]) => x >= 0 && x <= pw && y >= titleH && y <= ph);
+    const vw = ids.map((_, i) => i).filter((i) => inV[i]);
+    let pl = loc.map(([x, y]) => ({ x, y }));
+    let clear = true;
+    let worst = 0;
+    if (kind === 'thumbs') {
+      // Pad the boxes while separating so pictures keep a small gap; accept once the drawn boxes are clear.
+      const sub = declutter(vw.map((i) => ({ x: loc[i][0], y: loc[i][1] })), w + 4, h + LBL + 4, area, 300, 4);
+      pl = loc.map(([x, y]) => ({ x, y }));
+      vw.forEach((i, k) => (pl[i] = sub[k]));
+      clear = maxOverlap(sub, w + 1, h + LBL + 1) === 0;
+      for (const i of vw) worst = Math.max(worst, Math.hypot(pl[i].x - loc[i][0], pl[i].y - loc[i][1]));
+    }
+    return { size: sz, tw: w, th: h, abs, t, loc, inV, vw, pl, clear, worst };
+  };
+  const meanNudge = (q: ReturnType<typeof fit>): number =>
+    q.vw.reduce((sum, i) => sum + Math.hypot(q.pl[i].x - q.loc[i][0], q.pl[i].y - q.loc[i][1]), 0) / Math.max(1, q.vw.length);
   // Narrow panels: shrink the pictures until no picture (with its ID label below it, LBL px) overlaps
   // another, and fall back to dots only when they would be smaller than TRAJ_MIN_PICTURE px.
-  const area = { x: inset, y: top, w: pw - 2 * inset, h: ph - top - inset };
-  let placed = local.map(([x, y]) => ({ x, y }));
-  for (let attempt = 0; lod === 'thumbs' && attempt < 12; attempt++) {
-    // Pad the boxes while separating so pictures keep a small gap; accept once the drawn boxes are clear.
-    const sub = declutter(view.map((i) => ({ x: local[i][0], y: local[i][1] })), tw + 4, th + LBL + 4, area, 300, 4);
-    placed = local.map(([x, y]) => ({ x, y }));
-    view.forEach((i, k) => (placed[i] = sub[k]));
-    if (maxOverlap(sub, tw + 1, th + LBL + 1) === 0) break;
-    if (size * 0.88 < TRAJ_MIN_PICTURE) {
+  let F = fit(size, size >= TRAJ_MIN_PICTURE ? 'thumbs' : 'marks');
+  let lod: Lod = size >= TRAJ_MIN_PICTURE ? 'thumbs' : 'marks';
+  for (let attempt = 0; lod === 'thumbs' && !F.clear && attempt < 12; attempt++) {
+    if (F.size * 0.88 < TRAJ_MIN_PICTURE) {
       lod = 'marks';
-      placed = local.map(([x, y]) => ({ x, y }));
+      F = fit(F.size, 'marks');
       break;
     }
-    size *= 0.88;
-    tw = Math.round(size * Math.sqrt(asp));
-    th = Math.round(size / Math.sqrt(asp));
+    F = fit(F.size * 0.88, 'thumbs');
   }
+  // Tall, narrow panels (several contrasts side by side): a uniform-scale fit is width-limited, so the layout
+  // cannot use the panel's height without distorting distances. At fit, pictures grow into that room only while
+  // they still separate cleanly and the nudges stay as small as at the starting size (mean within 15%, worst
+  // within 20%): measured on real data, filling the height outright would double the median nudge.
+  if (lod === 'thumbs' && F.clear && !M.state.space) {
+    const base = F;
+    for (let step = 0; step < 16; step++) {
+      const next = fit(F.size * 1.08, 'thumbs');
+      if (next.size > 150 || !next.clear || meanNudge(next) > meanNudge(base) * 1.15 + 1 || next.worst > base.worst * 1.2 + 1) break;
+      F = next;
+    }
+  }
+  size = F.size;
+  const { tw, th } = F;
+  let innerAbs = F.abs;
+  let t0 = F.t;
+  let local = F.loc;
+  const inView = F.inV;
+  const view = F.vw;
+  let placed = F.pl;
   g.lod = lod;
   // At fit (no zoom), panels end where their content ends: the unused height a uniform-scale fit leaves above
   // and below a wide layout is dropped, so panels sit together under their headers.
@@ -2330,17 +2360,26 @@ export async function drawTrajectories(ctx: CanvasRenderingContext2D, g: SV.Spac
     });
     ctx.restore();
   });
-  // Footer: the fit every panel's positions come from, as in the single view.
+  // Footer (two lines; side by side has no reference column, so its legend lives here): what the positions
+  // are and how well they fit, then what the pictures show. Each line takes the longest wording that fits; the
+  // full wording is in the Across contrasts section when shortened.
   const stress = Number.isFinite(res.stress1) ? `${res.method === 'metric-smacof' ? 'metric ' : ''}Stress-1 ${res.stress1.toFixed(3).replace(/^0\./, '.')} · ` : '';
-  const moved = dotsN + ownN;
-  const nudge = moved ? ` · ${moved} ${moved === 1 ? 'picture' : 'pictures'} nudged apart${dotsN ? ': dots mark exact positions' : ''}${ownN ? `; unmarked: ${ownN} still over ${ownN === 1 ? 'its' : 'their'} own picture` : ''}` : '';
+  const counts = { dots: dotsN, rings: 0, own: ownN, slight: 0, slightPx: 0 };
+  const where = `Positions: ${SV.positionNote(a, layout)} of the ${a.contrast} maps, the same in every panel`;
+  const line1 = (form: 'full' | 'short' | 'tiny'): string => `${form === 'full' ? where : `Positions from the ${a.contrast} layout`} · ${stress}${ids.length} placed${nudgeCaption(counts, form)}`;
+  const st = M.STAT_LABEL[M.state.stat];
+  const line2Full = `Pictures: ${M.state.orient} slice ${M.sliceIndex() + 1} of each contrast's ${st}-maps. Axes and gaps are not results.`;
   ctx.font = `11px ${FONT.sans}`;
   ctx.fillStyle = THEME.faint;
   ctx.textAlign = 'right';
   ctx.textBaseline = 'top';
+  const fits = (t: string): boolean => ctx.measureText(t).width <= plot.w;
+  const l1 = (['full', 'short', 'tiny'] as const).map(line1).find(fits) ?? M.truncate(ctx, line1('tiny'), plot.w);
+  const l2 = [line2Full, `${M.state.orient} slice ${M.sliceIndex() + 1} · axes and gaps are not results`].find(fits) ?? M.truncate(ctx, line2Full, plot.w);
   const fy = plot.y + rows * ph + (rows - 1) * gap + 4;
-  ctx.fillText(M.truncate(ctx, `Positions from the ${a.contrast} layout: ${stress}${ids.length} placed${nudge}`, plot.w), plot.x + plot.w, fy);
-  g.sideFooter = { text: `Positions from the ${a.contrast} layout: ${stress}${ids.length} placed${nudge}`, y: fy };
+  ctx.fillText(l1, plot.x + plot.w, fy);
+  ctx.fillText(l2, plot.x + plot.w, fy + 14);
+  g.sideFooter = { text: `${l1}\n${l2}`, full: `${line1('full')}\n${line2Full}`, y: fy };
 }
 
 /**
@@ -2409,6 +2448,10 @@ function acrossContrastsSection(a: M.Analysis): string {
   return `<section><h3>Across contrasts <span class="sub">${s ?? 'medians'}</span></h3>
     <table class="nb-table" style="white-space:nowrap"><tr><th>pair</th><th title="${sameTip}">same subj.</th><th title="${otherTip}">other subj.</th></tr>${rows.join('')}</table>
     <p class="note">Same subj.: r between ${s ? `${s}'s` : "one subject's"} maps of the two contrasts; other subj.: r with other subjects' maps of the second contrast${s ? ' (median)' : ' (medians over subjects)'}.</p>
+    ${(() => {
+      const f = SV.spaceGeom?.sideFooter;
+      return f && f.text !== f.full ? `<p class="note" data-footer-full>Under the panels (shortened there): ${f.full.replace('\n', ' ')}</p>` : '';
+    })()}
     <p class="note">Each panel draws one contrast at the ${a.contrast} layout's positions, so a map that changes between contrasts shows a different picture in the same place. Across all ${total} subject × contrast maps, the most similar other map is the same subject's other contrast for <b>${same}</b>. (r on the ${b.support.length.toLocaleString()} voxels every contrast shares.)</p>
   </section>`;
 }
