@@ -222,7 +222,7 @@ export function correctedBasis(a: M.Analysis, b: SimilarityBasis): SimilarityBas
     ...b.excluded,
     ...b.eligible
       .filter((i) => !keep.includes(i))
-      .map((i) => ({ index: i, id: b.ids[i], reason: 'insufficient-support' as const, detail: `too unreliable to correct (ρ ${rel.rho[b.eligible.indexOf(i)].toFixed(2)} < 0.10)` })),
+      .map((i) => ({ index: i, id: b.ids[i], reason: 'low-reliability' as const, detail: `too unreliable to correct (ρ ${rel.rho[b.eligible.indexOf(i)].toFixed(2)} < 0.10)` })),
   ].sort((x, y) => x.index - y.index);
   return { ...b, key: `${b.key}|spearman-corrected`, eligible: keep, excluded, r, dist, status: m ? 'ok' : 'no-eligible-members' };
 }

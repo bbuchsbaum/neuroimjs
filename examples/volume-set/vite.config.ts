@@ -21,6 +21,7 @@ export default defineConfig({
     'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV || 'development'),
     global: 'globalThis',
   },
-  server: { fs: { strict: false } },
+  // Serve only the repository (src via the @ alias, node_modules); data comes through vsDataPlugin's routes.
+  server: { fs: { allow: [repo] } },
   build: { emptyOutDir: true, sourcemap: false, chunkSizeWarningLimit: 4000 },
 });

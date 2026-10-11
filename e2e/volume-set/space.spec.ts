@@ -1111,3 +1111,19 @@ test('side by side gives the whole stage width to its panels (no reference colum
   expect(geom.x0).toBeLessThan(16 + 30);
   expect(geom.x1).toBeGreaterThan(w - 16 - 60);
 });
+
+test.describe('Review fixes (PR #32)', () => {
+  test('switching model in Facet keeps only the contrasts the new model has', async ({ page }) => {
+    const errors: string[] = [];
+    page.on('pageerror', (e) => errors.push(e.message));
+    await open(page, 'mode=facet&model=synth&contrast=cue&facets=cue,delayearly,delaylate&stat=t&orient=axial', false);
+    await page.selectOption('#model', 'synth50');
+    await page.waitForFunction(() => new URL(location.href).searchParams.get('model') === 'synth50', null, { timeout: 30_000 });
+    // The rows that synth50 lacks are dropped instead of failing to load.
+    await page.waitForFunction(() => new URL(location.href).searchParams.get('facets') === 'cue', null, { timeout: 60_000 });
+    await settle(page);
+    expect(await page.locator('#status').textContent()).not.toMatch(/Error|no maps/);
+    expect(await page.locator('.stage-msg').count()).toBe(0);
+    expect(errors).toEqual([]);
+  });
+});

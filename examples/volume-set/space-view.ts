@@ -246,6 +246,8 @@ export function reasonShort(e: SimilarityBasis['excluded'][number], a: M.Analysi
     case 'constant':
     case 'constant-on-support':
       return 'constant';
+    case 'low-reliability':
+      return 'too unreliable';
     default:
       return 'no support';
   }

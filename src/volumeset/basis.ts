@@ -31,7 +31,8 @@
 
 export const BASIS_VERSION = 'common-support-pearson/1';
 
-export type ExclusionReason = 'all-missing' | 'low-coverage' | 'constant' | 'constant-on-support' | 'insufficient-support';
+/** `low-reliability` is not produced here; consumers that set maps aside for noise (e.g. Spearman correction) use it. */
+export type ExclusionReason = 'all-missing' | 'low-coverage' | 'constant' | 'constant-on-support' | 'insufficient-support' | 'low-reliability';
 
 export interface BasisOptions {
   /** Minimum coverage relative to the median member's coverage of the analysis mask. Default 0.9. */

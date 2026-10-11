@@ -598,6 +598,10 @@ function setupControls(): void {
   ($('#model') as HTMLSelectElement).onchange = (e) => {
     state.model = (e.target as HTMLSelectElement).value;
     fillContrasts();
+    // Facet rows must exist in the new model: keep those that do, else show all of its contrasts.
+    const avail = [...new Set(manifest.filter((m) => m.model === state.model).map((m) => m.contrast))];
+    state.facets = state.facets.filter((c) => avail.includes(c));
+    if (!state.facets.length) state.facets = avail;
     void render();
   };
   ($('#contrast') as HTMLSelectElement).onchange = (e) => {
@@ -628,7 +632,10 @@ function setupControls(): void {
 /** For β, pick a symmetric range from the 99th percentile of |β| across the set. */
 async function autoRange(): Promise<void> {
   if (state.stat === 't') return;
+  const want = `${state.model}|${state.contrast}|${state.stat}`;
   const a = await getAnalysis(state.model, state.contrast, state.stat);
+  // The view may have moved on while β loaded: never apply a range computed for another analysis.
+  if (`${state.model}|${state.contrast}|${state.stat}` !== want) return;
   const sample: number[] = [];
   for (const m of a.set.members) for (let v = 0; v < m.values.length; v += 37) if (Number.isFinite(m.values[v])) sample.push(Math.abs(m.values[v]));
   sample.sort((x, y) => x - y);
