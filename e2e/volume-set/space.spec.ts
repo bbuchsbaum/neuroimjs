@@ -371,9 +371,6 @@ test.describe('Space (S4)', () => {
   });
 
   test('dense set (200 maps) switches to anchor marks and stays navigable', async ({ page }, info) => {
-    // Generating/loading 200 maps plus fitting can exceed Playwright's default
-    // 30 s on a cold runner; the layout wait itself remains bounded at 90 s.
-    test.setTimeout(120_000);
     await open(page, 'mode=space&model=synth200&contrast=cue');
     const p = await probe(page);
     expect(p.placed.length).toBe(200);
@@ -387,7 +384,6 @@ test.describe('Space (S4)', () => {
   });
 
   test('clicking an ID label or anchor dot selects without moving the cursor, even under the preview', async ({ page }) => {
-    test.setTimeout(120_000); // includes both the 17-map and 200-map fixtures
     // Thumbnails: hover a label long enough for the enlarged preview to appear, then click it.
     await open(page, `${SPACE}&subject=s13`);
     const box = (await page.locator('canvas.montage').boundingBox())!;

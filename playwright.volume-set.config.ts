@@ -10,6 +10,9 @@ export default defineConfig({
   testDir: './e2e/volume-set',
   fullyParallel: false,
   workers: 1,
+  // Fixture loading/layout waits allow 90 s. Keep the enclosing test budget
+  // larger than that bound, including rendering and interactions on CI.
+  timeout: 120_000,
   reporter: [['list']],
   outputDir: 'test-results/volume-set',
   use: {
