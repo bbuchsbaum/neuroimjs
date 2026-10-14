@@ -519,8 +519,22 @@ test.describe('Space (S4)', () => {
 test.describe('Space on touch (emulated)', () => {
   test.use({ hasTouch: true, isMobile: false, viewport: { width: 1180, height: 820 } });
 
-  test('tap places the cursor or selects; touch drag pans the layout; the list opens Ortho', async ({ page }, info) => {
+  for (const gesture of ['pan', 'no-pan', 'pan-manipulation'] as const) test(`tap places the cursor or selects; touch drag pans the layout; the list opens Ortho [${gesture}]`, async ({ page }, info) => {
     await open(page, `${SPACE}&subject=s03`);
+    const events: unknown[] = [];
+    await page.exposeFunction('recordSpaceTouch', (event: unknown) => events.push(event));
+    await page.evaluate(() => {
+      for (const type of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'gotpointercapture', 'lostpointercapture', 'touchstart', 'touchmove', 'touchend', 'touchcancel', 'click', 'scroll']) {
+        document.addEventListener(type, (event) => {
+          const target = event.target as HTMLElement;
+          queueMicrotask(() => { void (window as unknown as { recordSpaceTouch: (event: unknown) => Promise<void> }).recordSpaceTouch({
+            type, time: performance.now(), target: target.tagName, id: target.id,
+            defaultPrevented: event.defaultPrevented, touchAction: target instanceof HTMLElement ? getComputedStyle(target).touchAction : null, pick: target.dataset?.pick, selected: document.querySelector('.space-members [aria-current="true"]')?.textContent,
+          }); });
+        }, { capture: true, passive: true });
+      }
+    });
+    if (gesture === 'pan-manipulation') await page.addStyleTag({ content: '.space-members button, #space-open { touch-action: manipulation; }' });
     const box = (await page.locator('canvas.montage').boundingBox())!;
     const p = await probe(page);
     // Tap a picture pixel: cursor + focus, through the same cell transform as a click.
@@ -541,42 +555,32 @@ test.describe('Space on touch (emulated)', () => {
     expect(url(page).get('subject')).toBe('s14');
     expect(url(page).get('cursor')).toBe(cursor);
     // One-finger drag on empty layout space pans (touch-action: none keeps the page still).
-    const cdp = await page.context().newCDPSession(page);
-    // Start on empty layout space: below the toolbar strip and away from every picture.
-    const thumbs = (await probe(page)).thumbs;
-    const free = (x: number, y: number): boolean => thumbs.every((t) => x < t.dest.x - 20 || x > t.dest.x + t.dest.w + 20 || y < t.dest.y - 30 || y > t.dest.y + t.dest.h + 30);
-    let start: [number, number] = [box.width * 0.55, box.height * 0.5];
-    outer: for (let fy = 0.15; fy < 0.6; fy += 0.05)
-      for (let fx = 0.3; fx < 0.9; fx += 0.05)
-        if (free(box.width * fx, box.height * fy) && free(box.width * fx + 80, box.height * fy + 32)) {
-          start = [box.width * fx, box.height * fy];
-          break outer;
-        }
-    const sx = box.x + start[0];
-    const sy = box.y + start[1];
-    const touch = (type: 'touchStart' | 'touchMove' | 'touchEnd', x: number, y: number) =>
-      cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y }] });
-    await touch('touchStart', sx, sy);
-    for (let i = 1; i <= 8; i++) await touch('touchMove', sx + i * 10, sy + i * 4);
-    await touch('touchEnd', sx + 80, sy + 32);
-    await settle(page);
-    expect(url(page).get('sv')).not.toBeNull();
+    if (gesture !== 'no-pan') {
+      const cdp = await page.context().newCDPSession(page);
+      // Start on empty layout space: below the toolbar strip and away from every picture.
+      const thumbs = (await probe(page)).thumbs;
+      const free = (x: number, y: number): boolean => thumbs.every((t) => x < t.dest.x - 20 || x > t.dest.x + t.dest.w + 20 || y < t.dest.y - 30 || y > t.dest.y + t.dest.h + 30);
+      let start: [number, number] = [box.width * 0.55, box.height * 0.5];
+      outer: for (let fy = 0.15; fy < 0.6; fy += 0.05)
+        for (let fx = 0.3; fx < 0.9; fx += 0.05)
+          if (free(box.width * fx, box.height * fy) && free(box.width * fx + 80, box.height * fy + 32)) {
+            start = [box.width * fx, box.height * fy];
+            break outer;
+          }
+      const sx = box.x + start[0];
+      const sy = box.y + start[1];
+      const touch = (type: 'touchStart' | 'touchMove' | 'touchEnd', x: number, y: number) =>
+        cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y }] });
+      await touch('touchStart', sx, sy);
+      for (let i = 1; i <= 8; i++) await touch('touchMove', sx + i * 10, sy + i * 4);
+      await touch('touchEnd', sx + 80, sy + 32);
+      await settle(page);
+      expect(url(page).get('sv')).not.toBeNull();
+      await cdp.detach();
+    }
     expect(url(page).get('cursor')).toBe(cursor);
     expect((await probe(page)).runs).toBe(p.runs);
     // Touch-sized list targets reach Ortho without a double-tap.
-    const events: unknown[] = [];
-    await page.exposeFunction('recordSpaceTouch', (event: unknown) => events.push(event));
-    await page.evaluate(() => {
-      for (const type of ['pointerdown', 'pointerup', 'pointercancel', 'touchstart', 'touchend', 'touchcancel', 'click']) {
-        document.addEventListener(type, (event) => {
-          const target = event.target as HTMLElement;
-          void (window as unknown as { recordSpaceTouch: (event: unknown) => Promise<void> }).recordSpaceTouch({
-            type, time: performance.now(), target: target.tagName, id: target.id,
-            pick: target.dataset.pick, selected: document.querySelector('.space-members [aria-current="true"]')?.textContent,
-          });
-        }, { capture: true });
-      }
-    });
     try {
       const member = page.locator('.space-members [data-pick="s07"]');
       await member.tap();
