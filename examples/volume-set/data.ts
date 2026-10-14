@@ -1,13 +1,18 @@
 import { readNiftiArrayBuffer } from '../../src/io/browserNifti';
 import { FloatNeuroVol } from '../../src/volume/DenseNeuroVol';
+import { embeddedAtlas, embeddedCovariates, embeddedManifest, embeddedTemplate, isEmbedded } from './embedded-data';
 import type { NeuroVol } from '../../src/volume/NeuroVol';
 import { VolumeSet } from '../../src/volumeset/VolumeSet';
 
 export interface VsMember {
+  id?: string;
   model: string;
   subject: string;
   contrast: string;
   url: string;
+  t?: Float32Array;
+  beta?: Float32Array;
+  se?: Float32Array;
 }
 
 /** Frame order inside each 4D contrast file (zero-based). */
@@ -28,10 +33,19 @@ export interface Atlas {
   names: Map<number, string>;
 }
 
+/**
+ * Resolve a volume-set data endpoint beside the demo page. This keeps the
+ * Vite dev route at `/vs/...` while static builds work below `/neuroimjs/space/`.
+ */
+export function vsDataUrl(path: string): string {
+  return new URL(`vs/${path.replace(/^\/+/, '')}`, document.baseURI).toString();
+}
+
 /** Optional cortical parcellation for cursor labels (Schaefer 2018, 400 parcels, 17 networks). */
 export async function loadAtlas(): Promise<Atlas | null> {
+  if (isEmbedded()) return embeddedAtlas();
   try {
-    const [vol, tsv] = await Promise.all([fetchVolume('/vs/template/atlas.nii.gz'), fetch('/vs/template/atlas.tsv').then((r) => (r.ok ? r.text() : Promise.reject(new Error('no atlas labels'))))]);
+    const [vol, tsv] = await Promise.all([fetchVolume(vsDataUrl('template/atlas.nii.gz')), fetch(vsDataUrl('template/atlas.tsv')).then((r) => (r.ok ? r.text() : Promise.reject(new Error('no atlas labels'))))]);
     const names = new Map<number, string>();
     for (const line of tsv.split(/\r?\n/).slice(1)) {
       const [idx, name] = line.split('\t');
@@ -53,7 +67,8 @@ export function prettyParcel(name: string): string {
 }
 
 export async function fetchManifest(): Promise<VsMember[]> {
-  const res = await fetch('/vs/manifest.json');
+  if (isEmbedded()) return embeddedManifest();
+  const res = await fetch(vsDataUrl('manifest.json'));
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as { error?: string } | null;
     throw new Error(body?.error ?? `manifest: HTTP ${res.status}`);
@@ -72,7 +87,8 @@ function percentile(sorted: Float32Array, q: number): number {
 }
 
 export async function loadTemplate(): Promise<Template> {
-  const [t1, mask] = await Promise.all([fetchVolume('/vs/template/T1w.nii.gz'), fetchVolume('/vs/template/mask.nii.gz')]);
+  if (isEmbedded()) return embeddedTemplate();
+  const [t1, mask] = await Promise.all([fetchVolume(vsDataUrl('template/T1w.nii.gz')), fetchVolume(vsDataUrl('template/mask.nii.gz'))]);
   const t1Data = t1.getData() as ArrayLike<number>;
   const m = mask.getData() as ArrayLike<number>;
   const vals: number[] = [];
@@ -88,6 +104,16 @@ export async function loadSet(
   mask: NeuroVol,
   onProgress?: (done: number, total: number) => void
 ): Promise<VolumeSet> {
+  if (isEmbedded()) {
+    const space = mask.space;
+    const vols = members.map((m) => {
+      const data = m[stat];
+      if (!data) throw new Error(`${stat} data are unavailable for ${m.id ?? m.subject}.`);
+      return new FloatNeuroVol(space, data);
+    });
+    onProgress?.(members.length, members.length);
+    return VolumeSet.fromVolumes(vols, members.map((m) => ({ subject: m.subject, contrast: m.contrast, model: m.model })), mask);
+  }
   const vols: NeuroVol[] = new Array(members.length);
   let next = 0;
   let done = 0;
@@ -126,8 +152,9 @@ export interface Covariates {
  * has no usable columns. A column is numeric when every non-missing value parses as a finite number.
  */
 export async function fetchCovariates(): Promise<Covariates | null> {
+  if (isEmbedded()) return embeddedCovariates();
   try {
-    const res = await fetch('/vs/participants.tsv');
+    const res = await fetch(vsDataUrl('participants.tsv'));
     if (!res.ok || res.status === 204) return null;
     const lines = (await res.text()).split(/\r?\n/).filter((l) => l.trim());
     if (lines.length < 2) return null;

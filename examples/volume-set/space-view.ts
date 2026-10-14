@@ -36,6 +36,11 @@ import * as V3 from './space-v3';
 let jobs: EmbeddingJobs<EmbedInput, EmbedOutput> | null = null;
 let embedRunner: EmbedWorkerRunner | null = null;
 
+/** True while the visible Space view has applied state but its background layout still fits. */
+export function isSpaceFitting(): boolean {
+  return spaceGeom?.layout.kind === 'pending';
+}
+
 /** The basis Space shows for an analysis: a region-restricted basis when one is applied, else the whole-mask basis. */
 export function basisOf(a: M.Analysis): SimilarityBasis {
   const b = SX.regionBasis(a) ?? a.basis;
@@ -102,7 +107,7 @@ export function layoutForBasis(basis: SimilarityBasis, ids: string[], opts: Nmds
     (err: Error) => {
       if (err.name === 'AbortError') return;
       if (jobs?.isCurrent(key) && M.state.mode === 'space') {
-        M.setStatus('Layout failed', 2500);
+        M.setStatus(`Error: Layout failed: ${err.message}`);
         M.scheduleDraw();
       }
     }

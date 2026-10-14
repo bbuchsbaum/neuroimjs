@@ -18,7 +18,7 @@ There are two NIfTI decoders, `readVol` (with `readVolList` and `readVec`, which
 They differ in storage types:
 
 - **Scaled data** become `Float32` (`FloatNeuroVol`) in `readVol` and `readVec`, but `Float64` (`Float64NeuroVol`) in `readNiftiArrayBuffer`, so scaled values can differ in the last float32 digits.
-- **Unscaled `UINT32` data** throw in `readVol` (a `NeuroimError` with code `UNSUPPORTED_DATATYPE`, message `Unsupported TypedArray type: uint32`); `readNiftiArrayBuffer` promotes them losslessly to `Float64NeuroVol`. This gap is tracked separately. Unscaled `UINT16` data load as `UInt16NeuroVol` in both, and slice and display like any other datatype.
+- **Unscaled `UINT32` data** are promoted losslessly to `Float64NeuroVol` by both decoders, because every `uint32` value is exactly representable in `Float64`. Unscaled `UINT16` data load as `UInt16NeuroVol` in both, and slice and display like any other datatype.
 
 ### Known differences from nibabel
 
@@ -28,7 +28,6 @@ Reading is checked against nibabel-generated fixtures (`npm run test:conformance
 - a file with neither transform gets `diag(pixdim)` with a zero offset instead of nibabel's centred base affine;
 - a NIfTI-2 file with only a qform fails to load.
 
-The `UINT32` gap in `readVol` (above) is the fourth known discrepancy.
 
 ## Node: read from disk
 
@@ -55,16 +54,14 @@ await readVol('sub-01_T1w.nii.gz', { onProgress: p => console.log(`${Math.round(
 - `readVol` also accepts an `ArrayBuffer` in Node, gzipped or not. Gzip is detected from the bytes.
 - With a path, the file must exist, and the format is chosen from the extension. A path ending in `.nii.gz` is always gunzipped.
 - `readVolList` takes an **array of paths** and reads them one after another. To get every frame of a single 4D file, use `readVec` or loop over `readVol(path, { index })`.
-- `readVol` cannot load an **unscaled `UINT32`** file: it throws `UNSUPPORTED_DATATYPE` (`Unsupported TypedArray type: uint32`). Use `readNiftiArrayBuffer`, which promotes it to `Float64NeuroVol`. An unscaled `UINT16` file loads as `UInt16NeuroVol`. With intensity scaling active, both load as `FloatNeuroVol`.
+- An unscaled **`UINT32`** file loads as `Float64NeuroVol` without losing integer precision; there is no `UInt32NeuroVol` class. An unscaled `UINT16` file loads as `UInt16NeuroVol`. With intensity scaling active, both load as `FloatNeuroVol`.
 
 ### 4D time series: `readVec` {#_4d-time-series-readvec}
 
 ```ts
-import { readVec, BigNeuroVec } from 'neuroimjs'
+import { readVec } from 'neuroimjs'
 
-// readVec is typed as returning NeuroVec; the object is a BigNeuroVec,
-// which is the type that declares volumeSpace.
-const vec = (await readVec('bold.nii.gz')) as BigNeuroVec
+const vec = await readVec('bold.nii.gz')
 
 const [nT, nX, nY, nZ] = vec.dim       // time first: [T, X, Y, Z]
 const ts = vec.getSeries(32, 32, 20)    // nT values at voxel (32, 32, 20)

@@ -18,6 +18,35 @@ import { NeuroSpace } from '../geometry/NeuroSpace';
 import { ROIVol } from '../roi/ROI_improved';
 import { TypedArray, ValueError } from '../types';
 import { createRng } from '../utils/rng';
+import { BigNeuroVec } from '../vector/BigNeuroVec';
+
+/** The legacy BigNeuroVec layout is [T, X, Y, Z]; other vec classes are [X, Y, Z, T]. */
+function timepoints(vec: NeuroVec | SparseNeuroVec): number {
+  return vec instanceof BigNeuroVec ? vec.dim[0] : vec.dim[3];
+}
+
+function vectorSpace(vec: NeuroVec | SparseNeuroVec): NeuroSpace {
+  return vec instanceof BigNeuroVec ? vec.volumeSpace : vec.space.withDimensions(vec.dim.slice(0, 3));
+}
+
+function timeFirstSpace(vec: BigNeuroVec, nTimepoints: number): NeuroSpace {
+  return new NeuroSpace(
+    [nTimepoints, ...vec.volumeSpace.dim],
+    [vec.spacing[0], ...vec.volumeSpace.spacing],
+    [vec.origin[0], ...vec.volumeSpace.origin]
+  );
+}
+
+function timeLastSpace(vec: NeuroVec, spatialSpace: NeuroSpace, nTimepoints: number): NeuroSpace {
+  if (!(vec instanceof BigNeuroVec)) return vec.space;
+  return new NeuroSpace(
+    [...spatialSpace.dim, nTimepoints],
+    [...spatialSpace.spacing, vec.spacing[0]],
+    [...spatialSpace.origin, vec.origin[0]],
+    spatialSpace.axes,
+    spatialSpace.trans.to2DArray()
+  );
+}
 
 /**
  * Helper function to create ClusteredNeuroVol from a volume containing cluster IDs.
@@ -104,11 +133,11 @@ export function splitBlocks(
       const vec = x as NeuroVec | SparseNeuroVec;
       
       // Create array to hold time series for this block
-      const nTimepoints = vec.dim[3]; // Time is the 4th dimension (X,Y,Z,T)
+      const nTimepoints = timepoints(vec);
       const blockSeries = new Float32Array(blockIndices.length * nTimepoints);
       
       // Extract time series for each voxel in the block
-      const spatialDims = vec.dim.slice(0, 3); // X,Y,Z dimensions
+      const spatialDims = vectorSpace(vec).dim;
       const spatialSize = spatialDims.reduce((a, b) => a * b, 1);
       
       for (let i = 0; i < blockIndices.length; i++) {
@@ -132,7 +161,7 @@ export function splitBlocks(
         maskData[idx] = 1;
       }
       
-      const maskSpace = vec.space.withDimensions(spatialDims);
+      const maskSpace = vectorSpace(vec);
       const mask = new LogicalNeuroVol(maskSpace, maskData);
       
       // Create SparseNeuroVec for this block
@@ -147,7 +176,7 @@ export function splitBlocks(
       }
       
       const blockVec = new SparseNeuroVec(
-        vec.space.withDimensions([
+        maskSpace.withDimensions([
           spatialDims[0],
           spatialDims[1],
           spatialDims[2],
@@ -202,7 +231,7 @@ export function splitClusters(
   // For NeuroVec, compare spatial dimensions only
   if ('getVolume' in x) {
     const vec = x as NeuroVec;
-    const spatialDims = vec.dim.slice(0, 3); // X,Y,Z dimensions
+    const spatialDims = vectorSpace(vec).dim;
     if (!spatialDims.every((d, i) => d === clusters.space.dim[i])) {
       throw new ValueError('x and clusters must have same spatial dimensions');
     }
@@ -252,7 +281,7 @@ export function splitClusters(
               // For NeuroVec, average time series
               const vec = x as NeuroVec;
               let sum = 0;
-              const nTimepoints = vec.dim[3]; // Time is the 4th dimension
+              const nTimepoints = timepoints(vec);
               for (let t = 0; t < nTimepoints; t++) {
                 sum += vec.getAt(xCoord, y, z, t);
               }
@@ -297,7 +326,7 @@ export function splitFill(
   x: NeuroVec | SparseNeuroVec,
   fac: Int32Array | Float32Array
 ): Map<number, NeuroVec | SparseNeuroVec> {
-  const nVolumes = x.dim[3]; // Time is the 4th dimension (X,Y,Z,T)
+  const nVolumes = timepoints(x);
   
   if (fac.length !== nVolumes) {
     throw new ValueError(`Length of factor (${fac.length}) must equal number of volumes (${nVolumes})`);
@@ -305,6 +334,24 @@ export function splitFill(
 
   const levels = Array.from(new Set(fac));
   const result = new Map<number, NeuroVec | SparseNeuroVec>();
+
+  if (x instanceof BigNeuroVec) {
+    const [nx, ny, nz] = x.volumeSpace.dim;
+    for (const level of levels) {
+      const levelIndices = Array.from(fac).flatMap((value, time) => value === level ? [time] : []);
+      const subset = new Float32Array(levelIndices.length * nx * ny * nz);
+      for (let newTime = 0; newTime < levelIndices.length; newTime++) {
+        const oldTime = levelIndices[newTime];
+        for (let z = 0; z < nz; z++) for (let y = 0; y < ny; y++) for (let xCoord = 0; xCoord < nx; xCoord++) {
+          subset[newTime * nx * ny * nz + xCoord + y * nx + z * nx * ny] = x.getAt(xCoord, y, z, oldTime);
+        }
+      }
+      result.set(level, new BigNeuroVec(subset, timeFirstSpace(x, levelIndices.length), {
+        storage: 'memory', volumeSpace: x.volumeSpace, shareData: true,
+      }));
+    }
+    return result;
+  }
 
   for (const level of levels) {
     // Get indices for this level
@@ -385,21 +432,33 @@ export function splitReduce(
   fac: Int32Array | Float32Array,
   FUN: (values: Float32Array) => number
 ): NeuroVol {
-  const nVolumes = x.dim[3]; // Time is the 4th dimension (X,Y,Z,T)
+  const nVolumes = timepoints(x);
   
   if (fac.length !== nVolumes) {
     throw new ValueError(`Length of factor (${fac.length}) must equal number of volumes (${nVolumes})`);
   }
 
-  // Create 3D space for output volume (X,Y,Z)
-  const volSpace = new NeuroSpace(
-    x.dim.slice(0, 3),
-    x.spacing.slice(0, 3),
-    x.origin.slice(0, 3)
-  );
+  // Preserve the complete 3D geometry, including a BigNeuroVec's affine.
+  const volSpace = vectorSpace(x);
 
   // Get unique levels
   const uniqueLevels = Array.from(new Set(fac));
+
+  if (x instanceof BigNeuroVec) {
+    const [nx, ny, nz] = volSpace.dim;
+    const outData = new Float32Array(volSpace.size);
+    for (let z = 0; z < nz; z++) for (let y = 0; y < ny; y++) for (let xCoord = 0; xCoord < nx; xCoord++) {
+      const reducedValues: number[] = [];
+      for (const level of uniqueLevels) {
+        const values: number[] = [];
+        for (let t = 0; t < nVolumes; t++) if (fac[t] === level) values.push(x.getAt(xCoord, y, z, t));
+        if (values.length > 0) reducedValues.push(FUN(new Float32Array(values)));
+      }
+      const index = xCoord + y * nx + z * nx * ny;
+      if (reducedValues.length > 0) outData[index] = reducedValues.reduce((a, b) => a + b, 0) / reducedValues.length;
+    }
+    return new FloatNeuroVol(volSpace, outData);
+  }
   
   if ('getData' in x && x.getData && !('voxelData' in x)) { // Check if it's a dense vector
     // Initialize output array
@@ -501,7 +560,7 @@ export function splitScale(
   center: boolean = true,
   scale: boolean = true
 ): NeuroVec | SparseNeuroVec {
-  const nVolumes = x.dim[3]; // Time is the 4th dimension (X,Y,Z,T)
+  const nVolumes = timepoints(x);
   
   if (fac.length !== nVolumes) {
     throw new ValueError(`Length of factor (${fac.length}) must equal number of volumes (${nVolumes})`);
@@ -509,6 +568,30 @@ export function splitScale(
 
   // Get unique levels
   const uniqueLevels = Array.from(new Set(fac));
+
+  if (x instanceof BigNeuroVec) {
+    const [nx, ny, nz] = x.volumeSpace.dim;
+    const scaledData = Float32Array.from(x.getData());
+    const spatialSize = nx * ny * nz;
+    for (const level of uniqueLevels) {
+      const levelIndices = Array.from(fac).flatMap((value, time) => value === level ? [time] : []);
+      if (levelIndices.length < 2) continue;
+      for (let voxel = 0; voxel < spatialSize; voxel++) {
+        const values = Float32Array.from(levelIndices, time => scaledData[voxel + time * spatialSize]);
+        const mean = center ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
+        let sd = 1;
+        if (scale) {
+          const variance = values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / (values.length - 1);
+          sd = Math.sqrt(variance);
+          if (sd === 0) sd = 1;
+        }
+        for (const time of levelIndices) scaledData[voxel + time * spatialSize] = (scaledData[voxel + time * spatialSize] - mean) / sd;
+      }
+    }
+    return new BigNeuroVec(scaledData, timeFirstSpace(x, nVolumes), {
+      storage: 'memory', volumeSpace: x.volumeSpace, shareData: true,
+    });
+  }
   
   if (!(x instanceof SparseNeuroVec)) {
     // Copy data
@@ -1088,14 +1171,18 @@ export function scaleSeries(
   vec: NeuroVec,
   method: 'zscore' | 'mean-center' | 'psc' = 'zscore'
 ): Float32NeuroVec {
-  const [dimX, dimY, dimZ, dimT] = vec.dim;
+  const spatialSpace = vectorSpace(vec);
+  const [dimX, dimY, dimZ] = spatialSpace.dim;
+  const dimT = timepoints(vec);
   const spatialSize = dimX * dimY * dimZ;
   const out = new Float32Array(spatialSize * dimT);
 
-  // Copy source data
+  // Time-last dense vectors can retain their storage order. BigNeuroVec is
+  // time-first in metadata but time-major in storage, so route it through the
+  // stable coordinate interface into this function's Float32NeuroVec result.
   const src = vec.getData();
-  if (src instanceof Float32Array || src instanceof Float64Array ||
-      src instanceof Int16Array || src instanceof Uint8Array) {
+  if (!(vec instanceof BigNeuroVec) && (src instanceof Float32Array || src instanceof Float64Array ||
+      src instanceof Int16Array || src instanceof Uint8Array)) {
     // Dense typed array — fast path
     for (let i = 0; i < out.length; i++) out[i] = src[i];
   } else {
@@ -1142,5 +1229,5 @@ export function scaleSeries(
     }
   }
 
-  return new Float32NeuroVec(vec.space, out);
+  return new Float32NeuroVec(timeLastSpace(vec, spatialSpace, dimT), out);
 }

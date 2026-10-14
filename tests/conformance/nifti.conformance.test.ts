@@ -44,9 +44,6 @@ import {
 // ---------------------------------------------------------------------------
 // Known discrepancies (each is a bug ticket). Keys are the check names below.
 // ---------------------------------------------------------------------------
-const UINT_READVOL =
-  'readVol throws "Unsupported TypedArray type: uint32" - createVolFromBuffer maps datatype 768 ' +
-  'but there is no UInt32NeuroVol (readNiftiArrayBuffer decodes it fine); tracked as a mote bead';
 const PRECEDENCE =
   'transform precedence: nibabel uses the sform whenever sform_code != 0; nifti-reader-js (both decoders) ' +
   'uses the qform when qform_code > sform_code';
@@ -104,13 +101,10 @@ const mismatching = (checks: string[], reason: string): Record<string, KnownDisc
     })
   );
 
-const UINT_THROWS = /^Unsupported TypedArray type: uint32$/;
 // The all-zero NIfTI-2 srow reaches nearestAnatomy(), which rejects it.
 const SINGULAR_THROWS = /^Invalid matrix input, (columns are degenerate|determinant is 0)$/;
 
 const KNOWN: KnownDiscrepancies = {
-  dtype_uint32_le: throwing(READVOL_ALL, UINT_READVOL, UINT_THROWS),
-  dtype_uint32_be: throwing(READVOL_ALL, UINT_READVOL, UINT_THROWS),
   xform_both_qform_code_higher: mismatching(
     [
       'readHeader: affine matches nibabel get_best_affine',
@@ -290,6 +284,7 @@ for (const c of manifest.cases) {
         for (let t = 0; t < nVols; t++) {
           const vol = await readVol(fixturePath(c), { index: t });
           expect(vol.space.dim).toEqual(spatialDims(c));
+          if (c.header.dtype === 'uint32') expect(vol.getData()).toBeInstanceOf(Float64Array);
           expectClose(vol.getData(), c.volumes[t].scaled, valueTolerance(c, 'native'), `volume ${t}`);
         }
       });

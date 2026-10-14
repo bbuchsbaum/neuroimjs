@@ -69,6 +69,62 @@ describe('Searchlight Analysis', () => {
       expect(lazyList.length).toBe(216); // 6x6x6 center region
     });
 
+    it('clips nonzero-centred spheres to the mask unless explicitly opted out', () => {
+      const sparseMask = new LogicalNeuroVol(new NeuroSpace([3, 3, 3], [1, 1, 1], [0, 0, 0]));
+      sparseMask.setAt(1, 1, 1, 1);
+
+      const clipped = searchlightIterator(sparseMask, 1, { nonzero: true }) as LazyList<ROIVolWindow>;
+      expect(clipped).toHaveLength(1);
+      expect(clipped.get(0).coords).toEqual([[1, 1, 1]]);
+
+      const geometric = searchlightIterator(sparseMask, 1, {
+        nonzero: true,
+        clipToMask: false,
+      }) as LazyList<ROIVolWindow>;
+      expect(geometric.get(0).coords).toHaveLength(7);
+    });
+
+    it('uses the nearest retained member as the centre when clipping removes it', () => {
+      const edgeMask = new LogicalNeuroVol(new NeuroSpace([2, 1, 1], [1, 1, 1], [0, 0, 0]));
+      edgeMask.setAt(1, 0, 0, 1);
+
+      const windows = searchlightIterator(edgeMask, 1, {
+        eager: true,
+        nonzero: false,
+        clipToMask: true,
+      }) as ROIVolWindow[];
+
+      expect(windows).toHaveLength(2);
+      expect(windows.map((window) => window.coords)).toEqual([[[1, 0, 0]], [[1, 0, 0]]]);
+      expect(windows.map((window) => window.centerIndex)).toEqual([0, 0]);
+    });
+
+    it('breaks equal-distance retained-centre ties in spherical iteration order', () => {
+      const tiedMask = new LogicalNeuroVol(new NeuroSpace([3, 1, 1], [1, 1, 1], [0, 0, 0]));
+      tiedMask.setAt(0, 0, 0, 1);
+      tiedMask.setAt(2, 0, 0, 1);
+
+      const windows = searchlightIterator(tiedMask, 1, {
+        eager: true,
+        nonzero: false,
+        clipToMask: true,
+      }) as ROIVolWindow[];
+
+      // At centre [1, 0, 0], both retained members are one grid unit away;
+      // sphericalROI visits [0, 0, 0] first and keeps it on an equal-distance tie.
+      expect(windows[1].coords).toEqual([[0, 0, 0], [2, 0, 0]]);
+      expect(windows[1].centerIndex).toBe(0);
+    });
+
+    it('rejects an empty clipped sphere', () => {
+      const emptyMask = new LogicalNeuroVol(new NeuroSpace([2, 1, 1], [1, 1, 1], [0, 0, 0]));
+      expect(() => searchlightIterator(emptyMask, 1, {
+        eager: true,
+        nonzero: false,
+        clipToMask: true,
+      })).toThrow('No voxels found within the specified sphere');
+    });
+
     it('should eagerly compute searchlights', () => {
       const radius = 3;
       const result = searchlightIterator(mask, radius, { eager: true });
@@ -133,6 +189,32 @@ describe('Searchlight Analysis', () => {
       const lazyList = result as LazyList<Float32Array>;
       expect(lazyList.length).toBe(216); // Only brain voxels
     });
+
+    it('clips coordinate neighbourhoods with the same default and opt-out', async () => {
+      const sparseMask = new LogicalNeuroVol(new NeuroSpace([3, 3, 3], [1, 1, 1], [0, 0, 0]));
+      sparseMask.setAt(1, 1, 1, 1);
+
+      const clipped = await searchlightCoords(sparseMask, 1, { nonzero: true });
+      expect(Array.from(clipped.get(0))).toEqual([1, 1, 1]);
+
+      const geometric = await searchlightCoords(sparseMask, 1, {
+        nonzero: true,
+        clipToMask: false,
+      });
+      expect(geometric.get(0)).toHaveLength(21);
+    });
+
+    it('returns the retained member and rejects empty clipped spheres', async () => {
+      const edgeMask = new LogicalNeuroVol(new NeuroSpace([2, 1, 1], [1, 1, 1], [0, 0, 0]));
+      edgeMask.setAt(1, 0, 0, 1);
+      const coords = await searchlightCoords(edgeMask, 1, { nonzero: false, clipToMask: true });
+      expect(Array.from(coords.get(0))).toEqual([1, 0, 0]);
+      expect(Array.from(coords.get(1))).toEqual([1, 0, 0]);
+
+      const emptyMask = new LogicalNeuroVol(new NeuroSpace([2, 1, 1], [1, 1, 1], [0, 0, 0]));
+      const empty = await searchlightCoords(emptyMask, 1, { nonzero: false, clipToMask: true });
+      expect(() => empty.get(0)).toThrow('No voxels found within the specified sphere');
+    });
   });
 
   describe('randomSearchlight', () => {
@@ -180,6 +262,19 @@ describe('Searchlight Analysis', () => {
       
       // All brain voxels should be covered
       expect(coveredIndices.size).toBe(brainVoxelCount);
+    });
+
+    it('keeps seeded random centres while clipping their members by default', () => {
+      const sparseMask = new LogicalNeuroVol(new NeuroSpace([3, 3, 3], [1, 1, 1], [0, 0, 0]));
+      sparseMask.setAt(1, 1, 1, 1);
+
+      const clipped = randomSearchlight(sparseMask, 1, { seed: 7 });
+      expect(clipped).toHaveLength(1);
+      expect(clipped[0].coords).toEqual([[1, 1, 1]]);
+
+      const geometric = randomSearchlight(sparseMask, 1, { seed: 7, clipToMask: false });
+      expect(geometric).toHaveLength(1);
+      expect(geometric[0].coords).toHaveLength(7);
     });
   });
 

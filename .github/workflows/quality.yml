@@ -73,6 +73,7 @@ jobs:
       # docs/public/data/mni152_t1.nii.gz (SHA-256 checked) by the Playwright
       # globalSetup, so no download is needed.
       - run: npm run test:e2e
+      - run: npm run test:e2e:volume-set
       - if: failure()
         uses: actions/upload-artifact@v4
         with:

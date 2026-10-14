@@ -31,6 +31,8 @@ interface InitializeRequest {
     dimensions: [number, number, number];
     spacing: [number, number, number];
     radius: number;
+    maskData: Uint8Array;
+    clipToMask: boolean;
   };
 }
 
@@ -97,7 +99,7 @@ export class SearchlightWorkerPool {
     }
   }
 
-  async initialize(mask: LogicalNeuroVol, radius: number): Promise<void> {
+  async initialize(mask: LogicalNeuroVol, radius: number, clipToMask: boolean): Promise<void> {
     this.assertActive();
     if (!Number.isFinite(radius) || radius < 0) {
       throw new RangeError('radius must be a finite, non-negative number');
@@ -114,6 +116,8 @@ export class SearchlightWorkerPool {
         dimensions: [...dimensions],
         spacing: [...spacing],
         radius,
+        maskData: mask.getData().slice() as Uint8Array,
+        clipToMask,
       },
     };
 
@@ -244,6 +248,8 @@ function searchlightWorkerMain(): void {
     dimensions: [number, number, number];
     spacing: [number, number, number];
     radius: number;
+    maskData: Uint8Array;
+    clipToMask: boolean;
   };
   type Request =
     | { type: 'initialize'; data: State }
@@ -298,6 +304,8 @@ function searchlightWorkerMain(): void {
             ((j - cy) * sy) ** 2 +
             ((k - cz) * sz) ** 2;
           if (distanceSquared <= radiusSquared) {
+            const index = i + j * nx + k * nx * ny;
+            if (state.clipToMask && state.maskData[index] === 0) continue;
             if (i === cx && j === cy && k === cz) {
               centerIdx = coordinates.length / 3;
             }
@@ -307,7 +315,29 @@ function searchlightWorkerMain(): void {
       }
     }
 
-    if (centerIdx < 0) throw new Error('Searchlight geometry omitted its center voxel');
+    if (coordinates.length === 0) {
+      // Match sphericalROI: a clipped sphere with no mask members is not a
+      // valid ROI. In particular, this can occur when nonzero is false and
+      // an out-of-mask centre is farther than radius from the mask.
+      throw new Error('No voxels found within the specified sphere');
+    }
+    if (centerIdx < 0) {
+      // sphericalROI retains the nearest included member as centerIndex when
+      // clipping removes the requested centre. Iterate in the geometry order
+      // above and update only on a strictly smaller grid distance so equal
+      // distances keep its deterministic first-member tie break.
+      let closestDistanceSquared = Infinity;
+      for (let offset = 0; offset < coordinates.length; offset += 3) {
+        const dx = coordinates[offset] - cx;
+        const dy = coordinates[offset + 1] - cy;
+        const dz = coordinates[offset + 2] - cz;
+        const distanceSquared = dx * dx + dy * dy + dz * dz;
+        if (distanceSquared < closestDistanceSquared) {
+          closestDistanceSquared = distanceSquared;
+          centerIdx = offset / 3;
+        }
+      }
+    }
     const coords = Int32Array.from(coordinates);
     const data = new Float32Array(coords.length / 3);
     data.fill(1);

@@ -8,6 +8,9 @@
  *                    files are downloaded once from the public TemplateFlow archive.
  *   VS_SYNTHETIC=1   ignore the two above and serve a deterministic synthetic set
  *                    generated in memory (see synthetic.ts), with a small Schaefer-style parcellation
+ *   VS_STATIC_SYNTHETIC=1
+ *                    additionally writes the default synthetic set as static `vs/` assets during
+ *                    `vite build`. This is for the VitePress Space demo, never real data.
  *
  * Endpoints:
  *   GET /vs/manifest.json         set members parsed from BIDS-style names
@@ -154,7 +157,8 @@ const syntheticHandler: Connect.NextHandleFunction = (req, res, next) => {
 export function vsDataPlugin(): Plugin {
   const dataRoot = process.env.VS_DATA_ROOT ?? '';
   const templateDir = process.env.VS_TEMPLATE_DIR || DEFAULT_TEMPLATE_DIR;
-  const synthetic = process.env.VS_SYNTHETIC === '1';
+  const staticSynthetic = process.env.VS_STATIC_SYNTHETIC === '1';
+  const synthetic = process.env.VS_SYNTHETIC === '1' || staticSynthetic;
 
   const fileHandler: Connect.NextHandleFunction = (req, res, next) => {
     const url = decodeURIComponent((req.url ?? '').split('?')[0]);
@@ -241,6 +245,44 @@ export function vsDataPlugin(): Plugin {
     },
     configurePreviewServer(server) {
       server.middlewares.use(handler);
+    },
+    generateBundle() {
+      if (!staticSynthetic) return;
+
+      // Keep the documentation payload bounded to the ordinary synthetic
+      // fixture. The synth50/synth200 performance fixtures stay available to
+      // the dev server and E2E tests but are never published as static assets.
+      const members = syntheticManifest().filter((member) => member.model === 'synth');
+      const staticMembers = members.map((member) => ({
+        ...member,
+        // Relative paths resolve from /neuroimjs/space/ after deployment.
+        url: member.url.replace(/^\//, ''),
+      }));
+      this.emitFile({
+        type: 'asset',
+        fileName: 'vs/manifest.json',
+        source: JSON.stringify({ members: staticMembers }),
+      });
+
+      for (const name of ['T1w.nii.gz', 'mask.nii.gz', 'atlas.nii.gz', 'atlas.tsv']) {
+        const source = syntheticTemplateFile(name);
+        if (!source) throw new Error(`Missing synthetic template asset: ${name}`);
+        this.emitFile({ type: 'asset', fileName: `vs/template/${name}`, source });
+      }
+
+      const participants = syntheticParticipantsTsv()
+        .split('\n')
+        .filter((line, index) => index === 0 || line.startsWith('sub-s'))
+        .join('\n');
+      this.emitFile({ type: 'asset', fileName: 'vs/participants.tsv', source: participants });
+
+      for (const member of members) {
+        this.emitFile({
+          type: 'asset',
+          fileName: member.url.replace(/^\//, ''),
+          source: syntheticMemberFile(member.model, member.subject, member.contrast),
+        });
+      }
     },
   };
 }

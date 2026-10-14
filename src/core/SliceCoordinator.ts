@@ -114,15 +114,15 @@ export class SliceCoordinator {
     for (let i = 0; i < volStack.length; i++) {
       const layer = volStack.getLayer(i);
       const space = layer.space;
-      const sliceAxisIndex = this.getSliceAxisIndex(axis);
+      const sliceAxisIndex = space.whichDim(axis.k);
       
       dimensions.push({
         volumeIndex: i,
         volumeId: layer.id,
         sliceCounts: {
-          axial: space.dim[2] || 1,    // Z axis
-          sagittal: space.dim[0] || 1,  // X axis
-          coronal: space.dim[1] || 1    // Y axis
+          axial: space.dimOf(AxisSet3D.AXIAL_LPI.k),
+          sagittal: space.dimOf(AxisSet3D.SAGITTAL_AIL.k),
+          coronal: space.dimOf(AxisSet3D.CORONAL_LIP.k)
         },
         currentAxis: axis,
         currentSliceCount: space.dim[sliceAxisIndex] || 1
@@ -130,25 +130,6 @@ export class SliceCoordinator {
     }
 
     return dimensions;
-  }
-
-  /**
-   * Determines which axis index corresponds to slicing for a given orientation
-   */
-  private getSliceAxisIndex(axis: AxisSet3D): number {
-    const axisStr = axis.toString();
-    
-    // Determine which dimension we're slicing along
-    if (axisStr.includes('XYZ') || axisStr.includes('AXIAL')) {
-      return 2; // Slice along Z axis
-    } else if (axisStr.includes('YZX') || axisStr.includes('SAGITTAL')) {
-      return 0; // Slice along X axis
-    } else if (axisStr.includes('XZY') || axisStr.includes('CORONAL')) {
-      return 1; // Slice along Y axis
-    }
-    
-    // Default to Z axis for unknown orientations
-    return 2;
   }
 
   /**

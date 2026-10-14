@@ -26,7 +26,7 @@ import { builtinModules } from 'node:module';
 import { dirname, join, relative, resolve } from 'node:path';
 import { createPackedConsumer, repositoryRoot } from './lib/packed-consumer.mjs';
 
-const SUBPATHS = ['io', 'slices', 'geometry'];
+const SUBPATHS = ['io', 'slices', 'geometry', 'space'];
 
 /**
  * Bare specifiers a subpath's compiled graph may import: Node built-ins plus
@@ -205,6 +205,10 @@ const EXERCISE = {
       if (!mod.isNeuroimError(error)) throw new Error('NeuroSpace did not throw a NeuroimError: ' + error);
     }
   `,
+  space: `
+    if (typeof mod.mountSpace !== 'function') throw new Error('missing mountSpace');
+    if (typeof globalThis.document !== 'undefined') throw new Error('Space import installed DOM globals');
+  `,
 };
 
 function probeSource(kind, subpath, exercise) {
@@ -292,6 +296,11 @@ function runtimeCheck() {
 import { readVol, read_vol, writeVol, readHeader, type NeuroVol, type ReadVolOptions } from 'neuroimjs/io';
 import { extractOrthogonalSlices, NeuroSlice, getCenterSliceIndex } from 'neuroimjs/slices';
 import { NeuroSpace, AxisSet3D, AXIAL_LPI, getVolumeGeometry, type VolumeGeometry } from 'neuroimjs/geometry';
+import { mountSpace, type SpaceHandle, type SpaceDataset } from 'neuroimjs/space';
+declare const host: HTMLElement;
+declare const dataset: SpaceDataset;
+const embedded: SpaceHandle = mountSpace(host, { assetBaseUrl: '/vendor/space/', data: dataset });
+void embedded;
 // @ts-expect-error readNiftiArrayBuffer is browser-only (ESM-only nifti-reader-js).
 import { readNiftiArrayBuffer } from 'neuroimjs/io';
 const options: ReadVolOptions = {};

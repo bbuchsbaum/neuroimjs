@@ -103,6 +103,7 @@ export default defineConfig({
           collapsed: false,
           items: [
             { text: 'Viewers', link: '/guide/viewers' },
+            { text: 'Subject Maps in Space', link: '/guide/volume-set-space' },
             { text: 'Colormaps & Layers', link: '/guide/colormaps' },
             { text: 'Composable Views', link: '/guide/composable-views' },
             { text: 'Multi-Layer Alignment', link: '/guide/alignment' },

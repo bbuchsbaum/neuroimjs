@@ -1,7 +1,10 @@
 # Volume-set browser
 
 A demo for looking at a *set* of aligned maps (for example one contrast map per subject in MNI space)
-side by side. It is a side quest, not a published API: everything in `src/volumeset/` is internal.
+side by side. The supported `neuroimjs/space` API embeds this integrated application
+in an isolated iframe with caller-supplied data. Numerical modules in
+`src/volumeset/` remain internal. See the [Space guide](../../docs/guide/volume-set-space.md)
+for embedding, geometry requirements, and a short walkthrough.
 
 ```bash
 VS_DATA_ROOT=/path/to/contrasts npm run demo:volume-set   # your real maps (the default)
@@ -143,8 +146,9 @@ Parcels come from the template's parcellation via [neuroatlasjs](https://github.
 
 - Correlation compares spatial patterns. It ignores amplitude, and it does not account for voxelwise
   precision or degrees of freedom. A t-map and a β-map give different layouts.
-- The layout is computed on the main analysis mask (template brain mask ∩ voxels where any map is
-  non-zero). It is not ROI-specific, and it is not a test: it does not show subtypes or significance.
+- By default, the layout uses the main analysis mask (template brain mask ∩ voxels where any map is
+  non-zero). The optional sphere explicitly restricts similarity to that region. Neither layout
+  establishes subtypes or significance.
 - The NMDS optimum is not guaranteed global. The starts statistic shows how stable it is, not that it
   is correct.
 - Layouts are fitted in a worker, so slicing stays responsive while a fit runs. The fit took about

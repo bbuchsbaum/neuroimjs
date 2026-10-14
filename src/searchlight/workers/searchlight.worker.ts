@@ -22,6 +22,7 @@ interface InitializeData {
   origin: number[];
   radius: number;
   nonzero: boolean;
+  clipToMask?: boolean;
 }
 
 interface ComputeData {
@@ -33,6 +34,7 @@ interface WorkerState {
   mask: LogicalNeuroVol;
   radius: number;
   nonzero: boolean;
+  clipToMask: boolean;
   allIndices: number[];
 }
 
@@ -84,6 +86,7 @@ function handleInitialize(data: InitializeData) {
     mask,
     radius: data.radius,
     nonzero: data.nonzero,
+    clipToMask: data.clipToMask ?? data.nonzero,
     allIndices: indices
   };
 
@@ -106,7 +109,7 @@ function handleCompute(data: ComputeData) {
     const centerGrid = state.mask.space.indexToGrid(centerIdx);
 
     // Create spherical ROI around this center
-    const roi = sphericalROI(state.mask, centerGrid, state.radius);
+    const roi = sphericalROI(state.mask, centerGrid, state.radius, 1, state.clipToMask);
 
     // Create serializable result
     results.push({

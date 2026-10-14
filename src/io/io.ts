@@ -434,7 +434,7 @@ export async function readVec(
     useBigVec?: boolean;
     onProgress?: (progress: number) => void;
   } = {}
-): Promise<NeuroVec> {
+): Promise<BigNeuroVec> {
   const { indices, onProgress } = options;
 
   const { header, imageBuffer } = await decodeNifti(fileName, p => onProgress?.(p * 0.5));
@@ -655,6 +655,12 @@ function createVolFromBuffer(
       scaled[i] = typedArray[i] * slope + inter;
     }
     return createNeuroVol('float32', space, scaled);
+  }
+
+  // DenseNeuroVol has no UInt32 implementation. Float64 represents every
+  // uint32 integer exactly, matching the browser decoder's lossless fallback.
+  if (dataType === 'uint32') {
+    return createNeuroVol('float64', space, Float64Array.from(typedArray));
   }
 
   return createNeuroVol(dataType, space, typedArray);

@@ -65,6 +65,14 @@ const waitMode = (page: Page, mode: string): Promise<unknown> =>
 /** Wait for two animation frames (coalesced redraws flush on rAF). */
 const settle = (page: Page): Promise<void> => page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
 
+test('Ortho uses anatomical slice bounds and the PIXI v8 label API', async ({ page }) => {
+  const messages: string[] = [];
+  page.on('console', message => messages.push(message.text()));
+  await open(page, 'mode=ortho&cursor=23,32,13', false);
+  await expect(page.locator('.ortho-host canvas').first()).toBeVisible();
+  expect(messages.filter(message => /out of bounds|pixi.*deprecat/i.test(message))).toEqual([]);
+});
+
 /** Hash of the canvas pixels inside a CSS-pixel rect of the main set canvas. */
 async function pixelHash(page: Page, r: Thumb['dest']): Promise<number> {
   return page.evaluate((r) => {
@@ -363,6 +371,9 @@ test.describe('Space (S4)', () => {
   });
 
   test('dense set (200 maps) switches to anchor marks and stays navigable', async ({ page }, info) => {
+    // Generating/loading 200 maps plus fitting can exceed Playwright's default
+    // 30 s on a cold runner; the layout wait itself remains bounded at 90 s.
+    test.setTimeout(120_000);
     await open(page, 'mode=space&model=synth200&contrast=cue');
     const p = await probe(page);
     expect(p.placed.length).toBe(200);
@@ -376,6 +387,7 @@ test.describe('Space (S4)', () => {
   });
 
   test('clicking an ID label or anchor dot selects without moving the cursor, even under the preview', async ({ page }) => {
+    test.setTimeout(120_000); // includes both the 17-map and 200-map fixtures
     // Thumbnails: hover a label long enough for the enlarged preview to appear, then click it.
     await open(page, `${SPACE}&subject=s13`);
     const box = (await page.locator('canvas.montage').boundingBox())!;

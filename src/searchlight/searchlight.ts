@@ -24,6 +24,12 @@ export interface SearchlightOptions {
   eager?: boolean;
   /** Whether to include only coordinates with nonzero values */
   nonzero?: boolean;
+  /**
+   * Whether neighbourhood members are restricted to nonzero mask voxels.
+   * Defaults to `nonzero`, so analyses selecting nonzero centres also stay
+   * within the mask. Set to `false` to retain the previous geometric sphere.
+   */
+  clipToMask?: boolean;
   /** Number of cores/workers to use for parallel computation */
   cores?: number;
   /** Progress callback */
@@ -38,7 +44,10 @@ export interface SearchlightOptions {
  * returning numbers in [0, 1) and takes precedence over `seed`. With neither,
  * a fresh seed is drawn on every call.
  */
-export type RandomSearchlightOptions = RandomOptions;
+export type RandomSearchlightOptions = RandomOptions & {
+  /** Restrict each sampled sphere to nonzero mask voxels (default: `true`). */
+  clipToMask?: boolean;
+};
 
 function validateSearchlightArguments(radius: number, cores = 0): void {
   if (!Number.isFinite(radius) || radius < 0) {
@@ -87,7 +96,7 @@ export function searchlightIterator(
   radius: number,
   options: SearchlightOptions = {}
 ): LazyList<ROIVolWindow> | ROIVolWindow[] | Promise<ROIVolWindow[]> {
-  const { eager = false, nonzero = false, cores = 0, onProgress } = options;
+  const { eager = false, nonzero = false, clipToMask = nonzero, cores = 0, onProgress } = options;
   validateSearchlightArguments(radius, cores);
 
   // Convert to LogicalNeuroVol if needed
@@ -129,7 +138,7 @@ export function searchlightIterator(
 
     // Create spherical ROI around this center
     // sphericalROI already returns a ROIVolWindow, so we can return it directly
-    return sphericalROI(logicalMask, centerGrid3D, radius);
+    return sphericalROI(logicalMask, centerGrid3D, radius, 1, clipToMask);
   };
 
   if (eager) {
@@ -140,7 +149,7 @@ export function searchlightIterator(
         logicalMask,
         radius,
         indices,
-        nonzero,
+        clipToMask,
         cores,
         onProgress
       );
@@ -176,7 +185,7 @@ export async function searchlightCoords(
   radius: number,
   options: SearchlightOptions = {}
 ): Promise<LazyList<Float32Array>> {
-  const { nonzero = false, cores = 0 } = options;
+  const { nonzero = false, clipToMask = nonzero, cores = 0 } = options;
   validateSearchlightArguments(radius, cores);
 
   // Convert to LogicalNeuroVol if needed
@@ -211,7 +220,7 @@ export async function searchlightCoords(
     ];
 
     // Create spherical ROI around this center
-    const roi = sphericalROI(logicalMask, centerGrid3D, radius);
+    const roi = sphericalROI(logicalMask, centerGrid3D, radius, 1, clipToMask);
 
     // Return coordinates as flat Float32Array
     const flatCoords = new Float32Array(roi.coords.length * 3);
@@ -229,7 +238,7 @@ export async function searchlightCoords(
       logicalMask,
       radius,
       indices,
-      nonzero,
+      clipToMask,
       cores
     );
     // Return a pre-computed LazyList
@@ -264,6 +273,7 @@ export function randomSearchlight(
 ): ROIVolWindow[] {
   validateSearchlightArguments(radius);
   const rng = resolveRng(options);
+  const clipToMask = options.clipToMask ?? true;
   // Convert to LogicalNeuroVol if needed
   const logicalMask = ensureLogicalMask(mask);
 
@@ -295,7 +305,7 @@ export function randomSearchlight(
     ];
 
     // Create spherical ROI around this center
-    const roi = sphericalROI(logicalMask, centerGrid3D, radius);
+    const roi = sphericalROI(logicalMask, centerGrid3D, radius, 1, clipToMask);
 
     // Remove all voxels in this searchlight from available indices
     const coords = roi.coords;
@@ -400,6 +410,7 @@ export function bootstrapSearchlight(
     throw new RangeError('iter must be a non-negative integer');
   }
   const rng = resolveRng(options);
+  const clipToMask = options.clipToMask ?? true;
   // Convert to LogicalNeuroVol if needed
   const logicalMask = ensureLogicalMask(mask);
 
@@ -435,7 +446,7 @@ export function bootstrapSearchlight(
     ];
 
     // Create spherical ROI around this center
-    const roi = sphericalROI(logicalMask, centerGrid3D, radius);
+    const roi = sphericalROI(logicalMask, centerGrid3D, radius, 1, clipToMask);
 
     // sphericalROI already returns a ROIVolWindow, but we need to update its parentIndex
     // Since we can't modify readonly properties, we'll use the returned ROI directly
@@ -453,14 +464,14 @@ async function computeSearchlightsParallel(
   mask: LogicalNeuroVol,
   radius: number,
   indices: number[],
-  nonzero: boolean,
+  clipToMask: boolean,
   cores: number,
   onProgress?: (progress: number) => void
 ): Promise<ROIVolWindow[]> {
   // Check if we're in a browser environment with Web Worker support
   if (typeof Worker === 'undefined') {
     console.warn('Web Workers not available, falling back to sequential processing');
-    return computeSearchlightsSequential(mask, radius, indices, nonzero, onProgress);
+    return computeSearchlightsSequential(mask, radius, indices, clipToMask, onProgress);
   }
 
   const pool = new SearchlightWorkerPool({
@@ -470,7 +481,7 @@ async function computeSearchlightsParallel(
 
   try {
     // Initialize workers
-    await pool.initialize(mask, radius);
+    await pool.initialize(mask, radius, clipToMask);
 
     // Compute searchlights in parallel
     const results = await pool.computeSearchlights(
@@ -498,7 +509,7 @@ function computeSearchlightsSequential(
   mask: LogicalNeuroVol,
   radius: number,
   indices: number[],
-  nonzero: boolean,
+  clipToMask: boolean,
   onProgress?: (progress: number) => void
 ): ROIVolWindow[] {
   const results: ROIVolWindow[] = [];
@@ -513,7 +524,7 @@ function computeSearchlightsSequential(
       centerGrid[2] || 0
     ];
     
-    const roi = sphericalROI(mask, centerGrid3D, radius);
+    const roi = sphericalROI(mask, centerGrid3D, radius, 1, clipToMask);
     
     // sphericalROI already returns a ROIVolWindow
     results.push(roi);
@@ -531,7 +542,7 @@ async function computeCoordsParallel(
   mask: LogicalNeuroVol,
   radius: number,
   indices: number[],
-  nonzero: boolean,
+  clipToMask: boolean,
   cores: number
 ): Promise<Float32Array[]> {
   // Check if we're in a browser environment with Web Worker support
@@ -540,7 +551,7 @@ async function computeCoordsParallel(
     const results: Float32Array[] = [];
     
     for (let i = 0; i < indices.length; i++) {
-      const centerIdx = nonzero ? indices[i] : i;
+      const centerIdx = indices[i];
       const centerGrid = mask.space.indexToGrid(centerIdx);
       
       // Ensure centerGrid is a 3-element array
@@ -550,7 +561,7 @@ async function computeCoordsParallel(
         centerGrid[2] || 0
       ];
       
-      const roi = sphericalROI(mask, centerGrid3D, radius);
+      const roi = sphericalROI(mask, centerGrid3D, radius, 1, clipToMask);
       
       // Convert coordinates to flat Float32Array
       const flatCoords = new Float32Array(roi.coords.length * 3);
@@ -571,7 +582,7 @@ async function computeCoordsParallel(
 
   try {
     // Initialize workers
-    await pool.initialize(mask, radius);
+    await pool.initialize(mask, radius, clipToMask);
 
     // Compute coordinates in parallel
     const results = await pool.computeSearchlights(

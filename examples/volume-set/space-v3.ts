@@ -31,7 +31,8 @@ import {
   envfitVector,
   envfitFactor,
 } from '../../src/volumeset/explain';
-import { fetchManifest, prettyParcel } from './data';
+import { fetchManifest, prettyParcel, vsDataUrl } from './data';
+import { embeddedSpaceAtlas, isEmbedded } from './embedded-data';
 import * as M from './main';
 
 // ---------------------------------------------------------------------------
@@ -80,7 +81,19 @@ function regionsFromTsv(tsv: string): Region[] {
 export function loadSpaceAtlas(): Promise<SpaceAtlas | null> {
   atlasPromise ??= (async () => {
     try {
-      const [vres, tres] = await Promise.all([fetch('/vs/template/atlas.nii.gz'), fetch('/vs/template/atlas.tsv')]);
+      const supplied = isEmbedded() ? embeddedSpaceAtlas() : null;
+      if (isEmbedded() && !supplied) return null;
+      if (supplied) {
+        const regions: Region[] = supplied.regions.map(({ id, label }) => ({ id, label, fullLabel: label }));
+        const atlas = new VolumeAtlas({ name: supplied.name, volume: supplied.volume, regions, affineTolerance: 1e-3 });
+        return {
+          atlas,
+          name: supplied.name,
+          label: (id: number) => atlas.regions.get(id)?.fullLabel ?? `parcel ${id}`,
+          short: (id: number) => atlas.regions.get(id)?.fullLabel ?? `parcel ${id}`,
+        };
+      }
+      const [vres, tres] = await Promise.all([fetch(vsDataUrl('template/atlas.nii.gz')), fetch(vsDataUrl('template/atlas.tsv'))]);
       if (!vres.ok || !tres.ok) return null;
       const vol = readNiftiArrayBuffer(await vres.arrayBuffer());
       const labels = Int32Array.from(vol.getData() as ArrayLike<number>, (x) => Math.round(x));
@@ -130,6 +143,13 @@ export function loadBetaSe(a: M.Analysis): Promise<BetaSe> {
           const i = next++;
           const m = byId.get(a.ids[i]);
           if (!m) throw new Error(`no file for ${a.ids[i]}`);
+          if (isEmbedded()) {
+            if (!m.beta || !m.se) throw new Error(`β/SE data are unavailable for ${m.id ?? m.subject}.`);
+            beta[i] = take(new FloatNeuroVol(a.set.space, m.beta));
+            se[i] = take(new FloatNeuroVol(a.set.space, m.se));
+            M.setStatus(`Loading β and SE ${++done}/${a.ids.length}`);
+            continue;
+          }
           const buf = await (await fetch(m.url)).arrayBuffer();
           beta[i] = take(readNiftiArrayBuffer(buf.slice(0), { index: 0 }));
           se[i] = take(readNiftiArrayBuffer(buf, { index: 3 }));
@@ -170,6 +190,7 @@ export function reliabilityOf(a: M.Analysis, b: SimilarityBasis): Reliability | 
   if (c && !(c instanceof Promise)) return c;
   if (c) return null;
   const isT = M.state.stat === 't';
+  if (!isT && !M.hasBetaSe()) return null;
   const build = (se: Float32Array[] | null): Reliability => {
     const rho: number[] = [];
     const sd: number[] = [];
@@ -456,7 +477,7 @@ export function explain(a: M.Analysis, b: SimilarityBasis, scope: ExplainScope, 
   if (explainCache.size > 12) explainCache.clear();
   explainCache.set(key, res);
   // Per-parcel heterogeneity needs β and SE; fill the column in when they arrive (the focused table has no I²).
-  if (sa && parcels && scope.kind !== 'focused') {
+  if (sa && parcels && scope.kind !== 'focused' && M.hasBetaSe()) {
     void loadBetaSe(a).then(({ beta, se }) => {
       const nVox = a.set.dim[0] * a.set.dim[1] * a.set.dim[2];
       const means = (vals: Float32Array): Map<number, number> => {
