@@ -7,15 +7,26 @@ in the pull request that makes the change.
 
 ## Unreleased
 
+## 0.6.0 - 2026-10-14
+
 Upgrading: `readVol` now takes `space.spacing` from the affine rather than
 from `pixdim`. Callers that need the raw `pixdim[1..3]` should use
 `readHeader().spacing`. See Changed. The `TypeError` export is removed; import
 `NeuroimTypeError` instead. See Removed. `writeVol`/`writeVec` now reject
 `compress`/`format` options that contradict a `.nii` or `.nii.gz` path, for
-example `{ compress: true }` with a `.nii` path. See Changed.
+example `{ compress: true }` with a `.nii` path. See Changed. Searchlights with
+`nonzero: true`, and random/bootstrap searchlights, now clip their neighbourhoods
+to the mask; pass `clipToMask: false` to retain geometric spheres.
 
 ### Added
 
+- Supported `neuroimjs/space` API: `mountSpace` embeds linked Montage, Facet,
+  Space and Ortho views in an isolated iframe with caller-supplied maps, typed
+  state/events, dataset replacement, and disposal. Version-matched frame assets
+  ship in the package for same-origin HTTP(S) hosting. The first API accepts
+  aligned, axis-aligned RAS+ grids and validates data before mounting. The
+  documentation includes a generated 17-subject demo; numerical modules remain
+  internal.
 - `SingleSliceViewer.setMarkers()` draws world-coordinate ring, cross, or dot
   markers at a constant screen size; `markersOnSlice()` returns the IDs drawn
   in the current viewport. `slabMm` is the full slab thickness. (#29)
@@ -73,6 +84,11 @@ example `{ compress: true }` with a `.nii` path. See Changed.
 
 ### Changed
 
+- **Breaking:** Searchlights with `nonzero: true` restrict sphere members as
+  well as centers to the nonzero mask. `randomSearchlight` and
+  `bootstrapSearchlight` also clip by default. Pass `clipToMask: false` to retain
+  the previous neighbourhoods; center selection and seeded sampling are unchanged.
+- `readVec` now declares `Promise<BigNeuroVec>`, exposing `volumeSpace` without a cast.
 - `ColorMapFactory.createDiverging()` now interpolates in RGB by default,
   avoiding a green hue between blue and a light neutral. Existing callers will
   see different intermediate colors; pass `{ mode: 'lch' }` to retain the old
@@ -128,6 +144,9 @@ example `{ compress: true }` with a `.nii` path. See Changed.
 
 ### Deprecated
 
+- `SimpleOrthogonalViewer.setLPICoord` and `getLPICoord` emit one warning per
+  method. Use `setWorldCoord` / `getWorldCoord` with RAS+ millimetres. Legacy
+  LPI accessors retain their storage-dependent voxel mapping.
 - `ValueError`. Catch library errors with `isNeuroimError(error, code)`.
   Functions that threw `ValueError` still throw instances of it (now with a
   specific `code`, e.g. `CORRUPT_FILE` for a non-NIfTI buffer), so existing
@@ -143,6 +162,19 @@ example `{ compress: true }` with a `.nii` path. See Changed.
 
 ### Fixed
 
+- `readVol` reads unscaled uint32 NIfTI data losslessly as `Float64NeuroVol`,
+  matching the browser decoder.
+- Statistics split and scaling helpers handle time-first `readVec` results and
+  preserve spatial geometry and temporal metadata. `splitReduce` retains its
+  existing mean-of-per-level reductions return value.
+- Integer `getSliceAt(..., 'trilinear')` outputs round to the nearest integer
+  (half ties toward positive infinity) instead of truncating. Float slices
+  retain interpolated fractions.
+- Coronal and sagittal slice bounds follow the volume's anatomical axes,
+  including flipped and permuted storage, instead of falling back to its Z extent.
+- Slice texture creation no longer performs a debug `getImageData` readback.
+- Real-browser coverage pins PIXI v8 orientation-label creation without
+  deprecation warnings during an Ortho viewer lifecycle.
 - `VolLayer.replaceVolume()` now invalidates render and texture versions, so
   mounted slices show the replacement without moving the crosshair. (#26)
 - Viewer mounting preserves host sizing styles. Fixed-height grid cells stay

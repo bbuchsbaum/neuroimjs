@@ -162,6 +162,10 @@ function chip(id: string, label: string, pressed: boolean, title: string, extra 
   return `<button class="chip ${extra}" id="${id}" aria-pressed="${pressed}" title="${title}">${label}</button>`;
 }
 
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+}
+
 /** Create or update the Space toolbar; hidden in other modes. Called on every Space draw and overlay pass. */
 export function syncToolbar(): void {
   const view = document.querySelector('#view') as HTMLDivElement | null;
@@ -196,9 +200,10 @@ export function syncToolbar(): void {
   if (g) toolbar.style.left = `${Math.round(g.plot.x)}px`;
   // Rebuild only when the set of controls changes; otherwise update in place, so a click is never
   // lost to a rebuild between pointer-down and pointer-up.
-  const covOpts = (covariates?.fields ?? []).map((f) => `<option value="cov:${f.name}">Mark: ${f.name}${f.kind === 'numeric' ? '' : ' (category)'}</option>`).join('');
+  const reliabilityAvailable = M.state.stat === 't' || M.hasBetaSe();
+  const covOpts = (covariates?.fields ?? []).map((f) => `<option value="cov:${escapeHtml(f.name)}">Mark: ${escapeHtml(f.name)}${f.kind === 'numeric' ? '' : ' (category)'}</option>`).join('');
   // Covariate options are filled in place (fixed-width select), so their arrival never shifts the chips.
-  const structure = `${opts.subset.size > 0}`;
+  const structure = `${opts.subset.size > 0}|${reliabilityAvailable}`;
   if (toolbar.dataset.structure !== structure) {
     toolbar.innerHTML = `
     <select class="chip" id="sx-colour" title="Mark each map with a value (a bar under its picture); positions do not change" aria-label="Mark maps by">
@@ -209,8 +214,8 @@ export function syncToolbar(): void {
     ${chip('sx-lens', 'Magnifier (L)', false, 'A loupe that magnifies the view under the pointer; nothing moves')}
     ${chip('sx-region', regionLabel(), false, 'Lay out by similarity within a sphere: first click applies 10 mm at the cursor, further clicks widen it (15, 25 mm) and then return to the whole brain')}
     ${chip('sx-traj', both('Contrasts side by side', 'Side by side'), false, 'Show every contrast at the same positions (this layout), one panel per contrast')}
-    ${chip('sx-explain', 'Explain', false, 'What drives the layout: the dissimilarity split by voxel and parcel, with the part noise alone would produce')}
-    ${chip('sx-noise', 'Correct for noise', false, 'Lay out by noise-corrected similarity (Spearman: r / √(ρᵢρⱼ)); unreliable maps are set aside')}
+    ${reliabilityAvailable ? chip('sx-explain', 'Explain', false, 'What drives the layout: the dissimilarity split by voxel and parcel, with the part noise alone would produce') : ''}
+    ${reliabilityAvailable ? chip('sx-noise', 'Correct for noise', false, 'Lay out by noise-corrected similarity (Spearman: r / √(ρᵢρⱼ)); unreliable maps are set aside') : ''}
     ${opts.subset.size ? chip('sx-subset', '', true, 'Clear the selected group (Esc). Shift-drag to add, Shift+Alt-drag to remove', 'subset') : ''}`;
     toolbar.dataset.structure = structure;
     wireToolbar();
@@ -228,11 +233,12 @@ export function syncToolbar(): void {
   set('sx-region', opts.region !== null, regionLabel());
   set('sx-traj', opts.trajectories);
   set('sx-explain', opts.explain !== '');
+  if (!reliabilityAvailable) { opts.noiseCorrected = false; opts.explain = ''; if (opts.colour === 'rel') opts.colour = ''; }
   set('sx-noise', opts.noiseCorrected);
   set('sx-subset', true, `Group of ${opts.subset.size} ✕`);
   const sel = toolbar.querySelector('#sx-colour') as HTMLSelectElement;
   const brushed = opts.colour.startsWith('parcel:') ? `<option value="${opts.colour}">Mark: parcel ${opts.colour.slice(7)}</option>` : '';
-  const optionsHtml = `<option value="">Mark: none</option><option value="cursor">Mark: value at cursor</option><option value="rel">Mark: reliability</option>${covOpts}${brushed}`;
+  const optionsHtml = `<option value="">Mark: none</option><option value="cursor">Mark: value at cursor</option>${reliabilityAvailable ? '<option value="rel">Mark: reliability</option>' : ''}${covOpts}${brushed}`;
   if (sel && sel.dataset.options !== optionsHtml) {
     sel.innerHTML = optionsHtml;
     sel.dataset.options = optionsHtml;
@@ -739,7 +745,7 @@ function ensureAtlas(): void {
 function channelLegendHtml(a: M.Analysis): string {
   if (!opts.colour) return '';
   if (opts.colour === 'rel' || opts.colour.startsWith('parcel:')) {
-    const sw = (c: string, label: string): string => `<span><i style="background:${c}"></i>${label}</span>`;
+    const sw = (c: string, label: string): string => `<span><i style="background:${c}"></i>${escapeHtml(label)}</span>`;
     if (opts.colour === 'rel')
       return `<section><h3>Marks</h3><p class="note">Reliability ρ: the share of each map's spatial variance that is not noise (${M.state.stat === 't' ? 't-maps: noise variance ≈ 1 per voxel' : 'β-maps: noise variance = SE²'}). Maps with low ρ correlate weakly with everyone and drift to the edge of a layout for that reason alone.</p><div class="chan-legend">${[0, 0.25, 0.5, 0.75, 1].map((t) => sw(SEQUENTIAL(t).hex(), M.fmtR(t))).join('')}</div></section>`;
     const pz = brushedValues(a);
@@ -747,7 +753,7 @@ function channelLegendHtml(a: M.Analysis): string {
     if (!pz) return '';
     const { range, lo, sign } = pz;
     const digits = range >= 10 ? 0 : range >= 1 ? 1 : 2;
-    const what = `Each map's mean z in <b>${atlasNow?.label(id) ?? `parcel ${id}`}</b> (z: the map standardised over the compared voxels).`;
+    const what = `Each map's mean z in <b>${escapeHtml(atlasNow?.label(id) ?? `parcel ${id}`)}</b> (z: the map standardised over the compared voxels).`;
     const length = `Bar length: |mean z| from 0 (no bar) to the largest, ${fmt(range, digits)}.`;
     if (sign !== 'mixed') {
       // One sign: the colour spans that side's whole ramp, from the smallest to the largest |mean z| observed.
@@ -758,7 +764,7 @@ function channelLegendHtml(a: M.Analysis): string {
     return `<section><h3>Marks</h3><p class="note">${what} Violet above 0, cyan below; colour lightens with |mean z| up to the largest observed, the same on both sides. ${length} Positions do not change.</p><div class="chan-legend">${[-range, -range / 2, range / 2, range].map((v) => sw(brushColour(v, pz), fmt(v, digits))).join('')}</div></section>`;
   }
   const st = M.STAT_LABEL[M.state.stat];
-  const sw = (c: string, label: string): string => (c === 'missing' ? `<span><i class="miss"></i>${label}</span>` : `<span><i style="background:${c}"></i>${label}</span>`);
+  const sw = (c: string, label: string): string => (c === 'missing' ? `<span><i class="miss"></i>${escapeHtml(label)}</span>` : `<span><i style="background:${c}"></i>${escapeHtml(label)}</span>`);
   let title: string;
   let items: string[];
   if (opts.colour === 'cursor') {
@@ -770,7 +776,7 @@ function channelLegendHtml(a: M.Analysis): string {
   } else {
     const field = opts.colour.slice(4);
     const f = covariates?.fields.find((q) => q.name === field);
-    title = `${field} from participants.tsv`;
+    title = `${escapeHtml(field)} from participants.tsv`;
     if (f?.kind === 'numeric') {
       const [lo, hi] = numericRange(field, a.ids);
       items = [0, 0.25, 0.5, 0.75, 1].map((t, i) => sw(SEQUENTIAL(t).hex(), i === 0 ? fmt(lo, 1) : i === 4 ? fmt(hi, 1) : ''));
@@ -811,6 +817,14 @@ function stopStability(): void {
   stabWorker?.terminate();
   stabWorker = null;
   stabWorkerKey = null;
+}
+
+/** Dispose background stability work when an embedded frame is released. */
+export function disposeSpaceExtras(): void {
+  stopStability();
+  stab = null;
+  toolbar?.remove();
+  toolbar = null;
 }
 
 /** Start (or reuse) the block bootstrap for the visible layout. */
@@ -1815,7 +1829,7 @@ function fold(key: string, body: string): string {
 
 /** Parcel cell: one-line abbreviation, cut with an ellipsis when the column is narrow; full name in the tooltip. */
 const parcelCell = (p: { id: number; name: string; short: string }, extra = ''): string =>
-  `<td style="overflow:hidden"><button data-parcel="${p.id}" title="${p.name}${extra}. Click to mark maps by this parcel and go to it." style="display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left">${p.short}</button></td>`;
+  `<td style="overflow:hidden"><button data-parcel="${p.id}" title="${escapeHtml(p.name)}${escapeHtml(extra)}. Click to mark maps by this parcel and go to it." style="display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left">${escapeHtml(p.short)}</button></td>`;
 
 /**
  * A table that always fits the side column: fixed layout at 100% width, the numeric columns at fixed
@@ -1980,9 +1994,10 @@ function reliabilitySection(a: M.Analysis): string {
 function covariateSection(): string {
   if (!opts.colour.startsWith('cov:') || !lastFit) return '';
   const f = lastFit;
-  return `<section><h3>Fit to layout <span class="sub">${f.field}</span></h3><p class="note">${
-    f.kind === 'numeric' ? `Linear gradient of ${f.field} across the layout: R² ${M.fmtR(f.r2)}` : `${f.field} groups' centroids: R² ${M.fmtR(f.r2)} (between-centroid share of layout variance)`
-  }, permutation p ${f.p < 0.001 ? '< .001' : M.fmtR(f.p)} (999 shuffles, n = ${f.n}). Valid as a test because ${f.field} did not build the layout; it says the layout lines up with ${f.field}, not why.</p></section>`;
+  const field = escapeHtml(f.field);
+  return `<section><h3>Fit to layout <span class="sub">${field}</span></h3><p class="note">${
+    f.kind === 'numeric' ? `Linear gradient of ${field} across the layout: R² ${M.fmtR(f.r2)}` : `${field} groups' centroids: R² ${M.fmtR(f.r2)} (between-centroid share of layout variance)`
+  }, permutation p ${f.p < 0.001 ? '< .001' : M.fmtR(f.p)} (999 shuffles, n = ${f.n}). Valid as a test because ${field} did not build the layout; it says the layout lines up with ${field}, not why.</p></section>`;
 }
 
 export function panelHtml(a: M.Analysis): string {
@@ -2116,7 +2131,8 @@ export function trajectoryMode(): boolean {
 }
 
 function sideContrasts(): string[] {
-  return [...new Set([M.state.contrast, ...M.state.facets])].slice(0, 4);
+  const compatible = new Set(M.compatibleContrasts());
+  return [...new Set([M.state.contrast, ...M.state.facets])].filter(contrast => compatible.has(contrast)).slice(0, 4);
 }
 
 /** One basis over every subject x contrast map on the voxels all sets share (for the r table only). */

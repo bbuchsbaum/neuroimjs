@@ -339,6 +339,12 @@ export abstract class DenseNeuroVol implements NeuroVol {
           throw new Error(`Unknown interpolation method: ${interpolation}`);
         }
 
+        // Typed-array assignment truncates fractional values for integer
+        // storage. Interpolated integer slices instead use nearest-integer
+        // rounding, while floating-point slices retain the interpolation value.
+        if (interpolation === 'trilinear' && this.hasIntegerStorage()) {
+          value = Math.round(value);
+        }
         sliceData[j * nx + i] = value;
       }
     }
@@ -357,6 +363,12 @@ export abstract class DenseNeuroVol implements NeuroVol {
       assertTypedArray(sliceData)
     );
     return slice;
+  }
+
+  private hasIntegerStorage(): boolean {
+    return this.data instanceof Uint8Array || this.data instanceof Int8Array ||
+      this.data instanceof Uint16Array || this.data instanceof Int16Array ||
+      this.data instanceof Int32Array;
   }
 
   public abstract getSliceTypedArrayType(): SliceTypedArrayType

@@ -8,6 +8,7 @@ test('parallel searchlights match the sequential oracle in a real worker', async
     (window as typeof window & {
       searchlightWorkerResult?: {
         count?: number;
+        edgeCount?: number;
         progress?: number[];
         workerSupported?: boolean;
         error?: string;
@@ -18,5 +19,6 @@ test('parallel searchlights match the sequential oracle in a real worker', async
   expect(result?.error).toBeUndefined();
   expect(result?.workerSupported).toBe(true);
   expect(result?.count).toBe(20);
+  expect(result?.edgeCount).toBe(2);
   expect(result?.progress?.at(-1)).toBe(1);
 });

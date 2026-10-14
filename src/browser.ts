@@ -193,3 +193,4 @@ export type {
   LoggerOptions,
   LogLevelName,
 } from './display/logging/Logger';
+export * from './space/index';

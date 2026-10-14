@@ -1,6 +1,6 @@
 # Stability & Roadmap
 
-neuroimjs is at **`0.5.0`** — pre-1.0, so minor releases may still change APIs, and the library is actively hardening toward 1.0. This page is the single source of truth for what you can build on. The statuses below were **verified against the source and a green unit suite as of 0.5.0**, not just an audit snapshot. Several known issues are still open; they are flagged in the tables and listed in the [roadmap](#roadmap).
+neuroimjs is pre-1.0, so minor releases may change APIs. See the [release notes](https://github.com/bbuchsbaum/neuroimjs/releases) for version-specific changes and upgrade instructions. The tables below describe the supported surfaces and known limitations; the Space embedding API is supported within its documented data and geometry contract.
 
 Legend:
 
@@ -27,6 +27,7 @@ These were correctness bugs in earlier drafts of the library and are **now fixed
 
 | Feature | Status | Notes |
 |---|---|---|
+| `mountSpace` | <span class="stability-badge stable">supported</span> | [Embed subject-map comparison](/guide/volume-set-space) through `neuroimjs/space`. Requires same-origin frame assets and aligned axis-aligned RAS+ grids; analysis internals remain private. |
 | `SimpleOrthogonalViewer` | <span class="stability-badge stable">stable</span> | Headline 3-view viewer. |
 | `SingleSliceViewer` + `ViewSynchronizer` | <span class="stability-badge stable">stable</span> | Composable views for custom layouts. |
 | `ColorMap` / `ColorMapFactory` | <span class="stability-badge stable">stable</span> | Presets + custom gradients; non-finite → transparent. |
@@ -52,7 +53,7 @@ These were correctness bugs in earlier drafts of the library and are **now fixed
 
 | Feature | Status | Notes |
 |---|---|---|
-| `readVol` / `readVolList` | <span class="stability-badge stable">stable</span> | NIfTI-1 and NIfTI-2, `.nii` and `.nii.gz`. Applies intensity scaling, byte-swaps big-endian data, and takes `space.spacing` from the affine. `readVolList` takes a list of paths. Checked against nibabel-generated fixtures (`npm run test:conformance`). Known discrepancies: unscaled `UINT32` files throw `UNSUPPORTED_DATATYPE` (`readNiftiArrayBuffer` promotes them to `Float64NeuroVol`); the qform wins when `qform_code > sform_code > 0` (nibabel prefers the sform); files with no transform get `diag(pixdim)`, not nibabel's base affine; NIfTI-2 qform-only files throw. See the [conformance notes](https://github.com/bbuchsbaum/neuroimjs/blob/main/tests/conformance/README.md). |
+| `readVol` / `readVolList` | <span class="stability-badge stable">stable</span> | NIfTI-1 and NIfTI-2, `.nii` and `.nii.gz`. Applies intensity scaling, byte-swaps big-endian data, and takes `space.spacing` from the affine. `readVolList` takes a list of paths. Checked against nibabel-generated fixtures (`npm run test:conformance`). Unscaled `UINT32` files are promoted losslessly to `Float64NeuroVol` by both decoders. Known discrepancies: the qform wins when `qform_code > sform_code > 0` (nibabel prefers the sform); files with no transform get `diag(pixdim)`, not nibabel's base affine; NIfTI-2 qform-only files throw. See the [conformance notes](https://github.com/bbuchsbaum/neuroimjs/blob/main/tests/conformance/README.md). |
 | `readHeader` | <span class="stability-badge stable">stable</span> | Raw header fields; `spacing` is the raw `pixdim[1..3]`. |
 | `writeVol` (3D) | <span class="stability-badge stable">stable</span> | NIfTI-1 single file; round-trips covered by tests. Compression follows the extension (`.nii.gz` is gzipped, `.nii` is not); a `compress` or `format` option that contradicts it throws `INVALID_ARGUMENT`. |
 | `writeVec` (4D) | <span class="stability-badge experimental">experimental</span> | NIfTI-1 single file. Layout from the class: `BigNeuroVec` time-first, `DenseNeuroVec`/`SparseNeuroVec` time-last; other `NeuroVec`s are rejected. Full affine as qform and sform (sform only when sheared); `pixdim[4]` from the time spacing, which `readVec` reads back. Round-trips with both decoders are tested; `npm run conformance:writers` checks the output with nibabel. See [I/O](/guide/io). |

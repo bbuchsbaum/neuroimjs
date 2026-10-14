@@ -150,7 +150,7 @@ viewer.onCoordChange((coord) => {
 - **Off-by-half in slice space.** Voxel centres sit at `n + 0.5` in image coordinates; voxel *indices* are integers.
 - **Forgetting bounds checks.** Use the `*Safe` transform variants when accepting user input; they return `null` (or clamp, with `{ clamp: true }`).
 - **Floating-point equality.** Compare coordinates with an epsilon.
-- **`setLPICoord`.** On `SimpleOrthogonalViewer` it equals `setWorldCoord` for LPI-stored volumes, but for other storage orders it maps through voxel indices, not anatomy. Use `setWorldCoord`.
+- **`setLPICoord` / `getLPICoord` are deprecated.** On `SimpleOrthogonalViewer` these legacy methods match world coordinates for axis-aligned LPI storage, but otherwise map through voxel indices, not anatomy. Each emits one deprecation warning per loaded library instance. Use `setWorldCoord` / `getWorldCoord` with RAS+ millimetres; their coordinates already include the volume's affine.
 
 ## References
 

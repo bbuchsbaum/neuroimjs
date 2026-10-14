@@ -12,8 +12,12 @@ import { SMOOTH_PRESETS, smoothingEffect, type SmoothPreset, type SmoothingEffec
 import { similarityBasis, type SimilarityBasis } from '../../src/volumeset/basis';
 import { type NmdsOptions } from '../../src/volumeset/nmds';
 import { SmoothPool } from './smooth-pool';
+import { emitEmbeddedState, emitEmbeddedStatus } from './embedded-bridge';
+import { embeddedInitialState, isEmbedded } from './embedded-data';
+import type { SpaceState, SpaceStatePatch, SpaceStatus } from '../../src/space/types';
 import { zoomAbout, panBy, type Viewport, type SpaceTransform } from './space';
 import * as SV from './space-view';
+import * as SX from './space-extras';
 import * as P from './peek';
 import {
   fetchManifest,
@@ -133,7 +137,7 @@ function readState(): State {
   const num = (k: string, v: number): number => (q.has(k) && Number.isFinite(Number(q.get(k))) ? Number(q.get(k)) : v);
   const cursor = q.get('cursor');
   const z = q.get('zoom')?.split(',').map(Number);
-  const mode = pick<Mode>(q.get('mode'), MODES, 'montage');
+  const mode = pick<Mode>(q.get('mode'), MODES, q.get('embedded') === '1' ? 'space' : 'montage');
   const back = pick<Mode>(q.get('back'), ['montage', 'facet', 'space'], 'montage');
   const sv = q.get('sv')?.split(',').map(Number);
   // Only one layout method exists in v1; any other value is ignored (and rewritten) with a warning.
@@ -205,8 +209,34 @@ if (state.thr >= state.range) {
   urlNotes.push(`threshold ${was} ≥ max ${state.range} → ${state.thr}`);
 }
 const wantPeak = !state.cursor;
+const embeddedMode = isEmbedded();
+let applyingEmbeddedState = false;
+
+function memberId(): string | null {
+  if (!state.subject) return null;
+  return manifest.find((m) => m.model === state.model && m.contrast === state.contrast && m.subject === state.subject)?.id ?? null;
+}
+
+export function embeddedState(): SpaceState {
+  return {
+    version: 1,
+    mode: state.mode,
+    model: state.model,
+    contrast: state.contrast,
+    statistic: state.stat === 'beta' ? 'beta' : 't',
+    selectedMemberId: memberId(),
+    worldCoord: state.cursor ? [...template.t1.space.gridToCoord(state.cursor)] as [number, number, number] : null,
+    orientation: state.orient,
+    threshold: state.thr,
+    range: state.range,
+  };
+}
 
 function writeState(): void {
+  if (embeddedMode) {
+    emitEmbeddedState(embeddedState(), applyingEmbeddedState ? 'api' : 'user');
+    return;
+  }
   const q = new URLSearchParams();
   q.set('mode', state.mode);
   if (state.mode === 'ortho' && state.prevMode !== 'montage') q.set('back', state.prevMode);
@@ -358,6 +388,7 @@ export function getAnalysis(model: string, contrast: string, stat: StatName): Pr
       .sort((a, b) => a.subject.localeCompare(b.subject));
     if (members.length === 0) return Promise.reject(new Error(`no maps for ${model} / ${contrast}`));
     p = loadSet(members, stat, template.mask, (d, t) => setStatus(`Loading ${contrast} ${d}/${t}`)).then((set) => {
+      if (set.maskIndex.length === 0) throw new Error('Selected analysis has no finite, nonzero voxels inside the mask.');
       // Background loads (e.g. other contrasts' panels) finish outside render(), which is what normally clears this.
       if (statusEl.textContent?.startsWith(`Loading ${contrast} `)) setStatus('');
       return analyse(key, contrast, set);
@@ -495,7 +526,11 @@ const statusEl = $<HTMLDivElement>('#status');
 const readoutEl = $<HTMLDivElement>('#readout');
 
 let statusTimer: number | undefined;
+let publicStatus: SpaceStatus = 'loading';
+export function embeddedStatus(): SpaceStatus { return publicStatus; }
 export function setStatus(text: string, clearAfterMs = 0): void {
+  publicStatus = text.startsWith('Error:') ? 'error' : /^Fitting\b/.test(text) ? 'fitting' : text ? 'loading' : 'ready';
+  if (embeddedMode) emitEmbeddedStatus(publicStatus, text || undefined);
   // Progress messages finishing (a render, a layout fit) must not wipe a URL correction before it can be read.
   if (text === '' && performance.now() < urlNoteUntil) {
     statusEl.textContent = urlNoteText;
@@ -525,17 +560,24 @@ function setupControls(): void {
     if (!contrasts.includes(state.contrast)) state.contrast = contrasts[0];
     fill($('#contrast'), contrasts, state.contrast);
   };
+  const fillStatistics = (): void => {
+    const members = manifest.filter((m) => m.model === state.model && m.contrast === state.contrast);
+    const statistics = (['t', 'beta'] as StatName[]).filter((stat) => !embeddedMode || (members.length > 0 && members.every((m) => !!m[stat])));
+    if (!statistics.length) throw new Error(`No supported statistic is supplied for ${state.model} / ${state.contrast}.`);
+    if (!statistics.includes(state.stat)) state.stat = statistics[0];
+    fill($('#stat'), statistics, state.stat, (s) => STAT_LABEL[s]);
+  };
   if (!models.includes(state.model)) {
     console.warn(`volume-set: unknown model "${state.model}", using ${models[0]}`);
     state.model = models[0];
   }
   fill($('#model'), models, state.model);
   fillContrasts();
-  const known = new Set(manifest.filter((m) => m.model === state.model).map((m) => m.contrast));
+  const known = new Set(compatibleContrasts());
   const facets = state.facets.filter((c) => known.has(c));
   state.facets = facets.length ? facets : [...known].slice(0, 3);
   fill($('#sort'), Object.keys(SORT_LABEL), state.sort, (s) => SORT_LABEL[s as SortKey]);
-  fill($('#stat'), ['t', 'beta'], state.stat, (s) => STAT_LABEL[s]);
+  fillStatistics();
   fill($('#smooth'), Object.keys(SMOOTH_LABEL), state.smooth, (s) => SMOOTH_LABEL[s as Smooth]);
   fill($('#minc'), MINC_OPTIONS.map(String), String(state.minc), (s) => (s === '0' ? 'All' : `≥ ${s} voxels`));
   ($('#minc') as HTMLSelectElement).onchange = (e) => {
@@ -598,14 +640,16 @@ function setupControls(): void {
   ($('#model') as HTMLSelectElement).onchange = (e) => {
     state.model = (e.target as HTMLSelectElement).value;
     fillContrasts();
+    fillStatistics();
     // Facet rows must exist in the new model: keep those that do, else show all of its contrasts.
-    const avail = [...new Set(manifest.filter((m) => m.model === state.model).map((m) => m.contrast))];
+    const avail = compatibleContrasts();
     state.facets = state.facets.filter((c) => avail.includes(c));
     if (!state.facets.length) state.facets = avail;
     void render();
   };
   ($('#contrast') as HTMLSelectElement).onchange = (e) => {
     state.contrast = (e.target as HTMLSelectElement).value;
+    fillStatistics();
     void render();
   };
   ($('#stat') as HTMLSelectElement).onchange = (e) => {
@@ -627,6 +671,41 @@ function setupControls(): void {
       void render();
     };
   }
+}
+
+/** Refresh source selectors after an embedded API changes model/contrast without reattaching UI handlers. */
+function refreshAnalysisControls(): void {
+  const models = [...new Set(manifest.map((m) => m.model))];
+  const put = (id: string, items: string[], value: string, label = (x: string): string => x): void => {
+    const sel = $<HTMLSelectElement>(`#${id}`);
+    sel.replaceChildren(...items.map((item) => {
+      const option = document.createElement('option');
+      option.value = item;
+      option.textContent = label(item);
+      return option;
+    }));
+    sel.value = value;
+  };
+  put('model', models, state.model);
+  const contrasts = [...new Set(manifest.filter((m) => m.model === state.model).map((m) => m.contrast))];
+  put('contrast', contrasts, state.contrast);
+  const members = manifest.filter((m) => m.model === state.model && m.contrast === state.contrast);
+  const stats = (['t', 'beta'] as StatName[]).filter((stat) => !embeddedMode || members.every((m) => !!m[stat]));
+  put('stat', stats, state.stat, (stat) => STAT_LABEL[stat]);
+  const known = new Set(contrasts);
+  state.facets = state.facets.filter((contrast) => known.has(contrast));
+  if (!state.facets.length) state.facets = contrasts.slice(0, 3);
+}
+
+/** Whether the active analysis supplies the β and SE frames required for noise correction. */
+export function hasBetaSe(): boolean {
+  return !embeddedMode || manifest.filter((m) => m.model === state.model && m.contrast === state.contrast).every((m) => !!m.beta && !!m.se);
+}
+
+export function compatibleContrasts(model = state.model, stat = state.stat): string[] {
+  const byContrast = new Map<string, VsMember[]>();
+  for (const member of manifest) if (member.model === model) byContrast.set(member.contrast, [...(byContrast.get(member.contrast) ?? []), member]);
+  return [...byContrast].filter(([, members]) => !embeddedMode || members.every((member) => !!member[stat])).map(([contrast]) => contrast);
 }
 
 /** For β, pick a symmetric range from the 99th percentile of |β| across the set. */
@@ -879,6 +958,12 @@ function ensureCanvas(): HTMLCanvasElement {
     },
     { passive: false }
   );
+  // Space owns touch panning. Cancel native handling after a recognized pan:
+  // Chromium can otherwise consume the next sidebar tap even with
+  // touch-action:none. Small movements remain taps.
+  c.addEventListener('touchmove', (e) => {
+    if (state.mode === 'space' && drag?.moved && e.cancelable) e.preventDefault();
+  }, { passive: false });
   c.addEventListener('pointerdown', (e) => {
     if (state.mode === 'space' && SV.onPointer('pointerdown', e)) return;
     const h = hitAt(e);
@@ -1320,7 +1405,8 @@ function toggleFocus(subject?: string): void {
 
 async function drawFacet(light = false): Promise<void> {
   facetHeads = [];
-  const rowsC = state.facets.includes(state.contrast) ? state.facets : [state.contrast, ...state.facets];
+  const compatible = new Set(compatibleContrasts());
+  const rowsC = [...new Set([state.contrast, ...state.facets])].filter((contrast) => compatible.has(contrast));
   const list = await Promise.all(rowsC.map((c) => getAnalysis(state.model, c, state.stat)));
   const base = list[rowsC.indexOf(state.contrast)];
   const order = orderOf(base);
@@ -1457,7 +1543,8 @@ function updateReadout(): void {
     state.smooth === 'off'
       ? `${st} = <b>${fmt(raw)}</b>${hiddenNote}`
       : `shown ${st} <b>${fmt(pre)}</b> <span class="muted">(smoothed)</span>${hiddenNote} · raw <b>${fmt(raw)}</b>`;
-  const parcel = atlas ? ` · <span class="muted" title="${atlas.name}: network · region · parcel. Atlas names, not functional labels.">${atlasLabel(ijk)}</span>` : '';
+  const escapeHtml = (value: string): string => value.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+  const parcel = atlas ? ` · <span class="muted" title="${escapeHtml(atlas.name)}: network · region · parcel. Atlas names, not functional labels.">${escapeHtml(atlasLabel(ijk))}</span>` : '';
   text.innerHTML = `<b>${name}</b> <span class="muted">${a.contrast}</span> · <span class="mono">${w.map((x) => fmt(x, 1)).join(', ')} mm</span> · <span class="mono">${shown}</span>${parcel}`;
 }
 
@@ -1549,6 +1636,7 @@ async function renderOrtho(): Promise<void> {
     }
     ortho.viewer.updateLayerVolume('subject', volFor(cur), layerOpts);
   }
+  if (state.cursor) ortho.viewer.setWorldCoord(a.set.space.gridToCoord(state.cursor));
   updateOrthoHead(a, order, cur);
   drawSide(a, order);
   drawRail(a, order);
@@ -1885,7 +1973,9 @@ function atlasLabel(ijk: readonly number[]): string {
   if (!atlas) return '';
   const [nx, ny] = template.t1.space.dim as number[];
   const id = Math.round(atlas.labels[ijk[0] + ijk[1] * nx + ijk[2] * nx * ny] ?? 0);
-  return id > 0 ? prettyParcel(atlas.names.get(id) ?? `parcel ${id}`) : 'outside Schaefer cortex';
+  if (id <= 0) return embeddedMode ? 'outside atlas regions' : 'outside Schaefer cortex';
+  const name = atlas.names.get(id) ?? `parcel ${id}`;
+  return embeddedMode ? name : prettyParcel(name);
 }
 
 export function truncate(ctx: CanvasRenderingContext2D, text: string, max: number): string {
@@ -2121,6 +2211,7 @@ railCanvas.addEventListener('click', (e) => {
 // ---------------------------------------------------------------------------
 
 let rendering = Promise.resolve();
+let renderFailure: Error | null = null;
 export function render(): Promise<void> {
   rendering = rendering
     .then(async () => {
@@ -2138,7 +2229,7 @@ export function render(): Promise<void> {
       if (state.mode === 'ortho') {
         await renderOrtho();
       } else {
-        const contrasts = state.mode === 'facet' ? [...new Set([state.contrast, ...state.facets])] : [state.contrast];
+        const contrasts = state.mode === 'facet' ? [...new Set([state.contrast, ...state.facets])].filter((contrast) => compatibleContrasts().includes(contrast)) : [state.contrast];
         const list = await Promise.all(contrasts.map((c) => getAnalysis(state.model, c, state.stat)));
         await ensureSmoothed(list);
         if (state.slice === null) state.slice = state.cursor ? state.cursor[AXIS[state.orient]] : Math.floor(list[0].set.sliceCount(state.orient) / 2);
@@ -2150,18 +2241,120 @@ export function render(): Promise<void> {
       updateReadout();
       P.syncPeek();
       writeState();
-      setStatus('');
+      if (state.mode === 'space' && SV.spaceGeom?.layout.kind === 'error') setStatus(`Error: ${SV.spaceGeom.layout.message}`);
+      else if (!(state.mode === 'space' && SV.isSpaceFitting())) setStatus('');
     })
     .catch((err) => {
+      renderFailure = err instanceof Error ? err : new Error(String(err));
       console.error(err);
       setStatus(`Error: ${err instanceof Error ? err.message : String(err)}`);
     });
   return rendering;
 }
 
+/** Apply the supported iframe state after the integrated UI has finished drawing it. */
+export async function applyEmbeddedState(patch: SpaceStatePatch, source: 'api' | 'user' = 'api'): Promise<void> {
+  if (!embeddedMode) throw new Error('Embedded state is only available in embedded mode.');
+  if (source !== 'api' && source !== 'user') throw new Error('source must be api or user.');
+  applyingEmbeddedState = source === 'api';
+  const previous: State = { ...state, facets: [...state.facets], cursor: state.cursor ? [...state.cursor] as [number, number, number] : null, zoom: state.zoom ? { ...state.zoom } : null, space: state.space ? { ...state.space } : null };
+  try {
+    if (!patch || typeof patch !== 'object') throw new Error('state patch must be an object.');
+    const next: State = { ...previous, facets: [...previous.facets], cursor: previous.cursor ? [...previous.cursor] as [number, number, number] : null, zoom: previous.zoom ? { ...previous.zoom } : null, space: previous.space ? { ...previous.space } : null };
+    if (patch.mode !== undefined) {
+      if (!MODES.includes(patch.mode as Mode)) throw new Error('mode is not supported.');
+      next.mode = patch.mode;
+      if (patch.mode === 'ortho' && previous.mode !== 'ortho') next.prevMode = previous.mode;
+    }
+    if (patch.model !== undefined) { if (typeof patch.model !== 'string') throw new Error('model must be a string.'); next.model = patch.model; }
+    if (patch.contrast !== undefined) { if (typeof patch.contrast !== 'string') throw new Error('contrast must be a string.'); next.contrast = patch.contrast; }
+    if (patch.statistic !== undefined) { if (patch.statistic !== 't' && patch.statistic !== 'beta') throw new Error('statistic is not supported.'); next.stat = patch.statistic; }
+    if (patch.orientation !== undefined) { if (!['axial', 'coronal', 'sagittal'].includes(patch.orientation)) throw new Error('orientation is not supported.'); next.orient = patch.orientation; }
+    if (patch.threshold !== undefined) {
+      if (!Number.isFinite(patch.threshold) || patch.threshold < 0) throw new Error('threshold must be a non-negative finite number.');
+      next.thr = patch.threshold;
+    }
+    if (patch.range !== undefined) {
+      if (!Number.isFinite(patch.range) || patch.range <= 0) throw new Error('range must be a positive finite number.');
+      next.range = patch.range;
+    }
+    if (next.thr >= next.range) throw new Error('threshold must be smaller than range.');
+    const modelMembers = manifest.filter((m) => m.model === next.model);
+    if (!modelMembers.length) throw new Error('model is not supplied.');
+    if (patch.model !== undefined && patch.contrast === undefined && !modelMembers.some((m) => m.contrast === next.contrast)) next.contrast = modelMembers[0].contrast;
+    const available = manifest.filter((m) => m.model === next.model && m.contrast === next.contrast);
+    if (!available.length) throw new Error('model/contrast do not identify a supplied analysis.');
+    if (!available.every((m) => m[next.stat])) {
+      if (patch.statistic === undefined) {
+        const fallback = (['t', 'beta'] as StatName[]).find((stat) => available.every((m) => !!m[stat]));
+        if (fallback) next.stat = fallback;
+        else throw new Error('No statistic is supplied for the selected analysis.');
+      } else throw new Error(`${next.stat} data are unavailable for the selected analysis.`);
+    }
+    if (patch.selectedMemberId !== undefined) {
+      const member = patch.selectedMemberId === null ? null : available.find((m) => m.id === patch.selectedMemberId);
+      if (patch.selectedMemberId !== null && !member) throw new Error('selectedMemberId is not a member of the selected analysis.');
+      next.subject = member?.subject ?? null;
+    } else if (!available.some((m) => m.subject === next.subject)) {
+      next.subject = null;
+    }
+    if (patch.worldCoord !== undefined) {
+      if (patch.worldCoord === null) next.cursor = null;
+      else {
+        if (patch.worldCoord.length !== 3 || !patch.worldCoord.every(Number.isFinite)) throw new Error('worldCoord must contain three finite millimetre coordinates.');
+        const grid = template.t1.space.coordToGrid(patch.worldCoord).map(Math.round) as [number, number, number];
+        const dim = template.t1.space.dim as number[];
+        if (grid.some((v, i) => v < 0 || v >= dim[i])) throw new Error('worldCoord is outside the supplied grid.');
+        next.cursor = grid;
+      }
+    }
+    next.slice = next.cursor ? next.cursor[AXIS[next.orient]] : null;
+    Object.assign(state, next);
+    refreshAnalysisControls();
+    renderFailure = null;
+    await render();
+    if (renderFailure) {
+      Object.assign(state, previous);
+      refreshAnalysisControls();
+      await render();
+      throw renderFailure;
+    }
+  } finally { applyingEmbeddedState = false; }
+}
+
+export const embeddedReady = main();
+
+export function disposeVolumeSet(): void {
+  clearTimeout(statusTimer);
+  pool?.dispose();
+  pool = null;
+  if (ortho) { ortho.viewer.dispose(); ortho = null; orthoCtx = null; }
+  SV.disposeSpaceJobs();
+  SX.disposeSpaceExtras();
+}
+
 async function main(): Promise<void> {
   setStatus('Loading template…');
   [manifest, template, atlas] = await Promise.all([fetchManifest(), loadTemplate(), loadAtlas()]);
+  if (embeddedMode) {
+    // Resolve the requested source before loading any analysis: the first
+    // supplied source can be empty even when the requested source is usable.
+    const initial = embeddedInitialState();
+    const model = initial.model ?? manifest[0]?.model;
+    const modelMembers = manifest.filter(member => member.model === model);
+    if (!modelMembers.length) throw new Error('Initial model is not supplied.');
+    const contrast = initial.contrast ?? modelMembers[0].contrast;
+    const members = modelMembers.filter(member => member.contrast === contrast);
+    if (!members.length) throw new Error('Initial contrast is not supplied for the model.');
+    const statistics = (['t', 'beta'] as StatName[]).filter(stat => members.every(member => !!member[stat]));
+    const stat = initial.statistic ?? statistics[0];
+    if (!statistics.includes(stat)) throw new Error('Initial statistic is unavailable for the selected analysis.');
+    state.model = model;
+    state.contrast = contrast;
+    state.stat = stat;
+    state.thr = DEFAULTS[stat].thr;
+    state.range = DEFAULTS[stat].range;
+  }
   setupControls();
   if (state.stat !== 't' && !new URLSearchParams(location.search).has('range')) await autoRange();
   // A cursor outside the grid (e.g. a hand-edited URL) falls back to the peak.
@@ -2189,7 +2382,7 @@ async function main(): Promise<void> {
     state.cursor = [g % nx, Math.floor(g / nx) % ny, Math.floor(g / (nx * ny))];
   }
   // Canvas text needs the web fonts loaded before the first draw.
-  await Promise.all([
+  if (!embeddedMode) await Promise.all([
     document.fonts?.load(`600 12px ${FONT.sans}`),
     document.fonts?.load(`11px ${FONT.mono}`),
   ]).catch(() => undefined);
@@ -2278,7 +2471,7 @@ async function main(): Promise<void> {
     if (e.persisted) return; // kept in the back/forward cache: keep the controller usable
     SV.disposeSpaceJobs();
   });
-  await document.fonts?.ready;
+  if (!embeddedMode) await document.fonts?.ready;
   await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
   SV.exposeSpaceProbe();
   urlNotes.push(...SV.takeSpaceUrlNotes());
@@ -2298,7 +2491,7 @@ function showStageError(err: unknown): void {
   view.innerHTML = `<div class="stage-msg" role="alert"><h2>Nothing to show yet</h2><p>${msg.replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' })[c]!)}</p><p class="muted">See examples/volume-set/README.md for the expected folder layout.</p></div>`;
 }
 
-main().catch((err) => {
+embeddedReady.catch((err) => {
   console.error(err);
   showStageError(err);
 });

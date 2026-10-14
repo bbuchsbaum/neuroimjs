@@ -1,6 +1,6 @@
 {
   "name": "neuroimjs",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "A neuroimaging library for JavaScript — volumetric data, NIfTI I/O, spatial transforms, and WebGL orthogonal viewers",
   "main": "./dist/cjs/index.js",
   "module": "./dist/esm/index.js",
@@ -26,6 +26,12 @@
       "import": "./dist/esm/entries/geometry.js",
       "require": "./dist/cjs/entries/geometry.js"
     },
+    "./space": {
+      "types": "./dist/types/entries/space.d.ts",
+      "import": "./dist/esm/entries/space.js",
+      "require": "./dist/cjs/entries/space.js"
+    },
+    "./space/frame/*": "./dist/space/frame/*",
     "./browser": {
       "types": "./dist/types/browser.d.ts",
       "import": "./dist/neuroimjs.es.js",
@@ -42,6 +48,9 @@
       ],
       "geometry": [
         "dist/types/entries/geometry.d.ts"
+      ],
+      "space": [
+        "dist/types/entries/space.d.ts"
       ],
       "browser": [
         "dist/types/browser.d.ts"
@@ -62,7 +71,8 @@
     "dev": "vite",
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "build": "npm run clean && npm run build:cjs && npm run build:esm && npm run build:types",
-    "build:vite": "node scripts/clean-browser-build.mjs && vite build",
+    "build:vite": "node scripts/clean-browser-build.mjs && vite build && npm run build:space",
+    "build:space": "node scripts/build-space-app.mjs",
     "build:cjs": "tsc -p tsconfig.cjs.build.json && node scripts/write-cjs-package.mjs",
     "build:esm": "tsc -p tsconfig.esm.build.json && node scripts/fix-esm-imports.js",
     "build:types": "tsc -p tsconfig.types.build.json && node scripts/fix-esm-imports.js",
@@ -82,7 +92,8 @@
     "format": "prettier --write src tests",
     "docs:api": "typedoc",
     "docs:dev": "npm run docs:api && vitepress dev docs",
-    "docs:build": "npm run docs:api && vitepress build docs",
+    "docs:build": "npm run docs:api && vitepress build docs && npm run build:space-demo",
+    "build:space-demo": "node scripts/build-space-demo.mjs",
     "docs:preview": "vitepress preview docs",
     "prepublishOnly": "npm run verify:release",
     "demo:ortho": "tsx examples/orthogonal_slice_demo.ts",

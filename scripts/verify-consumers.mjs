@@ -30,6 +30,7 @@ const requiredBuildOutputs = [
   'dist/types/browser.d.ts',
   'dist/neuroimjs.es.js',
   'dist/neuroimjs.umd.js',
+  'dist/space/frame/index.html',
 ];
 const missingOutputs = requiredBuildOutputs.filter(path => !existsSync(join(repositoryRoot, path)));
 if (missingOutputs.length > 0) {
@@ -118,7 +119,7 @@ try {
       skipLibCheck: true,
       noEmit: true,
     },
-    files: ['pages/vscode.ts', 'pages/neuromosaic-options.ts'],
+    files: ['pages/vscode.ts', 'pages/neuromosaic-options.ts', 'pages/space.ts'],
   }, null, 2));
   try {
     run('node', [join(repositoryRoot, 'node_modules', 'typescript', 'bin', 'tsc'), '--project', 'tsconfig.json'], consumerRoot);
@@ -133,6 +134,7 @@ try {
   const publicDir = join(pagesRoot, 'public');
   mkdirSync(publicDir, { recursive: true });
   copyFileSync(join(installed, 'dist', 'neuroimjs.umd.js'), join(publicDir, 'neuroimjs.umd.js'));
+  cpSync(join(installed, 'dist', 'space', 'frame'), join(publicDir, 'space-assets'), { recursive: true });
 
   const { build } = await import('vite');
   const siteRoot = join(consumerRoot, 'site');
@@ -158,6 +160,7 @@ try {
           neuromosaic: join(pagesRoot, 'neuromosaic.html'),
           froiatlas: join(pagesRoot, 'froiatlas.html'),
           vscode: join(pagesRoot, 'vscode.html'),
+          space: join(pagesRoot, 'space.html'),
         },
       },
     },

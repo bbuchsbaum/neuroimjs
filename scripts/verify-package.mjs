@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createPackedConsumer, repositoryRoot } from './lib/packed-consumer.mjs';
 
@@ -126,6 +126,22 @@ void readVol;
   if (packedPackage.exports['./browser'].types !== './dist/types/browser.d.ts') {
     throw new Error('Browser export does not point to browser-specific declarations');
   }
+
+  const frameRoot = join(consumerRoot, 'node_modules', 'neuroimjs', 'dist', 'space', 'frame');
+  const frameHtml = readFileSync(join(frameRoot, 'index.html'), 'utf8');
+  for (const match of frameHtml.matchAll(/(?:src|href)="(\.\/assets\/[^"?#]+)"/g)) {
+    if (!existsSync(join(frameRoot, match[1]))) throw new Error(`Missing Space asset: ${match[1]}`);
+  }
+  const frameFiles = readdirSync(frameRoot, { recursive: true });
+  if (!frameFiles.some(file => /embed\.worker.*\.js$/.test(String(file)))) {
+    throw new Error('Packed Space frame is missing its layout worker');
+  }
+  if (frameFiles.some(file => /(?:^|\/)vs\/|\.nii(?:\.gz)?$/.test(String(file)))) {
+    throw new Error('Space frame must not ship synthetic or restricted neuroimaging data');
+  }
+  run('node', ['--input-type=module', '-e',
+    "import {mountSpace} from 'neuroimjs/space'; import {existsSync} from 'node:fs'; if(typeof mountSpace!=='function'||!existsSync(new URL(import.meta.resolve('neuroimjs/space/frame/index.html'))))process.exit(1); if(typeof document!=='undefined')process.exit(1);"
+  ], consumerRoot);
 
   console.log(`Package smoke test passed: ${tarballName}`);
 } catch (error) {

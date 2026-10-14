@@ -5,6 +5,7 @@ import {
   splitFill,
   splitReduce,
   splitScale,
+  scaleSeries,
   partition,
   mapValues,
   centroids,
@@ -17,6 +18,7 @@ import { SparseNeuroVol } from '../src/sparse/SparseNeuroVol';
 import { SparseNeuroVec } from '../src/vec/SparseNeuroVec';
 import { ClusteredNeuroVol } from '../src/volume/ClusteredNeuroVol';
 import { LogicalNeuroVol } from '../src/volume/LogicalNeuroVol';
+import { BigNeuroVec } from '../src/vector/BigNeuroVec';
 
 describe('Statistical Operations', () => {
   let space3d: NeuroSpace;
@@ -753,5 +755,83 @@ describe('Statistical Operations', () => {
       // sample std over {2,4,6} = 2
       expect(StatFunctions.std(values)).toBeCloseTo(2, 6);
     });
+  });
+});
+
+describe('layout-aware vector helpers', () => {
+  const volumeSpace = new NeuroSpace(
+    [2, 1, 1], [2, 3, 4], [5, 6, 7], undefined,
+    [[2, 0.5, 0, 5], [0, 3, 0, 6], [0, 0, 4, 7], [0, 0, 0, 1]]
+  );
+  const values = new Float32Array([1, 2, 3, 6, 10, 20, 14, 28]);
+  const factor = new Int32Array([1, 1, 2, 2]);
+
+  function vectors() {
+    const timeLast = new Float32NeuroVec(
+      new NeuroSpace([2, 1, 1, 4], [2, 3, 4, 2.5], [5, 6, 7, 9], volumeSpace.axes, volumeSpace.trans.to2DArray()),
+      values
+    );
+    const timeFirst = new BigNeuroVec(
+      values,
+      new NeuroSpace([4, 2, 1, 1], [2.5, 2, 3, 4], [9, 5, 6, 7]),
+      { storage: 'memory', volumeSpace, shareData: true }
+    );
+    return [timeLast, timeFirst] as const;
+  }
+
+  it('gives time-first and time-last vectors the same independent split references', () => {
+    const [dense, big] = vectors();
+    for (const vec of [dense, big]) {
+      const filled = splitFill(vec, factor);
+      expect(filled.get(1)?.getAt(0, 0, 0, 1)).toBe(3);
+      expect(filled.get(2)?.getAt(1, 0, 0, 0)).toBe(20);
+
+      const reduced = splitReduce(vec, factor, StatFunctions.mean);
+      // Means are (1 + 3)/2 and (10 + 14)/2, then their mean: 7.
+      expect(Array.from(reduced.getData())).toEqual([7, 14]);
+      expect(reduced.space.trans.to2DArray()).toEqual(volumeSpace.trans.to2DArray());
+
+      const centered = splitScale(vec, factor, true, false);
+      expect(centered.getAt(0, 0, 0, 0)).toBe(-1);
+      expect(centered.getAt(0, 0, 0, 3)).toBe(2);
+    }
+    expect((splitFill(big, factor).get(1) as BigNeuroVec).volumeSpace.trans.to2DArray())
+      .toEqual(volumeSpace.trans.to2DArray());
+  });
+
+  it('uses the spatial geometry and temporal metadata for both layouts', () => {
+    const [dense, big] = vectors();
+    const clusters = new FloatNeuroVol(volumeSpace, new Float32Array([1, 1]));
+    expect(Array.from(splitClusters(big, clusters)[0].data)).toEqual([7, 14]);
+
+    const block = splitBlocks(big, new Uint32Array([1]), new Int32Array([1]))[0] as SparseNeuroVec;
+    expect(block.space.trans.to2DArray()).toEqual(volumeSpace.trans.to2DArray());
+    expect(block.getAt(1, 0, 0, 2)).toBe(20);
+
+    for (const vec of [dense, big]) {
+      const scaled = scaleSeries(vec, 'mean-center');
+      expect(scaled.space.trans.to2DArray()).toEqual(volumeSpace.trans.to2DArray());
+      expect(scaled.space.spacing).toEqual([2, 3, 4, 2.5]);
+      expect(scaled.space.origin).toEqual([5, 6, 7, 9]);
+      expect(scaled.getAt(0, 0, 0, 0)).toBe(-6);
+      expect(scaled.getAt(0, 0, 0, 3)).toBe(7);
+    }
+  });
+
+  it('keeps BigNeuroVec NaN scaling semantics aligned with dense vectors', () => {
+    const valuesWithNaN = new Float32Array([2, NaN, 4]);
+    const dense = new Float32NeuroVec(
+      new NeuroSpace([1, 1, 1, 3], [2, 3, 4, 2.5], [5, 6, 7, 9], volumeSpace.axes, volumeSpace.trans.to2DArray()),
+      valuesWithNaN
+    );
+    const big = new BigNeuroVec(
+      valuesWithNaN,
+      new NeuroSpace([3, 1, 1, 1], [2.5, 2, 3, 4], [9, 5, 6, 7]),
+      { storage: 'memory', volumeSpace: new NeuroSpace([1, 1, 1], [2, 3, 4], [5, 6, 7], volumeSpace.axes, volumeSpace.trans.to2DArray()), shareData: true }
+    );
+    for (const vec of [dense, big]) {
+      const scaled = splitScale(vec, new Int32Array([1, 1, 1]), false, true);
+      for (let time = 0; time < 3; time++) expect(scaled.getAt(0, 0, 0, time)).toBeNaN();
+    }
   });
 });

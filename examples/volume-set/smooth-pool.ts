@@ -15,6 +15,7 @@ export class SmoothPool {
   private queue: { job: SmoothJob; resolve: (v: Float32Array) => void; reject: (e: Error) => void }[] = [];
   private pending = new Map<number, { resolve: (v: Float32Array) => void; reject: (e: Error) => void; worker: Worker }>();
   private nextId = 1;
+  private disposed = false;
 
   constructor(anatomy: Float32Array, size = Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 2) - 1))) {
     for (let i = 0; i < size; i++) {
@@ -36,6 +37,7 @@ export class SmoothPool {
   }
 
   run(job: SmoothJob): Promise<Float32Array> {
+    if (this.disposed) return Promise.reject(new Error('smoothing pool is disposed'));
     return new Promise((resolve, reject) => {
       this.queue.push({ job, resolve, reject });
       this.pump();
@@ -51,5 +53,17 @@ export class SmoothPool {
       // Values are copied (the caller keeps its raw data); the result buffer is transferred back.
       w.postMessage({ type: 'job', id, ...job, values: job.values.slice() });
     }
+  }
+
+  dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    const error = new Error('smoothing pool is disposed');
+    for (const queued of this.queue.splice(0)) queued.reject(error);
+    for (const pending of this.pending.values()) pending.reject(error);
+    this.pending.clear();
+    this.idle = [];
+    for (const worker of this.workers) worker.terminate();
+    this.workers = [];
   }
 }

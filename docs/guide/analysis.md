@@ -13,22 +13,20 @@ Each window carries **geometry, not data**: `.coords` (voxel `[i, j, k]` triples
 ```ts
 import { searchlightIterator } from 'neuroimjs'
 
-// eager + single-threaded → ROIVolWindow[]; nonzero → centres restricted to the mask
+// eager + single-threaded → ROIVolWindow[]; nonzero → centres and members restricted to the mask
 const result = searchlightIterator(mask, 4 /* mm */, { eager: true, nonzero: true })
 if (!Array.isArray(result)) throw new Error('expected an eager, single-threaded result')
 
 const data = dataVol.getData()
 const scores = new Float32Array(dataVol.space.size)
 for (const sphere of result) {
-  const idx = sphere.indices().filter((i) => mask.getData()[i])   // keep in-mask voxels
+  const idx = sphere.indices()
   const local = idx.map((i) => data[i])
   scores[sphere.parentIndex] = local.reduce((a, b) => a + b, 0) / local.length
 }
 ```
 
-::: warning Spheres are not clipped to the mask
-`nonzero: true` only restricts which voxels serve as **centres**. Sphere membership is purely geometric, so spheres near the mask edge include out-of-mask voxels — filter `indices()` against the mask as above. Without `nonzero`, every voxel in the volume becomes a centre.
-:::
+With `nonzero: true`, every sphere member is restricted to the nonzero mask as well as its centre. To use a geometrically complete sphere around in-mask centres, set `clipToMask: false`. Without `nonzero`, every voxel in the volume remains a centre and geometry is unfiltered unless `clipToMask: true` is supplied.
 
 Return type by option:
 
@@ -182,7 +180,7 @@ const blocks = splitBlocks(dataVol, new Int32Array([0, 1, 2, 3]), new Int32Array
 ```
 
 ::: warning `splitReduce` averages across levels
-`splitReduce(x, fac, FUN)` applies `FUN` within each level and then **averages the per-level results** into a single 3D volume. For a voxel whose values are `0, 100, 200 | 300, 400, 500`, `StatFunctions.mean` yields `250` and `StatFunctions.max` yields `350` (the mean of 200 and 500) — not one volume per level. Use `splitFill` and reduce each level yourself if you need per-level maps. The output space is rebuilt from the vec's dims, spacing and origin only, so its axes and affine are dropped (as with `concat` below).
+`splitReduce(x, fac, FUN)` applies `FUN` within each level and then **averages the per-level results** into a single 3D volume. For a voxel whose values are `0, 100, 200 | 300, 400, 500`, `StatFunctions.mean` yields `250` and `StatFunctions.max` yields `350` (the mean of 200 and 500) — not one volume per level. Use `splitFill` and reduce each level yourself if you need per-level maps. The result preserves the vec's 3D spatial affine, including `BigNeuroVec.volumeSpace`.
 :::
 
 ::: warning `concat` keeps dims, spacing and origin only

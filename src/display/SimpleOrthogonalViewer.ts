@@ -14,6 +14,14 @@ import type { OrientationLabelOptions } from './OrientationLabelLayer';
 import type { CrossHairOptions } from './CrossHair';
 import type { ViewerTheme } from './ViewerTheme';
 import type { AlignmentStrategyType } from './alignment/AlignmentManager';
+import { getLogger } from './logging/Logger';
+
+const warnedLpiMethods = new Set<string>();
+function warnLegacyLpi(method: string, replacement: string): void {
+  if (warnedLpiMethods.has(method)) return;
+  warnedLpiMethods.add(method);
+  getLogger('SimpleOrthogonalViewer').warn(`${method} is deprecated; use ${replacement} for RAS+ world coordinates. Legacy LPI coordinates depend on storage orientation.`);
+}
 
 export type LayoutMode = 'left-tall' | 'top-bottom' | 'ortho';
 
@@ -168,14 +176,13 @@ export class SimpleOrthogonalViewer {
   }
 
   /**
-   * Set position using LPI anatomical world coordinates (mm) regardless of the
-   * underlying volume orientation. Converts LPI→volume space and updates slices.
-   *
-   * LPI follows neuroimjs axis naming (each axis named by where it starts):
-   * +x points toward Right, +y toward Anterior, +z toward Superior — the same
-   * orientation NiBabel and NIfTI call RAS+.
+   * Set position through the legacy axis-aligned LPI grid mapping.
+   * This equals world coordinates only for LPI-stored, axis-aligned volumes.
+   * @deprecated Use setWorldCoord with RAS+ millimetres. This method maps
+   * through voxel indices and depends on the volume's storage orientation.
    */
   setLPICoord(lpiCoord: [number, number, number]): void {
+    warnLegacyLpi('setLPICoord', 'setWorldCoord');
     const space = this.imageLayer.neuroSpace;
     const lpiSpace = new NeuroSpace(space.dim, space.spacing, space.origin, AxisSet3D.AXIAL_LPI);
     // Transform LPI world → current space world
@@ -187,9 +194,15 @@ export class SimpleOrthogonalViewer {
   }
 
   /**
-   * Read current position as LPI anatomical world coordinates (mm).
+   * Read current position through the legacy axis-aligned LPI grid mapping.
+   * @deprecated Use getWorldCoord for RAS+ millimetres independent of storage.
    */
   getLPICoord(): [number, number, number] {
+    warnLegacyLpi('getLPICoord', 'getWorldCoord');
+    return this.getLegacyLpiCoord();
+  }
+
+  private getLegacyLpiCoord(): [number, number, number] {
     const space = this.imageLayer.neuroSpace;
     const lpiSpace = new NeuroSpace(space.dim, space.spacing, space.origin, AxisSet3D.AXIAL_LPI);
     const M = space.getTransformationMatrixTo(lpiSpace);
@@ -450,7 +463,7 @@ export class SimpleOrthogonalViewer {
   } {
     return {
       worldCoord: this.getWorldCoord(),
-      lpiCoord: this.getLPICoord(),
+      lpiCoord: this.getLegacyLpiCoord(),
       slices: {
         axial: this.getSliceIndex('axial'),
         coronal: this.getSliceIndex('coronal'),

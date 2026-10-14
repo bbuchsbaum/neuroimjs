@@ -148,13 +148,6 @@ export class ImageLayer implements SliceLayer {
 
       if (ctx) {
         ctx.putImageData(imageData, 0, 0);
-        // Debug: sample center pixel to confirm non-black buffer
-        try {
-          const cx = Math.floor(imageData.width / 2);
-          const cy = Math.floor(imageData.height / 2);
-          const sample = ctx.getImageData(cx, cy, 1, 1).data;
-          this.logger.debug('Center pixel RGBA', { x: cx, y: cy, r: sample[0], g: sample[1], b: sample[2], a: sample[3] });
-        } catch {}
       } else {
         throw new Error('Failed to create 2D context');
       }

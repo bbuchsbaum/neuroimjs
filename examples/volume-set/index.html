@@ -4,12 +4,6 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Volume set · neuroimjs</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap"
-      rel="stylesheet"
-    />
     <style>
       :root {
         --bg: #0d0e14;
@@ -189,6 +183,18 @@
       </aside>
     </main>
     <footer><canvas id="rail" aria-label="Value at cursor for every subject"></canvas><button id="copy-rail" class="ghost" title="Copy subject values at the cursor as tab-separated text">Copy values</button></footer>
-    <script type="module" src="./main.ts"></script>
+    <script type="module">
+      const embedded = new URLSearchParams(location.search).get('embedded') === '1';
+      if (!embedded) {
+        const preconnect = document.createElement('link');
+        preconnect.rel = 'preconnect'; preconnect.href = 'https://fonts.googleapis.com';
+        document.head.appendChild(preconnect);
+        const stylesheet = document.createElement('link');
+        stylesheet.rel = 'stylesheet';
+        stylesheet.href = 'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap';
+        document.head.appendChild(stylesheet);
+        import('./main.ts');
+      } else import('./embedded-bootstrap.ts');
+    </script>
   </body>
 </html>

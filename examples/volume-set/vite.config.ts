@@ -5,6 +5,8 @@ import { vsDataPlugin } from './vs-data-plugin';
 const repo = path.resolve(__dirname, '../..');
 
 // Volume-set demo: serves local data via vsDataPlugin (VS_DATA_ROOT, VS_TEMPLATE_DIR).
+// VS_STATIC_SYNTHETIC=1 makes `vite build` emit a self-contained public demo;
+// callers choose its outDir (normally docs/.vitepress/dist/space).
 export default defineConfig({
   root: __dirname,
   base: './',

@@ -70,8 +70,61 @@
         if (!same) throw new Error('Parallel results differ from the sequential oracle');
         if (progress.at(-1) !== 1) throw new Error('Progress did not finish at 1');
 
+        // Clipping can remove an out-of-mask centre. The worker must retain
+        // sphericalROI's nearest-member centre fallback, including ties, and
+        // reject entirely empty clipped spheres through both public APIs.
+        const edgeSpace = new NeuroSpace([2, 1, 1], [1, 1, 1], [0, 0, 0]);
+        const edgeMask = new FloatNeuroVol(edgeSpace, new Float32Array([0, 1]));
+        const edgeOptions = { eager: true, nonzero: false, clipToMask: true };
+        const edgeSequential = searchlightIterator(edgeMask, 1, { ...edgeOptions, cores: 1 });
+        const edgeParallel = await searchlightIterator(edgeMask, 1, { ...edgeOptions, cores: 2 });
+        const edgeCoordsSequential = await searchlightCoords(edgeMask, 1, { nonzero: false, clipToMask: true, cores: 1 });
+        const edgeCoordsParallel = await searchlightCoords(edgeMask, 1, { nonzero: false, clipToMask: true, cores: 2 });
+        const expectedEdge = JSON.stringify([[1, 0, 0]]);
+        const sameEdge = edgeParallel.length === 2 && edgeParallel.every((roi, index) =>
+          JSON.stringify(roi.coords) === expectedEdge && roi.centerIndex === 0 &&
+          JSON.stringify(Array.from(edgeCoordsParallel.get(index))) ===
+            JSON.stringify(Array.from(edgeCoordsSequential.get(index)))
+        );
+        if (!sameEdge || edgeSequential.some((roi) => JSON.stringify(roi.coords) !== expectedEdge || roi.centerIndex !== 0)) {
+          throw new Error('Clipped-centre worker fallback differs from sphericalROI');
+        }
+
+        const tiedSpace = new NeuroSpace([3, 1, 1], [1, 1, 1], [0, 0, 0]);
+        const tiedMask = new FloatNeuroVol(tiedSpace, new Float32Array([1, 0, 1]));
+        const tiedSequential = searchlightIterator(tiedMask, 1, { ...edgeOptions, cores: 1 });
+        const tiedParallel = await searchlightIterator(tiedMask, 1, { ...edgeOptions, cores: 2 });
+        const tiedCoords = JSON.stringify([[0, 0, 0], [2, 0, 0]]);
+        if (JSON.stringify(tiedSequential[1].coords) !== tiedCoords || tiedSequential[1].centerIndex !== 0 ||
+            JSON.stringify(tiedParallel[1].coords) !== tiedCoords || tiedParallel[1].centerIndex !== 0) {
+          throw new Error('Worker did not retain spherical iteration order for a nearest-member tie');
+        }
+
+        const emptyMask = new FloatNeuroVol(edgeSpace, new Float32Array(2));
+        const emptyIterator = () => searchlightIterator(emptyMask, 1, { ...edgeOptions, cores: 1 });
+        if (!(() => { try { emptyIterator(); return false; } catch { return true; } })()) {
+          throw new Error('Sequential iterator accepted an empty clipped sphere');
+        }
+        const emptyCoords = await searchlightCoords(emptyMask, 1, { nonzero: false, clipToMask: true, cores: 1 });
+        if (!(() => { try { emptyCoords.get(0); return false; } catch { return true; } })()) {
+          throw new Error('Sequential coordinates accepted an empty clipped sphere');
+        }
+        try {
+          await searchlightIterator(emptyMask, 1, { ...edgeOptions, cores: 2 });
+          throw new Error('Parallel iterator accepted an empty clipped sphere');
+        } catch (error) {
+          if (!String(error).includes('No voxels found within the specified sphere')) throw error;
+        }
+        try {
+          await searchlightCoords(emptyMask, 1, { nonzero: false, clipToMask: true, cores: 2 });
+          throw new Error('Parallel coordinates accepted an empty clipped sphere');
+        } catch (error) {
+          if (!String(error).includes('No voxels found within the specified sphere')) throw error;
+        }
+
         window.searchlightWorkerResult = {
           count: parallel.length,
+          edgeCount: edgeParallel.length,
           progress,
           workerSupported: true,
         };
