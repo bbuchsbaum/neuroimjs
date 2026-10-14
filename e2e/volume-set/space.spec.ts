@@ -519,7 +519,7 @@ test.describe('Space (S4)', () => {
 test.describe('Space on touch (emulated)', () => {
   test.use({ hasTouch: true, isMobile: false, viewport: { width: 1180, height: 820 } });
 
-  test('tap places the cursor or selects; touch drag pans the layout; the list opens Ortho', async ({ page }) => {
+  test('tap places the cursor or selects; touch drag pans the layout; the list opens Ortho', async ({ page }, info) => {
     await open(page, `${SPACE}&subject=s03`);
     const box = (await page.locator('canvas.montage').boundingBox())!;
     const p = await probe(page);
@@ -564,10 +564,32 @@ test.describe('Space on touch (emulated)', () => {
     expect(url(page).get('cursor')).toBe(cursor);
     expect((await probe(page)).runs).toBe(p.runs);
     // Touch-sized list targets reach Ortho without a double-tap.
-    await page.locator('.space-members button:has-text("s07")').tap();
-    await page.locator('#space-open').tap();
-    await waitMode(page, 'ortho');
-    expect(url(page).get('subject')).toBe('s07');
+    const events: unknown[] = [];
+    await page.exposeFunction('recordSpaceTouch', (event: unknown) => events.push(event));
+    await page.evaluate(() => {
+      for (const type of ['pointerdown', 'pointerup', 'pointercancel', 'touchstart', 'touchend', 'touchcancel', 'click']) {
+        document.addEventListener(type, (event) => {
+          const target = event.target as HTMLElement;
+          void (window as unknown as { recordSpaceTouch: (event: unknown) => Promise<void> }).recordSpaceTouch({
+            type, time: performance.now(), target: target.tagName, id: target.id,
+            pick: target.dataset.pick, selected: document.querySelector('.space-members [aria-current="true"]')?.textContent,
+          });
+        }, { capture: true });
+      }
+    });
+    try {
+      const member = page.locator('.space-members [data-pick="s07"]');
+      await member.tap();
+      // Touch activation and its coalesced redraw must complete before the next action.
+      await expect(member).toHaveAttribute('aria-current', 'true');
+      await expect(page.locator('#space-open')).toHaveText('Open s07 in Ortho');
+      await page.locator('#space-open').tap();
+      await waitMode(page, 'ortho');
+      expect(url(page).get('subject')).toBe('s07');
+    } catch (error) {
+      await info.attach('touch-selection-events', { body: JSON.stringify(events, null, 2), contentType: 'application/json' });
+      throw error;
+    }
   });
 });
 
