@@ -958,6 +958,12 @@ function ensureCanvas(): HTMLCanvasElement {
     },
     { passive: false }
   );
+  // Space owns touch panning. Cancel native handling after a recognized pan:
+  // Chromium can otherwise consume the next sidebar tap even with
+  // touch-action:none. Small movements remain taps.
+  c.addEventListener('touchmove', (e) => {
+    if (state.mode === 'space' && drag?.moved && e.cancelable) e.preventDefault();
+  }, { passive: false });
   c.addEventListener('pointerdown', (e) => {
     if (state.mode === 'space' && SV.onPointer('pointerdown', e)) return;
     const h = hitAt(e);

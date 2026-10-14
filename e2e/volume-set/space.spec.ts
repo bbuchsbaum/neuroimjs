@@ -519,22 +519,25 @@ test.describe('Space (S4)', () => {
 test.describe('Space on touch (emulated)', () => {
   test.use({ hasTouch: true, isMobile: false, viewport: { width: 1180, height: 820 } });
 
-  for (const gesture of ['pan', 'no-pan', 'pan-manipulation'] as const) test(`tap places the cursor or selects; touch drag pans the layout; the list opens Ortho [${gesture}]`, async ({ page }, info) => {
+  for (const gesture of ['pan', 'no-pan'] as const) test(`tap places the cursor or selects; touch drag pans the layout; the list opens Ortho [${gesture}]`, async ({ page }, info) => {
     await open(page, `${SPACE}&subject=s03`);
-    const events: unknown[] = [];
-    await page.exposeFunction('recordSpaceTouch', (event: unknown) => events.push(event));
+    const events: { type: string; target: string; defaultPrevented: boolean }[] = [];
+    await page.exposeFunction('recordSpaceTouch', (event: typeof events[number]) => events.push(event));
     await page.evaluate(() => {
       for (const type of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'gotpointercapture', 'lostpointercapture', 'touchstart', 'touchmove', 'touchend', 'touchcancel', 'click', 'scroll']) {
         document.addEventListener(type, (event) => {
           const target = event.target as HTMLElement;
-          queueMicrotask(() => { void (window as unknown as { recordSpaceTouch: (event: unknown) => Promise<void> }).recordSpaceTouch({
+          void (window as unknown as { recordSpaceTouch: (event: unknown) => Promise<void> }).recordSpaceTouch({
             type, time: performance.now(), target: target.tagName, id: target.id,
-            defaultPrevented: event.defaultPrevented, touchAction: target instanceof HTMLElement ? getComputedStyle(target).touchAction : null, pick: target.dataset?.pick, selected: document.querySelector('.space-members [aria-current="true"]')?.textContent,
-          }); });
-        }, { capture: true, passive: true });
+            defaultPrevented: event.defaultPrevented,
+            touchAction: target instanceof HTMLElement ? getComputedStyle(target).touchAction : null,
+            pick: target.dataset?.pick,
+            selected: document.querySelector('.space-members [aria-current="true"]')?.textContent,
+          });
+        // Observe movement after the canvas handler; scroll itself does not bubble.
+        }, { capture: type === 'scroll', passive: true });
       }
     });
-    if (gesture === 'pan-manipulation') await page.addStyleTag({ content: '.space-members button, #space-open { touch-action: manipulation; }' });
     const box = (await page.locator('canvas.montage').boundingBox())!;
     const p = await probe(page);
     // Tap a picture pixel: cursor + focus, through the same cell transform as a click.
@@ -590,6 +593,8 @@ test.describe('Space on touch (emulated)', () => {
       await page.locator('#space-open').tap();
       await waitMode(page, 'ortho');
       expect(url(page).get('subject')).toBe('s07');
+      if (gesture === 'pan') expect(events.some(event => event.type === 'touchmove' && event.defaultPrevented)).toBe(true);
+      expect(events.filter(event => event.type === 'click' && event.target === 'CANVAS')).toHaveLength(2);
     } catch (error) {
       await info.attach('touch-selection-events', { body: JSON.stringify(events, null, 2), contentType: 'application/json' });
       throw error;
