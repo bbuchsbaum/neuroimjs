@@ -22,6 +22,8 @@ These were correctness bugs in earlier drafts of the library and are **now fixed
 - **Cubic/Lanczos resampling at volume boundaries** — boundary taps are linearly extrapolated, fixing the old outer-voxel bias.
 - **`temporalFilter()`** — performs real per-voxel temporal filtering; no longer a silent no-op.
 - **`sphericalROI` / searchlight radius** — radius is interpreted in **mm** and is spacing-aware per axis (anisotropy-correct).
+- **Searchlight sphere membership** — since 0.6.0, searchlights with `nonzero: true`, and `randomSearchlight` / `bootstrapSearchlight` by default, clip each sphere to the mask, not just its centre.
+- **`splitReduce` geometry** — the output volume keeps the input's 3D geometry, including the affine.
 
 ## Visualization
 
@@ -74,7 +76,7 @@ These were correctness bugs in earlier drafts of the library and are **now fixed
 | `FileBackedNeuroVec` | <span class="stability-badge experimental">known issue</span> | Loads volumes on demand through a callback you supply, with an LRU cache. It does not open files itself. |
 | `MappedNeuroVec` | <span class="stability-badge experimental">known issue</span> | Reads through a `DataView` over an `ArrayBuffer` you supply. It is not a memory-mapped file. |
 | `NeuroHyperVec` (5D+) core | <span class="stability-badge experimental">known issue</span> | Container, indexing and concat work. `reduce()` overflows the stack beyond a few thousand outputs; `getSubVolume` with two free named axes silently uses the first, and any spatial key (`x`, `y`, `z`) in the index spec throws. See [Time Series](/guide/time-series). |
-| `DenseNeuroHyperVec.glm`, `extractFeatures`, `save` | <span class="stability-badge aspirational">unavailable</span> | Throw "not yet implemented". |
+| `DenseNeuroHyperVec.glm`, `extractFeatures`, `save` | <span class="stability-badge aspirational">unavailable</span> | `glm` and `extractFeatures` throw "not yet implemented"; the async `save` returns a promise that rejects with it. |
 
 ## Processing & analysis
 
@@ -88,12 +90,12 @@ These were correctness bugs in earlier drafts of the library and are **now fixed
 | `Resampler.transform()` | <span class="stability-badge stable">stable</span> | Implemented. |
 | `Resampler` cubic/Lanczos at volume boundaries | <span class="stability-badge stable">stable</span> | Boundary taps are linearly extrapolated; edge-bias regression tests cover low/high edges and corners. |
 | Connected components / `clusterTable` / `localMaxima` | <span class="stability-badge experimental">known issue</span> | One-sided (`>= threshold`); mask voxels must equal `1`; labels and sizes stored as `Int16`. In-mask `NaN` voxels seed clusters (and pull in suprathreshold neighbours, with `maxValue` `NaN`); remove them from the mask first. |
-| `StatFunctions` (mean/sum/min/max/std/median) | <span class="stability-badge stable">stable</span> | `mean`/`min`/`max`/`std` skip NaN (`std` uses n − 1). `sum` returns NaN; `median` returns an arbitrary value, not NaN, because NaN breaks the sort. |
+| `StatFunctions` (mean/sum/min/max/std/median) | <span class="stability-badge stable">stable</span> | `mean`/`min`/`max`/`std` skip NaN (`std` uses n − 1). `sum` returns NaN. `median` does not skip NaN, and NaN breaks its sort, so it returns NaN or a wrong value depending on where the NaN sits. |
 | Group statistics (`computeSufficientStats`, t / Welch / paired / consistency maps, `OverlaySummaryService`) | <span class="stability-badge stable">stable</span> | Compensated two-pass sums; non-finite values skipped per voxel. See [Group Statistics](/guide/group-stats). |
 | `OverlayReviewSession` / `createReviewVecFromVolumes` | <span class="stability-badge stable">stable</span> | Validates geometry across subjects and contrasts. |
 | `sphericalROI` / searchlight radius | <span class="stability-badge stable">stable</span> | mm-based, spacing-aware (anisotropy-correct). |
-| Searchlight sphere membership | <span class="stability-badge experimental">known issue</span> | Spheres are not clipped to the mask (`nonzero` restricts centres only); filter `indices()` yourself. Window `.data` is all `1`s. |
-| `splitReduce` | <span class="stability-badge experimental">known issue</span> | Returns one volume: the mean of the per-level reductions, not one map per level. The output space keeps dims, spacing and origin only, dropping axes and affine. |
+| Searchlight sphere membership | <span class="stability-badge stable">stable</span> | With `nonzero: true`, sphere members as well as centres are restricted to the mask; `randomSearchlight` and `bootstrapSearchlight` also clip by default. Pass `clipToMask: false` for geometric spheres. Without `nonzero`, every voxel is a centre and spheres are not clipped unless `clipToMask: true`. `clusteredSearchlight` spheres are never clipped. Window `.data` is all `1`s. See [Analysis](/guide/analysis). |
+| `splitReduce` | <span class="stability-badge experimental">known issue</span> | Returns one volume: the mean of the per-level reductions, not one map per level. The output keeps the input's 3D geometry, including the affine (a `BigNeuroVec`'s `volumeSpace`). |
 | `NeuroAtlas` (`loadGlasserAtlas`, `loadSchaeferAtlas`, `loadAtlas`) | <span class="stability-badge experimental">known issue</span> | Glasser and Schaefer download their files from GitHub at run time. |
 | `concat` | <span class="stability-badge experimental">known issue</span> | Drops the input affine (keeps dims, spacing, origin only); use `createReviewVecFromVolumes` when geometry matters. |
 
@@ -115,7 +117,7 @@ Packaging and test-runner integrity (e2e excluded from the unit run, test files 
 
 The unit suite is green, but that does not mean only cleanup remains. In priority order:
 
-1. **Fix the flagged known issues** — the user-facing correctness bugs in the tables above: `NeuroHyperVec.reduce()` stack overflow and `getSubVolume` index specs, `edgeDetection('canny')`, searchlight sphere membership, `splitReduce`, `concat` dropping the affine, connected components and `StatFunctions.median` with NaN, morphology with NaN, the NIfTI transform-selection discrepancies listed under I/O, and the viewer `onReady` / layer pointer / `showIntensityReadout` gaps.
+1. **Fix the flagged known issues** — the user-facing correctness bugs in the tables above: `NeuroHyperVec.reduce()` stack overflow and `getSubVolume` index specs, `edgeDetection('canny')`, `splitReduce` averaging across levels, `concat` dropping the affine, connected components and `StatFunctions.median` with NaN, morphology with NaN, the NIfTI transform-selection discrepancies listed under I/O, and the viewer `onReady` / layer pointer / `showIntensityReadout` gaps.
 2. **Missing readers** — dual-file NIfTI and AFNI.
 3. **Consolidation** — some duplicate NIfTI / viewer / ROI implementations from earlier accretion still coexist. They work; they'll be merged behind the current APIs. Two merges are breaking and deferred to a major version: unifying the `NeuroVec` and `INeuroVec` interfaces, and coordinating `SimpleOrthogonalViewer` (MobX) and `ViewSynchronizer` (events) the same way. `readVec`'s legacy time-first shape is kept for compatibility.
 4. **Hygiene** — dead-code removal.

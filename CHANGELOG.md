@@ -7,7 +7,7 @@ in the pull request that makes the change.
 
 ## Unreleased
 
-### Documentation
+### Fixed
 
 - The docs home page and guide overview give the current version (0.6.0), and
   the home page no longer lists unscaled `UINT32` reads, fixed in 0.6.0, as a
@@ -16,6 +16,14 @@ in the pull request that makes the change.
   `SingleSliceViewerOptions` and `SimpleOrthogonalViewerOptions` now says the
   readout is not wired up (blank on `SingleSliceViewer`, ignored on
   `SimpleOrthogonalViewer`), matching the guides. (#34)
+- The stability matrix (`docs/guide/stability.md`) now matches 0.6.0 behaviour.
+  Searchlight sphere membership is listed as stable: `nonzero: true` and the
+  random/bootstrap searchlights clip spheres to the mask unless
+  `clipToMask: false`. `splitReduce` is documented as keeping the input's
+  affine (it still averages the per-level reductions). `StatFunctions.median`
+  with NaN is documented as returning NaN or a wrong value, and
+  `DenseNeuroHyperVec.save` as rejecting rather than throwing.
+  `tests/docs.consistency.test.ts` checks these rows against the code. (#35)
 
 ## 0.6.0 - 2026-10-14
 
