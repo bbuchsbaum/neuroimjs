@@ -115,7 +115,7 @@ Packaging and test-runner integrity (e2e excluded from the unit run, test files 
 
 The unit suite is green, but that does not mean only cleanup remains. In priority order:
 
-1. **Fix the flagged known issues** — the user-facing correctness bugs in the tables above: `NeuroHyperVec.reduce()` stack overflow and `getSubVolume` index specs, `edgeDetection('canny')`, searchlight sphere membership, `splitReduce`, `concat` dropping the affine, connected components and `StatFunctions.median` with NaN, morphology with NaN, unscaled `UINT32` reads in `readVol`, the NIfTI transform-selection discrepancies listed under I/O, and the viewer `onReady` / layer pointer / `showIntensityReadout` gaps.
+1. **Fix the flagged known issues** — the user-facing correctness bugs in the tables above: `NeuroHyperVec.reduce()` stack overflow and `getSubVolume` index specs, `edgeDetection('canny')`, searchlight sphere membership, `splitReduce`, `concat` dropping the affine, connected components and `StatFunctions.median` with NaN, morphology with NaN, the NIfTI transform-selection discrepancies listed under I/O, and the viewer `onReady` / layer pointer / `showIntensityReadout` gaps.
 2. **Missing readers** — dual-file NIfTI and AFNI.
 3. **Consolidation** — some duplicate NIfTI / viewer / ROI implementations from earlier accretion still coexist. They work; they'll be merged behind the current APIs. Two merges are breaking and deferred to a major version: unifying the `NeuroVec` and `INeuroVec` interfaces, and coordinating `SimpleOrthogonalViewer` (MobX) and `ViewSynchronizer` (events) the same way. `readVec`'s legacy time-first shape is kept for compatibility.
 4. **Hygiene** — dead-code removal.

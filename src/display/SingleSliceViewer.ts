@@ -88,7 +88,11 @@ export interface SingleSliceViewerOptions {
   initialCoord?: number[];
 
   /**
-   * Show intensity value readout under cursor
+   * Add an intensity-readout layer to the view.
+   *
+   * Known issue: nothing currently feeds the layer pointer positions, so the
+   * readout stays blank. Build a readout from {@link SingleSliceViewer.onPointerMove}
+   * instead (the Composable Views guide describes its coordinate fields).
    * @default false
    */
   showIntensityReadout?: boolean;

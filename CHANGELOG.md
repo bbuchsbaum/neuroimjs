@@ -7,6 +7,16 @@ in the pull request that makes the change.
 
 ## Unreleased
 
+### Documentation
+
+- The docs home page and guide overview give the current version (0.6.0), and
+  the home page no longer lists unscaled `UINT32` reads, fixed in 0.6.0, as a
+  known bug. The I/O guide links ADR-0004 in `docs/adr/` instead of PR #19 and
+  says the ADR is still a proposal. The TSDoc for `showIntensityReadout` on
+  `SingleSliceViewerOptions` and `SimpleOrthogonalViewerOptions` now says the
+  readout is not wired up (blank on `SingleSliceViewer`, ignored on
+  `SimpleOrthogonalViewer`), matching the guides. (#34)
+
 ## 0.6.0 - 2026-10-14
 
 Upgrading: `readVol` now takes `space.spacing` from the affine rather than

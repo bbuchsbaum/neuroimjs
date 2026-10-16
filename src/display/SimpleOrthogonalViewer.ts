@@ -30,6 +30,12 @@ export interface SimpleOrthogonalViewerOptions {
   showCrosshair?: boolean;
   showSlider?: boolean;
   gapPx?: number;
+  /**
+   * Accepted for API compatibility but currently ignored: no intensity
+   * readout is drawn. Build one from `onCoordChange` and `getValue` instead
+   * (see the Viewers guide).
+   * @default false
+   */
   showIntensityReadout?: boolean;
   /** Show anatomical orientation labels (L/R/A/P/S/I) pinned to each view's edges. */
   showOrientationLabels?: boolean;

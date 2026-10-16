@@ -31,7 +31,7 @@ The browser entry is a display-focused subset that keeps Node-only code out of b
 
 ## A note on maturity
 
-neuroimjs is **pre-1.0 (`0.5.0`)**, so minor releases can still change the API; each change is listed in the [changelog](https://github.com/bbuchsbaum/neuroimjs/blob/main/CHANGELOG.md). The viewer stack and the core geometry/volume types are dependable: they are covered by unit and browser (Playwright) tests, and NIfTI reading is checked against fixtures generated with nibabel. Some I/O and processing paths have known bugs, and a few APIs are still missing (AFNI and dual-file NIfTI cannot be read; some `NeuroHyperVec` operations throw "not yet implemented"). We track this transparently — see **[Stability & Roadmap](/guide/stability)** so you always know what's safe to build on.
+neuroimjs is **pre-1.0 (`0.6.0`)**, so minor releases can still change the API; each change is listed in the [changelog](https://github.com/bbuchsbaum/neuroimjs/blob/main/CHANGELOG.md). The viewer stack and the core geometry/volume types are dependable: they are covered by unit and browser (Playwright) tests, and NIfTI reading is checked against fixtures generated with nibabel. Some I/O and processing paths have known bugs, and a few APIs are still missing (AFNI and dual-file NIfTI cannot be read; some `NeuroHyperVec` operations throw "not yet implemented"). We track this transparently — see **[Stability & Roadmap](/guide/stability)** so you always know what's safe to build on.
 
 ## Next steps
 

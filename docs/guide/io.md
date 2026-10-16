@@ -22,7 +22,7 @@ They differ in storage types:
 
 ### Known differences from nibabel
 
-Reading is checked against nibabel-generated fixtures (`npm run test:conformance`). The affine comes from nifti-reader-js, whose transform choice differs from nibabel's in three cases (see the [conformance notes](https://github.com/bbuchsbaum/neuroimjs/blob/main/tests/conformance/README.md) and the transform-selection ADR in [PR #19](https://github.com/bbuchsbaum/neuroimjs/pull/19)):
+Reading is checked against nibabel-generated fixtures (`npm run test:conformance`). The affine comes from nifti-reader-js, whose transform choice differs from nibabel's in three cases (see the [conformance notes](https://github.com/bbuchsbaum/neuroimjs/blob/main/tests/conformance/README.md) and [ADR-0004](/adr/0004-nifti-transform-selection), which proposes a fix; its status is *Proposed*, so the behaviour below is what the current code does):
 
 - when `qform_code > sform_code > 0`, neuroimjs uses the qform where nibabel uses the sform;
 - a file with neither transform gets `diag(pixdim)` with a zero offset instead of nibabel's centred base affine;
