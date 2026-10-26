@@ -1166,3 +1166,57 @@ test.describe('Review fixes (PR #32)', () => {
     expect(errors).toEqual([]);
   });
 });
+
+
+test('not-placed ID labels focus without moving the cursor or closing peek, and double-click opens Ortho', async ({ page }) => {
+  await open(page, `${SPACE}&subject=s01&cursor=18,22,15`);
+  const canvas = page.locator('canvas.montage');
+  const box = (await canvas.boundingBox())!;
+  const thumb = (await probe(page)).thumbs.find(t => t.id === 's17')!;
+  await page.mouse.click(box.x + thumb.dest.x + thumb.dest.w / 2, box.y + thumb.dest.y + thumb.dest.h / 2);
+  await expect(page.locator('.peek-id')).toHaveText('s17');
+  // Keep the floating peek clear of the strip label under test.
+  const head = (await page.locator('.peek-head').boundingBox())!;
+  await page.mouse.move(head.x + 15, head.y + head.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(head.x + 515, head.y + head.height / 2);
+  await page.mouse.up();
+  const cursor = url(page).get('cursor');
+  // The label is in the 18 px band above the strip picture, outside its image hit target.
+  const label = (await probe(page)).thumbs.find(t => t.id === 's16')!;
+  const x = box.x + label.dest.x + 8;
+  const y = box.y + label.dest.y - 9;
+  await page.mouse.click(x, y);
+  await expect.poll(() => url(page).get('subject')).toBe('s16');
+  expect(url(page).get('cursor')).toBe(cursor);
+  await expect(page.locator('.peek-id')).toHaveText('s16');
+  // Retargeting can reposition the peek; dismiss it before testing the label's double-click.
+  await page.locator('.peek-close').click();
+  await settle(page);
+  await page.mouse.dblclick(x, y);
+  await waitMode(page, 'ortho');
+  expect(url(page).get('subject')).toBe('s16');
+  expect(url(page).get('cursor')).toBe(cursor);
+});
+
+for (const action of ['button', 'double-click'] as const) {
+  test(`peek ${action} opens Ortho with its pinned contrast and retains it on return`, async ({ page }) => {
+    await open(page, `${SPACE}&subject=s03&st=1`);
+    await expect.poll(async () => (await probe(page)).thumbs.some(t => t.contrast === 'delayearly')).toBe(true);
+    const thumb = (await probe(page)).thumbs.find(t => t.id === 's03' && t.contrast === 'delayearly')!;
+    const box = (await page.locator('canvas.montage').boundingBox())!;
+    await page.mouse.click(box.x + thumb.dest.x + thumb.dest.w / 2, box.y + thumb.dest.y + thumb.dest.h / 2);
+    await expect(page.locator('.peek-id')).toHaveText('s03');
+    await expect(page.locator('.peek-meta')).toContainText('delayearly');
+    expect(url(page).get('contrast')).toBe('cue');
+    if (action === 'button') await page.locator('.peek-ortho').click();
+    else await page.locator('.peek-img').dblclick();
+    await waitMode(page, 'ortho');
+    expect(url(page).get('contrast')).toBe('delayearly');
+    expect(url(page).get('subject')).toBe('s03');
+    await expect(page.locator('.ortho-host canvas').first()).toBeVisible();
+    await page.keyboard.press('Escape');
+    await waitMode(page, 'space');
+    expect(url(page).get('contrast')).toBe('delayearly');
+  });
+}

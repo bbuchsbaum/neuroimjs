@@ -311,6 +311,7 @@ export async function drawSpace(light = false): Promise<void> {
 
   // Members the basis excludes: a strip below the layout, outside its coordinates.
   const strip = [...b.excluded].sort((x, y) => a.ids[x.index].localeCompare(a.ids[y.index]));
+  const stripMarks: SpaceGeom['marks'] = [];
   const stripH = strip.length ? Math.round(Math.max(78, Math.min(120, H * 0.17))) : 0;
   // A strip at the top is reserved for the Space toolbar, so it never covers a map.
   const toolbarH = 34;
@@ -341,6 +342,8 @@ export async function drawSpace(light = false): Promise<void> {
       if (x + cellW > W - pad - 80) return;
       shown++;
       M.drawCell(ctx, a, e.index, outer, { left: a.ids[e.index] }, false);
+      // The ID band selects without placing a voxel, just like placed-map labels.
+      stripMarks.push({ member: e.index, box: { ...outer, h: 18 }, kind: 'label' });
       ctx.font = `10.5px ${FONT.sans}`;
       ctx.fillStyle = THEME.warn;
       ctx.textAlign = 'left';
@@ -367,7 +370,7 @@ export async function drawSpace(light = false): Promise<void> {
     lod === 'thumbs'
       ? { x: plot.x + thumbW / 2, y: plot.y + thumbH / 2, w: Math.max(1, plot.w - thumbW), h: Math.max(1, plot.h - thumbH) }
       : { x: plot.x + 40, y: plot.y + 16, w: Math.max(1, plot.w - 80), h: Math.max(1, plot.h - 32) };
-  const geom: SpaceGeom = { a, key: b.key, t: null, inner, plot, lod, thumbW, thumbH, points: [], marks: [], layout, strip: strip.map((e) => e.index), zoomBox: null, dock: null, captions: [] };
+  const geom: SpaceGeom = { a, key: b.key, t: null, inner, plot, lod, thumbW, thumbH, points: [], marks: stripMarks, layout, strip: strip.map((e) => e.index), zoomBox: null, dock: null, captions: [] };
   if (!traj) {
     // The preview docks under the legend when the column has room for a picture plus its caption.
     const room = plot.y + plot.h + (stripH ? stripH : 0) - dockY - 62; // caption: ID + up to three caveat lines

@@ -1675,7 +1675,9 @@ export function placeCursor(ijk: [number, number, number]): void {
 }
 
 /** Open one subject's map in Ortho with the cursor at a voxel. */
-export function openOrthoAt(subject: string, ijk: [number, number, number]): void {
+export function openOrthoAt(subject: string, ijk: [number, number, number], contrast: string | null = null): void {
+  // Like picture-to-Ortho navigation, the chosen map remains active on return.
+  if (contrast !== null) state.contrast = contrast;
   state.cursor = [...ijk];
   state.slice = ijk[AXIS[state.orient]];
   state.subject = subject;

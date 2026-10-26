@@ -165,7 +165,7 @@ function ensureEl(): HTMLDivElement {
   el.querySelector('.peek-close')!.addEventListener('click', closePeek);
   el.querySelector('.peek-ortho')!.addEventListener('click', () => {
     if (!peek) return;
-    M.openOrthoAt(peek.subject, cursorOnPeekPlane());
+    M.openOrthoAt(peek.subject, cursorOnPeekPlane(), peek.contrast);
   });
   el.querySelectorAll<HTMLButtonElement>('[data-peek-orient]').forEach((b) =>
     b.addEventListener('click', () => {
@@ -210,7 +210,7 @@ function ensureEl(): HTMLDivElement {
   });
   cv.addEventListener('dblclick', (e) => {
     const ijk = ijkAt(cv, e);
-    if (ijk && peek) M.openOrthoAt(peek.subject, ijk);
+    if (ijk && peek) M.openOrthoAt(peek.subject, ijk, peek.contrast);
   });
   dragByHead(el);
   return el;
