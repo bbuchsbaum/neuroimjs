@@ -9,7 +9,37 @@ run that built it.
 Publishing a GitHub release is the **only** publish trigger. Do not run
 `npm publish` locally.
 
-## Release flow
+## Quick release (one command)
+
+With entries under **Unreleased** in `CHANGELOG.md`, on an up-to-date, clean
+`main`:
+
+```bash
+npm run release -- minor --dry-run   # preview: version, notes, commands
+npm run release -- minor             # or patch | major | prerelease | 0.7.0
+```
+
+`scripts/release.mjs` checks the preconditions (on `main`, clean, in sync with
+`origin`, `gh` logged in, tag absent, version newer than npm `latest`,
+non-empty Unreleased section). It then bumps `package.json` and
+`package-lock.json`, dates the changelog section, commits `Release vX.Y.Z`,
+pushes `main`, creates the GitHub release with that section as its notes
+(marked pre-release for `-suffix` versions) and watches the `Release` workflow
+until it finishes. Add `--check` to run `verify:release` locally first, or
+`--no-watch` to return as soon as the release exists. The only credential
+used is your existing `gh`/git login. There is no npm login and no OTP.
+
+A prerelease (`prerelease` or `x.y.z-rc.N`) uses the Unreleased section as its
+release notes but leaves `CHANGELOG.md` alone, so the stable release that
+follows still gets the whole section. If a step fails, the script prints the
+state it left and the exact command to finish or undo it. In particular, if
+`gh release create` fails after the push, do not rerun the script; run the
+printed `gh release create …` command.
+
+The script commits straight to `main`. To go through a PR instead, follow the
+manual flow below.
+
+## Release flow (manual)
 
 1. **Bump the version in a pull request.** On a branch, set the version and
    date the changelog:
@@ -136,7 +166,7 @@ The provenance check reads the SLSA statement inside the attestation; it does
 not verify the Sigstore signature. For that, install the package in a project
 and run `npm audit signatures`.
 
-Releases up to and including 0.5.0 were published by hand and have no
+Releases up to and including 0.6.0 were published by hand and have no
 provenance attestation.
 
 ## When something fails
