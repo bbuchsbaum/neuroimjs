@@ -16,8 +16,8 @@ const DARK = '--nij-surface:#1a1a19;--nij-ink:#f0efec;--nij-ink-2:#c3c2b7;--nij-
   '--nij-s1:#3987e5;--nij-s2:#d95926;--nij-s3:#199e70;--nij-s4:#c98500;--nij-s5:#d55181;--nij-s6:#008300;--nij-s7:#9085e9;--nij-s8:#e66767;';
 const CSS = `
 .nij-plot{${LIGHT}position:relative;font:12px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--nij-ink);background:var(--nij-surface)}
-@media (prefers-color-scheme:dark){:root:where(:not([data-theme="light"])) .nij-plot{${DARK}--nij-faint:.6}}
-:root[data-theme="dark"] .nij-plot{${DARK}--nij-faint:.6}
+@media (prefers-color-scheme:dark){:root:where(:not([data-theme="light"])) .nij-plot{${DARK}--nij-faint:.75;--nij-band:.15}}
+:root[data-theme="dark"] .nij-plot{${DARK}--nij-faint:.75;--nij-band:.15}
 .nij-plot-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 8px;margin-bottom:2px}
 .nij-plot-title{font-weight:600}
 .nij-plot-meta{color:var(--nij-ink-2)}
@@ -43,12 +43,14 @@ const CSS = `
 .nij-mean{fill:var(--c);stroke:var(--nij-surface);stroke-width:1}
 .nij-err{stroke:var(--c);stroke-width:1.5;stroke-linecap:round}
 .nij-mean-line{fill:none;stroke:var(--c);stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
-.nij-ribbon{fill:var(--c);opacity:.2}
+.nij-ribbon{fill:var(--c);opacity:var(--nij-band,.2)}
 .nij-fit{stroke:var(--c);stroke-width:2}
 .nij-cursor{stroke:var(--nij-ink-3);stroke-width:1;fill:none;pointer-events:none}
 .nij-tip{position:absolute;pointer-events:none;background:var(--nij-surface);color:var(--nij-ink);border:1px solid var(--nij-rule);
  border-radius:6px;padding:4px 8px;box-shadow:0 2px 8px rgba(0,0,0,.12);white-space:nowrap;font-variant-numeric:tabular-nums;z-index:2}
 .nij-tip b{font-weight:600}
+.nij-tip i{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--c);margin-right:5px}
+.nij-plot-svg:focus-visible{outline:2px solid var(--nij-s1);outline-offset:2px}
 .nij-plot-foot{color:var(--nij-ink-3);margin:2px 0 4px;max-width:62ch}
 .nij-plot-warn{display:block;color:var(--nij-ink);border-left:3px solid var(--nij-s4);padding:1px 0 1px 7px;margin:2px 0 4px}
 .nij-plot-controls{display:grid;grid-template-columns:max-content max-content 1fr;gap:3px 8px;align-items:center;color:var(--nij-ink-2);font-size:11px}
@@ -110,6 +112,7 @@ export class PlotPanel {
   private showAveraged = false;
   private resize?: ResizeObserver;
   private lastWidth = 0;
+  private listening?: AbortController;
 
   constructor(private backing: Backing, private o: PlotPanelOptions = {}) {
     ensureStyle();
@@ -203,12 +206,14 @@ export class PlotPanel {
     return this.ext ? buildScene(this.backing, this.ext, this.spec, !!this.o.circular) : null;
   }
 
-  dispose(): void { this.resize?.disconnect(); }
+  dispose(): void { this.resize?.disconnect(); this.listening?.abort(); }
 
   private draw(): void {
     const root = this.element;
     root.replaceChildren();
     this.svg = null;
+    this.listening?.abort();
+    this.listening = new AbortController();
     const scene = this.scene();
     if (!scene) return;
     const width = this.o.width ?? (root.clientWidth || 460);
@@ -248,76 +253,131 @@ export class PlotPanel {
       }));
       foot.push(`${fits.join('; ')}. One point per subject; line with 95% CI of the fit.`);
     }
-    if (scene.incomplete.length) foot.push(`${scene.incomplete.length} subject${scene.incomplete.length > 1 ? 's' : ''} without every cell left out of the intervals.`);
+    if (scene.incomplete.length) foot.push(`Left out of the intervals for a missing cell: ${scene.incomplete.join(', ')}.`);
     if (scene.collapsed.length) foot.push(`Averaged within subject over ${scene.collapsed.join(', ')}.`);
     if (foot.length) div(root, 'nij-plot-foot', foot.join(' '));
     if (this.o.controls !== false) this.controls(root, scene, color);
   }
 
+  /**
+   * Nearest-point reading by mouse, touch (a tap pins, a tap elsewhere
+   * clears) and keyboard (arrows step through the marks).
+   */
   private hover(svg: SVGSVGElement, hits: HitPoint[]): void {
+    const SVGNS = 'http://www.w3.org/2000/svg';
     const tip = document.createElement('div');
     tip.className = 'nij-tip';
     tip.hidden = true;
+    tip.setAttribute('role', 'status');
     this.element.appendChild(tip);
-    const ring = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    const ring = document.createElementNS(SVGNS, 'circle');
     ring.setAttribute('class', 'nij-cursor');
     ring.setAttribute('r', '6');
     ring.style.display = 'none';
     svg.appendChild(ring);
-    let hot: string | null = null;
-    const toLocal = (ev: PointerEvent) => {
-      const r = svg.getBoundingClientRect();
-      const vb = svg.viewBox.baseVal;
-      return [((ev.clientX - r.left) / (r.width || 1)) * (vb.width || r.width), ((ev.clientY - r.top) / (r.height || 1)) * (vb.height || r.height)];
-    };
-    const rule = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    const rule = document.createElementNS(SVGNS, 'line');
     rule.setAttribute('class', 'nij-cursor');
     rule.style.display = 'none';
     svg.insertBefore(rule, svg.firstChild);
+    svg.setAttribute('tabindex', '0');
     const summaries = hits.filter((h) => h.xv !== undefined);
     const top = Math.min(...hits.map((h) => h.y), 20), bottom = svg.viewBox.baseVal.height - 30;
-    svg.addEventListener('pointermove', (ev) => {
-      const [x, y] = toLocal(ev);
+    let hot: string | null = null;
+    let pinned = false;
+
+    type Reading = { at: HitPoint; rows: { color?: string; text: string }[]; snapped: boolean };
+    const nearest = (x: number, y: number): Reading | null => {
       let best: HitPoint | null = null, bd = 24 * 24;
-      // Subjects win when the pointer is right on them; otherwise a linear x snaps.
       for (const h of hits) {
         if (h.xv !== undefined) continue;
         const d = (h.x - x) ** 2 + (h.y - y) ** 2;
         if (d < bd) { bd = d; best = h; }
       }
-      rule.style.display = 'none';
+      // Subjects win when the pointer is right on them; otherwise a linear x snaps.
       if ((!best || bd > 36) && summaries.length) {
         let near: HitPoint | null = null, dx = 28;
         for (const h of summaries) if (Math.abs(h.x - x) < dx) { dx = Math.abs(h.x - x); near = h; }
-        if (near) {
-          const col = summaries.filter((h) => h.panel === near!.panel && h.xv === near!.xv).sort((a, b) => a.y - b.y);
-          best = { x: near.x, y: Math.min(...col.map((h) => h.y)), color: near.color, lines: [near.lines[0], ...col.map((h) => h.lines[1])] };
-          rule.setAttribute('x1', String(near.x)); rule.setAttribute('x2', String(near.x));
-          rule.setAttribute('y1', String(top)); rule.setAttribute('y2', String(bottom));
-          rule.style.display = '';
-        }
+        if (near) return snap(near);
       }
-      if (!best) { leave(); return; }
+      return best ? { at: best, rows: rowsOf(best), snapped: false } : null;
+    };
+    const rowsOf = (h: HitPoint) => h.lines.map((text, i) => ({ text, color: i === h.lines.length - 1 ? h.color : undefined }));
+    const snap = (near: HitPoint): Reading => {
+      const col = summaries.filter((h) => h.panel === near.panel && h.xv === near.xv).sort((a, b) => a.y - b.y);
+      return {
+        at: { ...near, y: Math.min(...col.map((h) => h.y)) },
+        rows: [{ text: near.lines[0] }, ...col.map((h) => ({ text: h.lines[1], color: h.color }))],
+        snapped: true,
+      };
+    };
+    const show = (r: Reading | null) => {
+      if (!r) { clear(); return; }
+      const best = r.at;
+      rule.style.display = r.snapped ? '' : 'none';
+      if (r.snapped) {
+        rule.setAttribute('x1', String(best.x)); rule.setAttribute('x2', String(best.x));
+        rule.setAttribute('y1', String(top)); rule.setAttribute('y2', String(bottom));
+      }
       ring.setAttribute('cx', String(best.x));
       ring.setAttribute('cy', String(best.y));
-      ring.style.display = rule.style.display === '' ? 'none' : '';
+      ring.style.display = r.snapped ? 'none' : '';
       tip.hidden = false;
-      tip.innerHTML = best.lines.map((l, i) => (i ? escapeHtml(l) : `<b>${escapeHtml(l)}</b>`)).join('<br>');
+      tip.replaceChildren();
+      r.rows.forEach((row, i) => {
+        const line = document.createElement('div');
+        if (row.color) {
+          const sw = document.createElement('i');
+          sw.style.setProperty('--c', row.color);
+          line.appendChild(sw);
+        }
+        const t = document.createElement(i === 0 && r.rows.length > 1 ? 'b' : 'span');
+        t.textContent = row.text;
+        line.appendChild(t);
+        tip.appendChild(line);
+      });
       const sr = svg.getBoundingClientRect(), er = this.element.getBoundingClientRect();
       const k = sr.width / (svg.viewBox.baseVal.width || sr.width || 1);
       const px = sr.left - er.left + best.x * k, py = sr.top - er.top + best.y * k;
       tip.style.left = `${Math.max(0, Math.min(px + 12, er.width - tip.offsetWidth))}px`;
       tip.style.top = `${py - tip.offsetHeight - 10}px`;
-      const id = best.subject ?? null;
+      const id = r.snapped ? null : best.subject ?? null;
       if (id !== hot) { hot = id; this.setHighlight(id); this.o.onSubject?.(id); }
-    });
-    const leave = () => {
+    };
+    const clear = () => {
       tip.hidden = true;
       rule.style.display = 'none';
       ring.style.display = 'none';
       if (hot !== null) { hot = null; this.setHighlight(null); this.o.onSubject?.(null); }
     };
-    svg.addEventListener('pointerleave', leave);
+    const local = (ev: PointerEvent): [number, number] => {
+      const r = svg.getBoundingClientRect();
+      const vb = svg.viewBox.baseVal;
+      return [((ev.clientX - r.left) / (r.width || 1)) * (vb.width || r.width), ((ev.clientY - r.top) / (r.height || 1)) * (vb.height || r.height)];
+    };
+    svg.addEventListener('pointermove', (ev) => { if (ev.pointerType !== 'touch' && !pinned) show(nearest(...local(ev))); });
+    svg.addEventListener('pointerleave', (ev) => { if (ev.pointerType !== 'touch' && !pinned) clear(); });
+    svg.addEventListener('pointerdown', (ev) => {
+      if (ev.pointerType !== 'touch') return;
+      const r = nearest(...local(ev));
+      pinned = !!r;
+      show(r);
+    });
+    document.addEventListener('pointerdown', (ev) => {
+      if (pinned && !svg.contains(ev.target as Node)) { pinned = false; clear(); }
+    }, { signal: this.listening?.signal });
+    // Keyboard: step through marks left to right.
+    const order = [...hits.filter((h) => h.xv === undefined), ...summaries].sort((a, b) => a.x - b.x || a.y - b.y);
+    let cursor = -1;
+    svg.addEventListener('keydown', (ev) => {
+      if (!order.length) return;
+      if (ev.key === 'Escape') { cursor = -1; clear(); return; }
+      if (ev.key !== 'ArrowRight' && ev.key !== 'ArrowLeft') return;
+      ev.preventDefault();
+      cursor = Math.max(0, Math.min(order.length - 1, cursor + (ev.key === 'ArrowRight' ? 1 : -1)));
+      const h = order[cursor];
+      show(h.xv !== undefined ? snap(h) : { at: h, rows: rowsOf(h), snapped: false });
+    });
+    svg.addEventListener('blur', () => { cursor = -1; if (!pinned) clear(); });
   }
 
   private controls(root: HTMLElement, scene: Scene, color: (l: string | null) => string): void {
@@ -391,7 +451,6 @@ const cssEscape = (s: string): string => {
   const esc = (globalThis as { CSS?: { escape?: (v: string) => string } }).CSS?.escape;
   return esc ? esc(s) : s.replace(/["\\]/g, '\\$&');
 };
-const escapeHtml = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c] as string);
 
 function div(p: HTMLElement, cls: string, txt?: string): HTMLDivElement {
   const d = document.createElement('div');

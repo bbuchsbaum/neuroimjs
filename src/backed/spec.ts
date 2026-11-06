@@ -72,8 +72,9 @@ export interface Scene {
   covariate: boolean;
   /** What was averaged away. */
   collapsed: string[];
-  /** Subjects per color level (or overall). */
+  /** Subjects per color level (or overall), and per facet. */
   nByLevel: Record<string, number>;
+  nByFacet: Record<string, number>;
   /** A between-subject factor is mapped while intervals are within-subject. */
   mixed: boolean;
   /** Subjects left out of within-subject intervals for a missing cell. */
@@ -155,6 +156,10 @@ export function buildScene(b: Backing, ext: Extract, spec: PlotSpec, circular = 
   if (b.subject) for (const l of spec.color ? colorLevels : ['']) {
     nByLevel[l] = new Set(rows.filter((r) => !spec.color || String(r[spec.color]) === l).map((r) => r[b.subject as string])).size;
   }
+  const nByFacet: Record<string, number> = {};
+  if (b.subject && spec.facet) for (const l of facetLevels as string[]) {
+    nByFacet[l] = new Set(rows.filter((r) => String(r[spec.facet as string]) === l).map((r) => r[b.subject as string])).size;
+  }
   const unitOf = (n: string | undefined) => (n === b.axis?.name ? b.axis?.unit : n === b.axis?.basis?.name ? b.axis?.basis?.unit :
     b.columns.find((c) => c.name === n)?.unit);
   return {
@@ -172,6 +177,7 @@ export function buildScene(b: Backing, ext: Extract, spec: PlotSpec, circular = 
     covariate: isCov,
     collapsed,
     nByLevel,
+    nByFacet,
     mixed: sum.error === 'within' && keys.some((k) => k !== ax && !within.includes(k)),
     incomplete: sum.incomplete,
     circular,

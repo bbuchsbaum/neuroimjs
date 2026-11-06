@@ -102,7 +102,8 @@ export function renderScene(scene: Scene, o: RenderOptions): Rendered {
   const W = strip ? Math.min(o.width, 360) : o.width;
   const nS = scene.panels[0]?.series.length ?? 1;
   const endLabels = nS > 1 && (linear ? !scene.covariate : scene.paired);
-  const m = { top: scene.facet.name ? 44 : 26, right: endLabels ? 70 : 14, bottom: !linear && scene.x.name ? 40 : 30, left: 38 };
+  const bandName = !linear && scene.x.name ? scene.x.name : '';
+  const m = { top: scene.facet.name ? 44 : 26, right: Math.max(endLabels ? 70 : 14, bandName ? bandName.length * 6.2 + 14 : 0), bottom: 30, left: 38 };
   const nP = scene.panels.length;
   const gap = 20;
   const plotW = strip ? 96 : W - m.left - m.right;
@@ -144,7 +145,7 @@ export function renderScene(scene: Scene, o: RenderOptions): Rendered {
   scene.panels.forEach((panel, pi) => {
     const px = m.left + pi * (pw + gap);
     const g = el('g', { class: 'nij-panel' }, svg);
-    if (panel.facet != null) text(g, panel.facet, { x: px + pw / 2, y: 30, class: 'nij-facet', 'text-anchor': 'middle' });
+    if (panel.facet != null) text(g, panel.facet + (scene.nByFacet[panel.facet] != null ? `, n = ${scene.nByFacet[panel.facet]}` : ''), { x: px + pw / 2, y: 30, class: 'nij-facet', 'text-anchor': 'middle' });
     const band = scene.x.levels.length || 1;
     const bw = pw / band;
     const dodge = (si: number) => (nS > 1 && !linear ? (si - (nS - 1) / 2) * Math.min(14, bw / (nS + 2)) : 0);
@@ -169,7 +170,7 @@ export function renderScene(scene: Scene, o: RenderOptions): Rendered {
       if (lab) text(xa, lab, { x: px + pw, y: by + 14, 'text-anchor': 'end', class: 'nij-label' });
     } else {
       scene.x.levels.forEach((l) => text(xa, l, { x: X(l), y: by + 12, 'text-anchor': 'middle' }));
-      if (scene.x.name && pi === Math.floor((nP - 1) / 2)) text(xa, scene.x.name, { x: nP % 2 ? px + pw / 2 : px + pw + gap / 2, y: by + 25, 'text-anchor': 'middle', class: 'nij-label' });
+      if (bandName && pi === nP - 1) text(xa, bandName, { x: px + pw + 10, y: by + 12, class: 'nij-label' });
     }
 
     const ends: { y: number; label: string; x: number; color: string }[] = [];
@@ -184,7 +185,7 @@ export function renderScene(scene: Scene, o: RenderOptions): Rendered {
           if (sub.points.length < 2) continue;
           const d = sub.points.map((p, i) => `${i ? 'L' : 'M'}${X(p.x, si).toFixed(1)},${Y(p.y).toFixed(1)}`).join('');
           el('path', { d, class: 'nij-subject-line', 'data-subject': sub.id }, subs);
-          for (const p of sub.points) hits.push({ x: X(p.x, si), y: Y(p.y), subject: sub.id, color: col, lines: [sub.id, `${tag}${p.x}: ${fmtNum(p.y)}`] });
+          for (const p of sub.points) hits.push({ x: X(p.x, si), y: Y(p.y), subject: sub.id, color: col, lines: [`${tag}${p.x}: ${fmtNum(p.y)}`] });
         }
         else {
           const groups = new Map<string, { id: string; x: string | number; y: number }[]>();
@@ -200,7 +201,7 @@ export function renderScene(scene: Scene, o: RenderOptions): Rendered {
               const cx = X(p.x, si) + off[i] + (linear ? 0 : nS > 1 ? 0 : -14);
               el('circle', { cx, cy: Y(p.y), r, class: 'nij-subject-dot', 'data-subject': p.id, 'data-key': `s|${p.id}|${p.x}` }, subs);
               hits.push({ x: cx, y: Y(p.y), subject: p.id, color: col,
-                lines: [p.id, scene.covariate ? `${tag}${scene.x.name} ${fmtNum(p.x as number)}: ${fmtNum(p.y)}` : `${tag}${p.x === '' ? '' : p.x + ': '}${fmtNum(p.y)}`] });
+                lines: [scene.covariate ? `${tag}${scene.x.name} ${fmtNum(p.x as number)}: ${fmtNum(p.y)}` : `${tag}${p.x === '' ? '' : p.x + ': '}${fmtNum(p.y)}`] });
             });
           }
         }
@@ -256,8 +257,9 @@ export function renderScene(scene: Scene, o: RenderOptions): Rendered {
     // Direct labels at line ends, spread apart, with a leader when moved.
     const placed = relax(ends.map((e) => e.y), 13);
     ends.forEach((e, i) => {
-      const lx = Math.max(...ends.map((q) => q.x)) + 10;
-      const lead = el('path', { d: `M${e.x + 5},${e.y}L${lx - 3},${placed[i]}`, class: 'nij-leader' }, g);
+      const from = Math.max(...ends.map((q) => q.x)) + 5; // clear of every dodged mark
+      const lx = from + 8;
+      const lead = el('path', { d: `M${from},${e.y}L${lx - 3},${placed[i]}`, class: 'nij-leader' }, g);
       lead.style.setProperty('--c', e.color);
       text(g, e.label, { x: lx, y: placed[i], class: 'nij-direct', 'dominant-baseline': 'middle' });
     });

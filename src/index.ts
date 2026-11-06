@@ -337,3 +337,8 @@ export type {
   LogLevelName,
 } from './display/logging/Logger';
 export * from './space/index';
+
+// Backed plots: the data behind a map, plotted at a probe (see docs/plans/backed-plots.md).
+export * as backed from './backed';
+export { PlotPanel, BackedView, MemoryBacking } from './backed';
+export type { Backing, PlotSpec } from './backed';

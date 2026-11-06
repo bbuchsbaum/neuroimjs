@@ -6,3 +6,4 @@ export { type PlotSpec, type Scene, type Series, type Panel, inferSpec, buildSce
 export { renderScene, niceTicks, swarm, relax, type RenderOptions, type Rendered, type HitPoint } from './render';
 export { PlotPanel, colorScale, type PlotPanelOptions } from './PlotPanel';
 export { mean, sd, tQuantile, tPValue, fitLine } from './stats';
+export { BackedView, type BackedViewOptions, type ViewerLike } from './BackedView';
