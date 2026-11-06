@@ -8,7 +8,7 @@ import { CrossHair, CrossHairOptions } from './CrossHair';  // note: updated Cro
 import { CoordinateTransformer } from './CoordinateTransformer';
 import { NeuroSpace } from '../geometry/NeuroSpace';
 import { SliceModel } from './SliceModel';
-import { reaction, IReactionDisposer, autorun } from 'mobx';
+import { reaction, IReactionDisposer, autorun, untracked } from 'mobx';
 import { ISliceView, ICoordinateTransformer } from './interfaces/index';
 import { PointerEventHandler, SlicePointerEvent } from './types/display';
 
@@ -222,7 +222,10 @@ export class SliceView implements ISliceView {
     // 1) Re-render when currentCoord changes
     const coordDisposer = autorun(() => {
       const coord = this.model.currentCoord.slice();
-      this.updatePosition(coord);
+      // Render untracked: otherwise this autorun also subscribes to every layer
+      // observable that rendering reads (version, opacity, ...) and re-renders
+      // on each layer change, duplicating the layer reaction below.
+      untracked(() => this.updatePosition(coord));
 
       // Sync the slider as well
       if (this.slider) {

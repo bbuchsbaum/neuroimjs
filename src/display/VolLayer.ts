@@ -508,11 +508,14 @@ export class VolLayer {
 
   /**
    * Sets a new intensity threshold [low, high] and invalidates the cache.
+   * Setting the current threshold again is a no-op, so repeated calls (e.g.
+   * one per view that shares this layer) do not re-colour every slice.
    *
    * @param threshold - The new threshold to apply.
    */
   @action
   public setThreshold(threshold: Threshold): void {
+    if (samePair(threshold, this.threshold)) return;
     this.threshold = threshold;
     this.colorMap.setThreshold(threshold);
     this.invalidateCache();
@@ -525,6 +528,7 @@ export class VolLayer {
    */
   @action
   public setOpacity(opacity: number): void {
+    if (opacity === this.opacity) return;
     // Opacity is applied once, at composite time (ImageLayer sets sprite.alpha).
     // It is deliberately NOT baked into the colormap: doing both squared the
     // effective opacity (0.7 rendered as 0.49) and overwrote any per-entry LUT alpha.
@@ -611,11 +615,13 @@ export class VolLayer {
 
   /**
    * Sets a new intensity range [min, max] for visualization and invalidates the cache.
+   * Setting the current range again is a no-op.
    *
    * @param range - The new intensity range.
    */
   @action
   public setRange(range: Range): void {
+    if (samePair(range, this.range)) return;
     this.range = range;
     this.colorMap.setRange(this.range);
     this.invalidateCache();
@@ -630,6 +636,10 @@ export class VolLayer {
   public setVisible(visible: boolean): void {
     this.visible = visible;
   }
+}
+
+function samePair(a: ArrayLike<number> | null | undefined, b: ArrayLike<number> | null | undefined): boolean {
+  return !!a && !!b && a.length === 2 && b.length === 2 && a[0] === b[0] && a[1] === b[1];
 }
 
 /**
@@ -810,43 +820,48 @@ export function clusterSizes(
   high: number
 ): Float32Array {
   const [nx, ny, nz] = [dim[0], dim[1] ?? 1, dim[2] ?? 1];
-  const n = nx * ny * nz;
+  const nxy = nx * ny;
+  const n = nxy * nz;
   const sizes = new Float32Array(n);
-  const sign = (v: number) => (v >= high && v > 0 ? 1 : v <= low && v < 0 ? -1 : 0);
-  const seen = new Uint8Array(n);
-  const stack: number[] = [];
-  const members: number[] = [];
+  // Sign per voxel (1 / -1 beyond the threshold, 0 otherwise); a voxel is
+  // reset to 0 once visited, so it doubles as the "seen" mask.
+  const sign = new Int8Array(n);
+  for (let i = 0; i < n; i++) {
+    const v = data[i];
+    sign[i] = v >= high && v > 0 ? 1 : v <= low && v < 0 ? -1 : 0;
+  }
+  // Every voxel is pushed at most once, so one buffer serves as both the DFS
+  // stack and the list of the current cluster's members.
+  const members = new Int32Array(n);
   for (let seed = 0; seed < n; seed++) {
-    if (seen[seed]) continue;
-    const s = sign(data[seed]);
+    const s = sign[seed];
     if (s === 0) continue;
-    seen[seed] = 1;
-    stack.push(seed);
-    members.length = 0;
-    while (stack.length) {
-      const idx = stack.pop()!;
-      members.push(idx);
-      const i = idx % nx;
-      const j = Math.floor(idx / nx) % ny;
-      const k = Math.floor(idx / (nx * ny));
-      for (let dk = -1; dk <= 1; dk++) {
-        const kk = k + dk;
-        if (kk < 0 || kk >= nz) continue;
-        for (let dj = -1; dj <= 1; dj++) {
-          const jj = j + dj;
-          if (jj < 0 || jj >= ny) continue;
-          for (let di = -1; di <= 1; di++) {
-            const ii = i + di;
-            if (ii < 0 || ii >= nx) continue;
-            const m = (kk * ny + jj) * nx + ii;
-            if (seen[m] || sign(data[m]) !== s) continue;
-            seen[m] = 1;
-            stack.push(m);
+    sign[seed] = 0;
+    members[0] = seed;
+    let count = 1;
+    let head = 0;
+    while (head < count) {
+      const idx = members[head++];
+      const k = (idx / nxy) | 0;
+      const rem = idx - k * nxy;
+      const j = (rem / nx) | 0;
+      const i = rem - j * nx;
+      const k0 = k > 0 ? k - 1 : 0, k1 = k < nz - 1 ? k + 1 : k;
+      const j0 = j > 0 ? j - 1 : 0, j1 = j < ny - 1 ? j + 1 : j;
+      const i0 = i > 0 ? i - 1 : 0, i1 = i < nx - 1 ? i + 1 : i;
+      for (let kk = k0; kk <= k1; kk++) {
+        for (let jj = j0; jj <= j1; jj++) {
+          const row = kk * nxy + jj * nx;
+          for (let ii = i0; ii <= i1; ii++) {
+            const m = row + ii;
+            if (sign[m] !== s) continue;
+            sign[m] = 0;
+            members[count++] = m;
           }
         }
       }
     }
-    for (const m of members) sizes[m] = members.length;
+    for (let q = 0; q < count; q++) sizes[members[q]] = count;
   }
   return sizes;
 }

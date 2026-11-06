@@ -1,3 +1,4 @@
+import { runInAction } from 'mobx';
 import { OrthogonalImageViewer } from './OrthogonalImageViewer';
 import { ImageLayer } from './ImageLayer';
 import { VolStack } from './VolStack';
@@ -269,7 +270,12 @@ export class SimpleOrthogonalViewer {
       visible: params.visible,
     } as any;
 
-    this.viewer.applyToImageLayers(layer => layer.updateLayer(layerId, updateParams));
+    // The main and per-view ImageLayers share one VolStack. Apply the update as
+    // a single MobX transaction so each view re-renders once, after every
+    // per-view texture cache has been invalidated, instead of once per layer.
+    runInAction(() => {
+      this.viewer.applyToImageLayers(layer => layer.updateLayer(layerId, updateParams));
+    });
     this.redraw();
     this.emitter.emit('layerUpdated', { id: layerId });
   }
