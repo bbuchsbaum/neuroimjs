@@ -140,14 +140,18 @@ export function summarise(rows: Row[], o: SummaryOptions): Summary {
   const scale = error === 'within' ? Math.sqrt(cellsJ / (cellsJ - 1)) : 1;
 
   const cells: Cell[] = [];
-  for (const g of groupBy(used, keys).values()) {
+  // Means and n from every subject; within-subject half-widths from the
+  // complete subjects' normalised values.
+  const usedBy = groupBy(used, keys);
+  for (const [k, g] of groupBy(subjects, keys)) {
     const vals = g.map((r) => r.value as number);
     const m = mean(vals);
     const n = vals.length;
-    const spread = error === 'within' ? g.map((r) => spreadOf.get(r) as number) : vals;
-    const half = error === 'none' || n < 2 ? NaN : (tQuantile(1 - (1 - level) / 2, n - 1) * sd(spread) * scale) / Math.sqrt(n);
+    const spread = error === 'within' ? (usedBy.get(k) ?? []).map((r) => spreadOf.get(r) as number) : vals;
+    const ns = spread.length;
+    const half = error === 'none' || ns < 2 ? NaN : (tQuantile(1 - (1 - level) / 2, ns - 1) * sd(spread) * scale) / Math.sqrt(ns);
     const key: Row = {};
-    for (const k of keys) key[k] = g[0][k];
+    for (const c of keys) key[c] = g[0][c];
     cells.push({ key, mean: m, lo: m - half, hi: m + half, n });
   }
   return { cells, subjects, error, withinCells: cellsJ, incomplete: [...incomplete] };

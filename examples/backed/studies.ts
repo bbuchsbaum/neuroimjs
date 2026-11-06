@@ -11,10 +11,12 @@ let seed = 7;
 const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
 const norm = () => Math.sqrt(-2 * Math.log(rand() + 1e-12)) * Math.cos(2 * Math.PI * rand());
 
-function data(rows: Row[], width: number, f: (r: Row, a: number) => number, noise: number) {
+/** Each row: signal + a row-level deviation shared by all voxels (what survives averaging) + voxel noise. */
+function data(rows: Row[], width: number, f: (r: Row, a: number) => number, noise: number, rowNoise = noise) {
   return rows.map((r) => {
     const d = new Float32Array(NV * width);
-    for (let m = 0; m < NV; m++) for (let a = 0; a < width; a++) d[m * width + a] = f(r, a) + noise * norm();
+    const dev = Array.from({ length: width }, () => rowNoise * norm());
+    for (let m = 0; m < NV; m++) for (let a = 0; a < width; a++) d[m * width + a] = f(r, a) + dev[a] + noise * norm();
     return d;
   });
 }
@@ -23,7 +25,7 @@ const subjects = (n: number) => Array.from({ length: n }, (_, i) => `sub-${Strin
 export function onePerSubject() {
   const offs = new Map<string, number>();
   const design = subjects(24).map((s) => { offs.set(s, 0.6 + 0.5 * norm()); return { subject: s }; });
-  return new MemoryBacking({ space, design, data: data(design, 1, (r) => offs.get(r.subject as string)!, 0.3), valueLabel: 'faces − houses, % signal' });
+  return new MemoryBacking({ space, design, data: data(design, 1, (r) => offs.get(r.subject as string)!, 0.3, 0), valueLabel: 'faces − houses (% signal change)' });
 }
 
 export function groupByCondition() {
@@ -38,7 +40,7 @@ export function groupByCondition() {
     const c = r.condition === 'faces' ? 1.1 : r.condition === 'houses' ? 0.45 : 0.1;
     return base.get(r.subject as string)! + c * (r.group === 'patient' ? 0.6 : 1);
   };
-  return new MemoryBacking({ space, design, data: data(design, 1, eff, 0.35), valueLabel: 'β, % signal', provenance: { space: 'MNI' },
+  return new MemoryBacking({ space, design, data: data(design, 1, eff, 0.35), valueLabel: 'β (% signal change)', provenance: { space: 'MNI' },
     columns: [{ name: 'subject', kind: 'factor', role: 'subject' }, { name: 'group', kind: 'factor', role: 'group' },
       { name: 'condition', kind: 'factor', role: 'condition', levels: ['faces', 'houses', 'scrambled'] },
       { name: 'run', kind: 'factor', role: 'run' }] });
@@ -54,7 +56,7 @@ export function fir() {
   const amp = new Map(ids.map((s) => [s, 1 + 0.3 * norm()]));
   for (const s of ids) for (const condition of ['faces', 'houses']) design.push({ subject: s, condition });
   const f = (r: Row, a: number) => amp.get(r.subject as string)! * (r.condition === 'faces' ? 3 : 1.6) * hrf(lags[a]) / 0.1;
-  return new MemoryBacking({ space, design, axis, data: data(design, lags.length, f, 0.25), valueLabel: '% signal' });
+  return new MemoryBacking({ space, design, axis, data: data(design, lags.length, f, 0.25, 0.3), valueLabel: '% signal change' });
 }
 
 export function basis() {
@@ -67,13 +69,13 @@ export function basis() {
   for (const s of ids) for (const condition of ['faces', 'houses']) design.push({ subject: s, condition });
   const gain = new Map(ids.map((s) => [s, 1 + 0.35 * norm()]));
   const coef = (r: Row, a: number) => gain.get(r.subject as string)! * (r.condition === 'faces' ? [1.4, 0.5, 0.1] : [0.8, -0.2, 0.05])[a];
-  return new MemoryBacking({ space, design, axis, data: data(design, 3, coef, 0.15), valueLabel: '% signal' });
+  return new MemoryBacking({ space, design, axis, data: data(design, 3, coef, 0.15, 0.12), valueLabel: '% signal change' });
 }
 
 export function covariate() {
   const ids = subjects(30);
   const ages = new Map(ids.map((s) => [s, Math.round(20 + 50 * rand())]));
   const design = ids.map((s) => ({ subject: s, age: ages.get(s)! }));
-  return new MemoryBacking({ space, design, data: data(design, 1, (r) => 1.4 - 0.015 * (r.age as number), 0.3),
-    valueLabel: 'faces − houses, % signal', columns: [{ name: 'age', kind: 'numeric', unit: 'years', role: 'covariate' }] });
+  return new MemoryBacking({ space, design, data: data(design, 1, (r) => 1.4 - 0.015 * (r.age as number) + (r.subject === 'sub-07' ? 1.2 : 0), 0.3, 0.2),
+    valueLabel: 'faces − houses (% signal change)', columns: [{ name: 'age', kind: 'numeric', unit: 'years', role: 'covariate' }] });
 }

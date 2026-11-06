@@ -78,6 +78,9 @@ export interface HitPoint {
   x: number;
   y: number;
   subject?: string;
+  /** For summaries on a linear x: the panel and x value, so hover can snap to x. */
+  panel?: number;
+  xv?: number;
   /** Tooltip lines. */
   lines: string[];
   color: string;
@@ -99,7 +102,7 @@ export function renderScene(scene: Scene, o: RenderOptions): Rendered {
   const W = strip ? Math.min(o.width, 360) : o.width;
   const nS = scene.panels[0]?.series.length ?? 1;
   const endLabels = nS > 1 && (linear ? !scene.covariate : scene.paired);
-  const m = { top: 26, right: endLabels ? 70 : 14, bottom: 30, left: 38 };
+  const m = { top: scene.facet.name ? 44 : 26, right: endLabels ? 70 : 14, bottom: !linear && scene.x.name ? 40 : 30, left: 38 };
   const nP = scene.panels.length;
   const gap = 20;
   const plotW = strip ? 96 : W - m.left - m.right;
@@ -118,9 +121,9 @@ export function renderScene(scene: Scene, o: RenderOptions): Rendered {
     if (s.fit) for (const x of xs) ys.push(s.fit.intercept + s.fit.slope * x + s.fit.band(x), s.fit.intercept + s.fit.slope * x - s.fit.band(x));
   }
   const dlo = Math.min(...ys), dhi = Math.max(...ys);
-  const yt = niceTicks(dlo, dhi, 4).filter((t) => t >= dlo - 1e-9 && t <= dhi + 1e-9);
   const pad = (dhi - dlo) * 0.04 || 1;
   const y0 = dlo - pad, y1 = dhi + pad;
+  const yt = niceTicks(dlo, dhi, Math.max(3, Math.round(ph / 40))).filter((t) => t >= y0 && t <= y1);
   const Y = (v: number) => m.top + ph - ((v - y0) / (y1 - y0)) * ph;
   const xlo = linear ? Math.min(...xs) : 0, xhi = linear ? Math.max(...xs) : 1;
   const xpad = scene.covariate ? (xhi - xlo) * 0.03 : 0;
@@ -141,7 +144,7 @@ export function renderScene(scene: Scene, o: RenderOptions): Rendered {
   scene.panels.forEach((panel, pi) => {
     const px = m.left + pi * (pw + gap);
     const g = el('g', { class: 'nij-panel' }, svg);
-    if (panel.facet != null) text(g, panel.facet, { x: px + pw / 2, y: 10, class: 'nij-facet', 'text-anchor': 'middle' });
+    if (panel.facet != null) text(g, panel.facet, { x: px + pw / 2, y: 30, class: 'nij-facet', 'text-anchor': 'middle' });
     const band = scene.x.levels.length || 1;
     const bw = pw / band;
     const dodge = (si: number) => (nS > 1 && !linear ? (si - (nS - 1) / 2) * Math.min(14, bw / (nS + 2)) : 0);
@@ -149,6 +152,7 @@ export function renderScene(scene: Scene, o: RenderOptions): Rendered {
       linear ? px + ((Number(x) - xlo + xpad) / (xhi - xlo + 2 * xpad || 1)) * pw
         : px + (Math.max(0, scene.x.levels.indexOf(String(x))) + 0.5) * bw + dodge(si);
 
+    if (pw > 300) for (const t of yt) if (t !== 0) el('line', { x1: px, x2: px + pw, y1: Y(t), y2: Y(t), class: 'nij-grid' }, g);
     if (dlo < 0 && dhi > 0 || dlo === 0 || dhi === 0) el('line', { x1: px, x2: px + pw, y1: Y(0), y2: Y(0), class: 'nij-zero' }, g);
 
     // X: range frame on linear axes, level names on bands; the name and unit at the end.
@@ -156,15 +160,17 @@ export function renderScene(scene: Scene, o: RenderOptions): Rendered {
     const by = m.top + ph + 6;
     if (linear) {
       el('line', { x1: X(xlo), x2: X(xhi), y1: by, y2: by, class: 'nij-frame' }, xa);
+      const lab = pi === nP - 1 && scene.x.name ? (scene.x.unit ? `${scene.x.name}, ${scene.x.unit}` : scene.x.name) : '';
+      const room = px + pw - lab.length * 6.2 - 14; // ticks stop short of the axis name
       xt.forEach((t) => {
         el('line', { x1: X(t), x2: X(t), y1: by, y2: by + 3, class: 'nij-frame' }, xa);
-        text(xa, fmtNum(t), { x: X(t), y: by + 14, 'text-anchor': 'middle' });
+        if (!lab || X(t) < room) text(xa, fmtNum(t), { x: X(t), y: by + 14, 'text-anchor': 'middle' });
       });
-      if (pi === nP - 1 && scene.x.name) {
-        const lab = scene.x.unit ? `${scene.x.name}, ${scene.x.unit}` : scene.x.name;
-        text(xa, lab, { x: px + pw, y: by + 26, 'text-anchor': 'end', class: 'nij-label' });
-      }
-    } else scene.x.levels.forEach((l) => text(xa, l, { x: X(l), y: by + 12, 'text-anchor': 'middle' }));
+      if (lab) text(xa, lab, { x: px + pw, y: by + 14, 'text-anchor': 'end', class: 'nij-label' });
+    } else {
+      scene.x.levels.forEach((l) => text(xa, l, { x: X(l), y: by + 12, 'text-anchor': 'middle' }));
+      if (scene.x.name && pi === Math.floor((nP - 1) / 2)) text(xa, scene.x.name, { x: nP % 2 ? px + pw / 2 : px + pw + gap / 2, y: by + 25, 'text-anchor': 'middle', class: 'nij-label' });
+    }
 
     const ends: { y: number; label: string; x: number; color: string }[] = [];
     panel.series.forEach((s, si) => {
@@ -212,7 +218,8 @@ export function renderScene(scene: Scene, o: RenderOptions): Rendered {
         const sparse = pts.length <= 24; // measured bins (FIR) get dots; a smooth curve doesn't
         for (const c of pts) {
           if (sparse) el('circle', { cx: X(c.x), cy: Y(c.mean), r: 2.6, class: 'nij-mean', 'data-key': `m|${s.level}|${c.x}` }, sg);
-          hits.push({ x: X(c.x), y: Y(c.mean), color: col, lines: [`${tag}${scene.x.name} ${fmtNum(c.x as number)}${scene.x.unit ?? ''}`, ci(c)] });
+          hits.push({ x: X(c.x), y: Y(c.mean), color: col, panel: pi, xv: c.x as number,
+            lines: [`${scene.x.name} ${fmtNum(c.x as number)}${scene.x.unit ? ' ' + scene.x.unit : ''}`, `${s.level != null ? s.level + ': ' : ''}${ci(c)}`] });
         }
         const last = pts[pts.length - 1];
         if (endLabels && s.level != null) ends.push({ y: Y(last.mean), label: s.level, x: X(last.x), color: col });
@@ -225,7 +232,7 @@ export function renderScene(scene: Scene, o: RenderOptions): Rendered {
         for (const c of s.cells) {
           const x = X(c.x, si) + (strip ? 14 : 0);
           if (Number.isFinite(c.lo)) el('line', { x1: x, x2: x, y1: Y(c.lo), y2: Y(c.hi), class: 'nij-err' }, sg);
-          el('circle', { cx: x, cy: Y(c.mean), r: 4, class: 'nij-mean', 'data-key': `m|${s.level}|${c.x}` }, sg);
+          el('circle', { cx: x, cy: Y(c.mean), r: 3.5, class: 'nij-mean', 'data-key': `m|${s.level}|${c.x}` }, sg);
           hits.push({ x, y: Y(c.mean), color: col, lines: [`${tag}${c.x === '' ? 'mean' : c.x}`, ci(c)] });
         }
       }
@@ -237,17 +244,24 @@ export function renderScene(scene: Scene, o: RenderOptions): Rendered {
           at.slice().reverse().map((x) => `L${X(x)},${Y(f.intercept + f.slope * x - f.band(x))}`).join('') + 'Z';
         el('path', { d, class: 'nij-ribbon' }, sg);
         el('line', { x1: X(xlo), x2: X(xhi), y1: Y(f.intercept + f.slope * xlo), y2: Y(f.intercept + f.slope * xhi), class: 'nij-fit' }, sg);
-        text(sg, `${tag}r = ${f.r.toFixed(2)}, p ${fmtP(f.p)}, n = ${f.n}`, { x: px + pw, y: m.top + si * 14, 'text-anchor': 'end', class: 'nij-note' });
+        const stat = scene.circular ? `${tag}r = ${f.r.toFixed(2)}, n = ${f.n}` : `${tag}r = ${f.r.toFixed(2)}, p ${fmtP(f.p)}, n = ${f.n}`;
+        text(sg, stat + (s.robust ? `; ${s.robust.fit.r.toFixed(2)} without ${s.robust.subjects.join(', ')} (ringed)` : ''), { x: px + pw, y: 10 + si * 14, 'text-anchor': 'end', class: 'nij-note' });
+        if (s.robust) {
+          const flagged = new Set(s.robust.subjects);
+          sg.querySelectorAll<SVGCircleElement>('.nij-subject-dot').forEach((d) => {
+            if (flagged.has(d.dataset.subject as string)) el('circle', { cx: d.getAttribute('cx') ?? 0, cy: d.getAttribute('cy') ?? 0, r: 6, class: 'nij-flag' }, sg);
+          });
+        }
       }
     });
 
     // Direct labels at line ends, spread apart, with a leader when moved.
     const placed = relax(ends.map((e) => e.y), 13);
     ends.forEach((e, i) => {
-      const lx = px + pw + 8;
-      if (Math.abs(placed[i] - e.y) > 1.5) el('path', { d: `M${e.x + 4},${e.y}L${lx - 2},${placed[i]}`, class: 'nij-leader' }, g);
-      const t = text(g, e.label, { x: lx, y: placed[i], class: 'nij-direct', 'dominant-baseline': 'middle' });
-      t.style.setProperty('--c', e.color);
+      const lx = Math.max(...ends.map((q) => q.x)) + 10;
+      const lead = el('path', { d: `M${e.x + 5},${e.y}L${lx - 3},${placed[i]}`, class: 'nij-leader' }, g);
+      lead.style.setProperty('--c', e.color);
+      text(g, e.label, { x: lx, y: placed[i], class: 'nij-direct', 'dominant-baseline': 'middle' });
     });
 
     // One value per subject: say the estimate in words beside the strip.
@@ -260,7 +274,8 @@ export function renderScene(scene: Scene, o: RenderOptions): Rendered {
         const tx = px + pw + 20;
         text(g, `${fmtNum(c.mean)} [${fmtNum(c.lo)}, ${fmtNum(c.hi)}]`, { x: tx, y: Y(c.mean), class: 'nij-estimate', 'dominant-baseline': 'middle' });
         text(g, `mean, 95% CI · n = ${c.n}`, { x: tx, y: Y(c.mean) + 16, class: 'nij-note', 'dominant-baseline': 'middle' });
-        text(g, `t(${vals.length - 1}) = ${t.toFixed(1)}, p ${fmtP(tPValue(t, vals.length - 1))}, dz = ${dz.toFixed(2)}`,
+        text(g, scene.circular ? 'no test: region chosen on these data'
+          : `t(${vals.length - 1}) = ${t.toFixed(1)}, p ${fmtP(tPValue(t, vals.length - 1))}, dz = ${dz.toFixed(2)}`,
           { x: tx, y: Y(c.mean) + 30, class: 'nij-note', 'dominant-baseline': 'middle' });
       }
     }

@@ -50,6 +50,8 @@ export interface Series {
   cells: (Cell & { x: string | number })[];
   subjects: { id: string; points: { x: string | number; y: number }[] }[];
   fit?: Fit;
+  /** Fit without the influential points, and which subjects those are. */
+  robust?: { fit: Fit; subjects: string[] };
 }
 
 export interface Panel { facet: string | null; series: Series[] }
@@ -76,6 +78,8 @@ export interface Scene {
   mixed: boolean;
   /** Subjects left out of within-subject intervals for a missing cell. */
   incomplete: string[];
+  /** The probe was chosen on a map of these data: no inferential statistics. */
+  circular: boolean;
   provenance?: Backing['provenance'];
 }
 
@@ -86,7 +90,7 @@ const levelsOf = (b: Backing, name: string | undefined, rows: Row[]): string[] =
   return (declared ?? [...present]).filter((l) => present.has(l));
 };
 
-export function buildScene(b: Backing, ext: Extract, spec: PlotSpec): Scene {
+export function buildScene(b: Backing, ext: Extract, spec: PlotSpec, circular = false): Scene {
   let rows = long(b, ext);
   for (const [col, keep] of Object.entries(spec.keep ?? {})) {
     if (keep?.length) rows = rows.filter((r) => keep.includes(String(r[col])));
@@ -135,7 +139,13 @@ export function buildScene(b: Backing, ext: Extract, spec: PlotSpec): Scene {
       const s: Series = { level: c, cells, subjects };
       const pts = isCov ? subjectRows.filter((r) => Number.isFinite(r[spec.x as string] as number)) : [];
       if (pts.length > 2) {
-        s.fit = fitLine(pts.map((r) => r[spec.x as string] as number), pts.map((r) => r.value as number));
+        const xs = pts.map((r) => r[spec.x as string] as number), ys = pts.map((r) => r.value as number);
+        s.fit = fitLine(xs, ys);
+        const out = new Set(s.fit.influential);
+        if (out.size && pts.length - out.size > 2) {
+          const keep = (_: unknown, i: number) => !out.has(i);
+          s.robust = { fit: fitLine(xs.filter(keep), ys.filter(keep)), subjects: [...out].map((i) => String(pts[i][b.subject as string])) };
+        }
       }
       return s;
     }),
@@ -164,6 +174,7 @@ export function buildScene(b: Backing, ext: Extract, spec: PlotSpec): Scene {
     nByLevel,
     mixed: sum.error === 'within' && keys.some((k) => k !== ax && !within.includes(k)),
     incomplete: sum.incomplete,
+    circular,
     provenance: b.provenance,
   };
 }

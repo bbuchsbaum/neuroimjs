@@ -79,6 +79,8 @@ export interface Fit {
   slope: number; intercept: number; r: number; p: number; n: number;
   /** Half-width of the 95% CI of the fitted mean at x. */
   band: (x: number) => number;
+  /** Indices of influential points (Cook's distance > 4/n). */
+  influential: number[];
 }
 
 /** Least-squares line and Pearson r. */
@@ -98,5 +100,12 @@ export function fitLine(xs: number[], ys: number[]): Fit {
   const s = Math.sqrt(rss / (n - 2));
   const q = tQuantile(0.975, n - 2);
   const band = (x: number) => q * s * Math.sqrt(1 / n + (x - mx) ** 2 / sxx);
-  return { slope, intercept, r, p: n > 2 ? tPValue(t, n - 2) : NaN, n, band };
+  const influential: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const h = 1 / n + (xs[i] - mx) ** 2 / sxx;
+    const e = ys[i] - intercept - slope * xs[i];
+    const d = (e * e / (2 * s * s)) * (h / (1 - h) ** 2);
+    if (d > 4 / n) influential.push(i);
+  }
+  return { slope, intercept, r, p: n > 2 ? tPValue(t, n - 2) : NaN, n, band, influential };
 }

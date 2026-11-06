@@ -25,20 +25,23 @@ const CSS = `
 .nij-axis text{fill:var(--nij-ink-3);font-size:11px;font-variant-numeric:tabular-nums}
 .nij-frame{stroke:var(--nij-ink-3);stroke-width:1}
 .nij-zero{stroke:var(--nij-rule);stroke-width:1}
+.nij-grid{stroke:var(--nij-rule);stroke-width:1;opacity:.5}
+.nij-flag{fill:none;stroke:var(--nij-ink-2);stroke-width:1}
 .nij-facet{fill:var(--nij-ink-2);font-weight:600}
 .nij-label{fill:var(--nij-ink-2);font-size:11px}
 .nij-note{fill:var(--nij-ink-2);font-size:11px;font-variant-numeric:tabular-nums}
 .nij-estimate{fill:var(--nij-ink);font-size:15px;font-weight:600;font-variant-numeric:tabular-nums}
 .nij-direct{fill:var(--nij-ink-2);font-size:11px}
-.nij-leader{stroke:var(--nij-ink-3);stroke-width:.75;fill:none}
+.nij-leader{stroke:var(--c);stroke-width:1;opacity:.6;fill:none}
 .nij-subject-dot{fill:var(--c);opacity:.4}
 .nij-subject-line{fill:none;stroke:var(--c);stroke-width:1;opacity:.22}
 .has-hot .nij-subject-dot,.has-hot .nij-subject-line{opacity:.08}
 .nij-plot .is-hot{opacity:1!important}
-.nij-subject-line.is-hot{stroke-width:2}
-.nij-subject-dot.is-hot{stroke:var(--nij-surface);stroke-width:1.5}
-.nij-mean{fill:var(--c);stroke:var(--nij-surface);stroke-width:2}
-.nij-err{stroke:var(--c);stroke-width:2;stroke-linecap:round}
+.nij-subject-line.is-hot{stroke:var(--nij-ink);stroke-width:1.5}
+.nij-subject-dot.is-hot{fill:var(--nij-ink);stroke:var(--nij-surface);stroke-width:1.5}
+.nij-hot-label{fill:var(--nij-ink);font-size:11px;font-weight:600;pointer-events:none}
+.nij-mean{fill:var(--c);stroke:var(--nij-surface);stroke-width:1}
+.nij-err{stroke:var(--c);stroke-width:1.5;stroke-linecap:round}
 .nij-mean-line{fill:none;stroke:var(--c);stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
 .nij-ribbon{fill:var(--c);opacity:.2}
 .nij-fit{stroke:var(--c);stroke-width:2}
@@ -55,10 +58,10 @@ const CSS = `
 .nij-seg button:disabled{opacity:.35;cursor:default}
 .nij-chips{display:flex;flex-wrap:wrap;gap:2px 8px}
 .nij-chip{color:var(--nij-ink-2);padding:1px 2px}
-.nij-chip i{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--c,var(--nij-ink-3));margin-right:4px;vertical-align:0}
+.nij-chip i:empty{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--c,var(--nij-ink-3));margin-right:4px;vertical-align:0}
 .nij-chip small{color:var(--nij-ink-3);margin-left:3px}
 .nij-chip[aria-pressed=false]{color:var(--nij-ink-3);text-decoration:line-through}
-.nij-chip[aria-pressed=false] i{background:transparent;box-shadow:inset 0 0 0 1px var(--nij-ink-3)}
+.nij-chip[aria-pressed=false] i:empty{background:transparent;box-shadow:inset 0 0 0 1px var(--nij-ink-3)}
 .nij-more{grid-column:1/-1;justify-self:start;padding-left:0}
 `;
 
@@ -173,11 +176,31 @@ export class PlotPanel {
     if (!svg) return;
     svg.querySelectorAll('.is-hot').forEach((e) => e.classList.remove('is-hot'));
     svg.classList.toggle('has-hot', !!id);
-    if (id) svg.querySelectorAll(`[data-subject="${cssEscape(id)}"]`).forEach((e) => e.classList.add('is-hot'));
+    svg.querySelector('.nij-hot-label')?.remove();
+    if (!id) return;
+    const marks = svg.querySelectorAll(`[data-subject="${cssEscape(id)}"]`);
+    marks.forEach((e) => e.classList.add('is-hot'));
+    // Name the subject at the end of its line (or beside its last dot).
+    let at: [number, number] | null = null;
+    marks.forEach((e) => {
+      if (e.tagName === 'path') {
+        const pts = (e.getAttribute('d') ?? '').slice(1).split('L').map((p) => p.split(',').map(Number));
+        const last = pts[pts.length - 1];
+        if (!at || last[0] > at[0]) at = [last[0], last[1]];
+      } else if (!at) at = [Number(e.getAttribute('cx')), Number(e.getAttribute('cy'))];
+    });
+    if (at) {
+      const t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      t.setAttribute('class', 'nij-hot-label');
+      t.setAttribute('x', String(at[0] + 6));
+      t.setAttribute('y', String(at[1] - 6));
+      t.textContent = id;
+      svg.appendChild(t);
+    }
   }
 
   scene(): Scene | null {
-    return this.ext ? buildScene(this.backing, this.ext, this.spec) : null;
+    return this.ext ? buildScene(this.backing, this.ext, this.spec, !!this.o.circular) : null;
   }
 
   dispose(): void { this.resize?.disconnect(); }
@@ -239,17 +262,37 @@ export class PlotPanel {
       const vb = svg.viewBox.baseVal;
       return [((ev.clientX - r.left) / (r.width || 1)) * (vb.width || r.width), ((ev.clientY - r.top) / (r.height || 1)) * (vb.height || r.height)];
     };
+    const rule = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    rule.setAttribute('class', 'nij-cursor');
+    rule.style.display = 'none';
+    svg.insertBefore(rule, svg.firstChild);
+    const summaries = hits.filter((h) => h.xv !== undefined);
+    const top = Math.min(...hits.map((h) => h.y), 20), bottom = svg.viewBox.baseVal.height - 30;
     svg.addEventListener('pointermove', (ev) => {
       const [x, y] = toLocal(ev);
       let best: HitPoint | null = null, bd = 24 * 24;
+      // Subjects win when the pointer is right on them; otherwise a linear x snaps.
       for (const h of hits) {
+        if (h.xv !== undefined) continue;
         const d = (h.x - x) ** 2 + (h.y - y) ** 2;
         if (d < bd) { bd = d; best = h; }
+      }
+      rule.style.display = 'none';
+      if ((!best || bd > 36) && summaries.length) {
+        let near: HitPoint | null = null, dx = 28;
+        for (const h of summaries) if (Math.abs(h.x - x) < dx) { dx = Math.abs(h.x - x); near = h; }
+        if (near) {
+          const col = summaries.filter((h) => h.panel === near!.panel && h.xv === near!.xv).sort((a, b) => a.y - b.y);
+          best = { x: near.x, y: Math.min(...col.map((h) => h.y)), color: near.color, lines: [near.lines[0], ...col.map((h) => h.lines[1])] };
+          rule.setAttribute('x1', String(near.x)); rule.setAttribute('x2', String(near.x));
+          rule.setAttribute('y1', String(top)); rule.setAttribute('y2', String(bottom));
+          rule.style.display = '';
+        }
       }
       if (!best) { leave(); return; }
       ring.setAttribute('cx', String(best.x));
       ring.setAttribute('cy', String(best.y));
-      ring.style.display = '';
+      ring.style.display = rule.style.display === '' ? 'none' : '';
       tip.hidden = false;
       tip.innerHTML = best.lines.map((l, i) => (i ? escapeHtml(l) : `<b>${escapeHtml(l)}</b>`)).join('<br>');
       const sr = svg.getBoundingClientRect(), er = this.element.getBoundingClientRect();
@@ -262,6 +305,7 @@ export class PlotPanel {
     });
     const leave = () => {
       tip.hidden = true;
+      rule.style.display = 'none';
       ring.style.display = 'none';
       if (hot !== null) { hot = null; this.setHighlight(null); this.o.onSubject?.(null); }
     };
@@ -296,9 +340,12 @@ export class PlotPanel {
       for (const l of levels) {
         const on = !keep || keep.includes(l);
         const c = button(chips, '', on, 'nij-chip');
-        const sw = document.createElement('i');
-        if (isColor && on) sw.style.setProperty('--c', color(l));
-        c.append(sw, l);
+        if (isColor) {
+          const sw = document.createElement('i');
+          if (on) sw.style.setProperty('--c', color(l));
+          c.append(sw);
+        }
+        c.append(l);
         if (isColor && on && scene.nByLevel[l] != null) {
           const small = document.createElement('small');
           small.textContent = `n ${scene.nByLevel[l]}`;
