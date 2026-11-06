@@ -55,16 +55,16 @@ export function cellMeans(rows: Row[], cols: string[]): Row[] {
   return out;
 }
 
-/** True when some subject has more than one level of `col`. */
+/** True when every subject has more than one level of `col`: a within-subject factor. */
 export function variesWithin(rows: Row[], subject: string | undefined, col: string): boolean {
   if (!subject) return false;
-  const seen = new Map<Value, Value>();
+  const levels = new Map<Value, Set<Value>>();
   for (const r of rows) {
-    const s = r[subject];
-    if (!seen.has(s)) seen.set(s, r[col]);
-    else if (seen.get(s) !== r[col]) return true;
+    const s = levels.get(r[subject]) ?? new Set<Value>();
+    s.add(r[col]);
+    levels.set(r[subject], s);
   }
-  return false;
+  return levels.size > 0 && [...levels.values()].every((s) => s.size > 1);
 }
 
 export type ErrorKind = 'between' | 'within' | 'none';
@@ -85,6 +85,8 @@ export interface Summary {
   error: ErrorKind;
   /** Number of within-subject cells the Morey correction used. */
   withinCells: number;
+  /** Subjects left out of within-subject intervals for lacking a cell. */
+  incomplete: string[];
 }
 
 export interface SummaryOptions {
@@ -117,10 +119,17 @@ export function summarise(rows: Row[], o: SummaryOptions): Summary {
   let error: ErrorKind = o.error ?? 'between';
   if (error === 'within' && (cellsJ < 2 || !subj)) error = 'between';
 
-  // Values whose spread gives the interval.
+  // Values whose spread gives the interval. Within-subject intervals need
+  // every subject in every within cell; incomplete subjects are left out.
   const spreadOf = new Map<Row, number>();
+  const incomplete = new Set<string>();
+  let used = subjects;
   if (error === 'within' && subj) {
-    for (const ctx of groupBy(subjects, context).values()) {
+    for (const ctx of groupBy(subjects, context).values())
+      for (const own of groupBy(ctx, [subj]).values())
+        if (own.length < cellsJ) incomplete.add(String(own[0][subj]));
+    used = subjects.filter((r) => !incomplete.has(String(r[subj])));
+    for (const ctx of groupBy(used, context).values()) {
       const grand = mean(ctx.map((r) => r.value as number));
       for (const own of groupBy(ctx, [subj]).values()) {
         const m = mean(own.map((r) => r.value as number));
@@ -131,7 +140,7 @@ export function summarise(rows: Row[], o: SummaryOptions): Summary {
   const scale = error === 'within' ? Math.sqrt(cellsJ / (cellsJ - 1)) : 1;
 
   const cells: Cell[] = [];
-  for (const g of groupBy(subjects, keys).values()) {
+  for (const g of groupBy(used, keys).values()) {
     const vals = g.map((r) => r.value as number);
     const m = mean(vals);
     const n = vals.length;
@@ -141,5 +150,5 @@ export function summarise(rows: Row[], o: SummaryOptions): Summary {
     for (const k of keys) key[k] = g[0][k];
     cells.push({ key, mean: m, lo: m - half, hi: m + half, n });
   }
-  return { cells, subjects, error, withinCells: cellsJ };
+  return { cells, subjects, error, withinCells: cellsJ, incomplete: [...incomplete] };
 }

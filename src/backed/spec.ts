@@ -70,6 +70,12 @@ export interface Scene {
   covariate: boolean;
   /** What was averaged away. */
   collapsed: string[];
+  /** Subjects per color level (or overall). */
+  nByLevel: Record<string, number>;
+  /** A between-subject factor is mapped while intervals are within-subject. */
+  mixed: boolean;
+  /** Subjects left out of within-subject intervals for a missing cell. */
+  incomplete: string[];
   provenance?: Backing['provenance'];
 }
 
@@ -127,14 +133,18 @@ export function buildScene(b: Backing, ext: Extract, spec: PlotSpec): Scene {
         .sort((p, q) => order(p.x) - order(q.x));
       const subjects = [...bySubject].map(([id, points]) => ({ id, points: points.sort((p, q) => order(p.x) - order(q.x)) }));
       const s: Series = { level: c, cells, subjects };
-      if (isCov && subjectRows.length > 2) {
-        const pts = subjectRows.filter((r) => Number.isFinite(r[spec.x as string] as number));
+      const pts = isCov ? subjectRows.filter((r) => Number.isFinite(r[spec.x as string] as number)) : [];
+      if (pts.length > 2) {
         s.fit = fitLine(pts.map((r) => r[spec.x as string] as number), pts.map((r) => r.value as number));
       }
       return s;
     }),
   }));
 
+  const nByLevel: Record<string, number> = {};
+  if (b.subject) for (const l of spec.color ? colorLevels : ['']) {
+    nByLevel[l] = new Set(rows.filter((r) => !spec.color || String(r[spec.color]) === l).map((r) => r[b.subject as string])).size;
+  }
   const unitOf = (n: string | undefined) => (n === b.axis?.name ? b.axis?.unit : n === b.axis?.basis?.name ? b.axis?.basis?.unit :
     b.columns.find((c) => c.name === n)?.unit);
   return {
@@ -151,6 +161,9 @@ export function buildScene(b: Backing, ext: Extract, spec: PlotSpec): Scene {
     subjects: spec.subjects ?? 'points',
     covariate: isCov,
     collapsed,
+    nByLevel,
+    mixed: sum.error === 'within' && keys.some((k) => k !== ax && !within.includes(k)),
+    incomplete: sum.incomplete,
     provenance: b.provenance,
   };
 }

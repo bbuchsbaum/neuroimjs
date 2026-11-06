@@ -40,6 +40,8 @@ export interface Provenance {
   /** What the map shows, e.g. "faces − houses, t". */
   map?: string;
   formula?: string;
+  /** Named space of probe coordinates, e.g. "MNI152NLin2009cAsym". */
+  space?: string;
 }
 
 /** Values at a probe: `values[row * width + a]` for axis position a. */

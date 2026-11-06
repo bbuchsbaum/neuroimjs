@@ -7,7 +7,7 @@ const cases: [string, ReturnType<typeof S.onePerSubject>, object?, object?][] = 
   ['FIR time course', S.fir()],
   ['Spline / HRF basis, reconstructed', S.basis()],
   ['Covariate', S.covariate(), { x: 'age', subjects: 'points' }],
-  ['Circular selection', S.groupByCondition(), undefined, { circular: true }],
+  ['Circular selection', S.groupByCondition(), undefined, { circular: 'faces − houses, t > 3.1' }],
 ];
 
 const grid = document.getElementById('grid')!;

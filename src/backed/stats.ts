@@ -75,7 +75,11 @@ export function tQuantile(p: number, df: number): number {
   return (lo + hi) / 2;
 }
 
-export interface Fit { slope: number; intercept: number; r: number; p: number; n: number }
+export interface Fit {
+  slope: number; intercept: number; r: number; p: number; n: number;
+  /** Half-width of the 95% CI of the fitted mean at x. */
+  band: (x: number) => number;
+}
 
 /** Least-squares line and Pearson r. */
 export function fitLine(xs: number[], ys: number[]): Fit {
@@ -88,5 +92,11 @@ export function fitLine(xs: number[], ys: number[]): Fit {
   const slope = sxy / sxx;
   const r = sxy / Math.sqrt(sxx * syy);
   const t = (r * Math.sqrt(n - 2)) / Math.sqrt(Math.max(1e-300, 1 - r * r));
-  return { slope, intercept: my - slope * mx, r, p: n > 2 ? tPValue(t, n - 2) : NaN, n };
+  const intercept = my - slope * mx;
+  let rss = 0;
+  for (let i = 0; i < n; i++) rss += (ys[i] - intercept - slope * xs[i]) ** 2;
+  const s = Math.sqrt(rss / (n - 2));
+  const q = tQuantile(0.975, n - 2);
+  const band = (x: number) => q * s * Math.sqrt(1 / n + (x - mx) ** 2 / sxx);
+  return { slope, intercept, r, p: n > 2 ? tPValue(t, n - 2) : NaN, n, band };
 }

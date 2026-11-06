@@ -1,8 +1,10 @@
 /**
- * A scene drawn as SVG: small multiples on one y scale, subject marks quiet
- * behind the summaries, direct labels where they fit. No dependencies.
+ * A scene drawn as SVG: small multiples on one y scale, range-frame axes,
+ * subject marks quiet behind the summaries, direct labels where lines end.
+ * Returns the hit points so the host can do nearest-point hover.
  */
 import type { Scene, Series } from './spec';
+import { mean, sd, tPValue } from './stats';
 
 const NS = 'http://www.w3.org/2000/svg';
 
@@ -30,21 +32,24 @@ export function niceTicks(lo: number, hi: number, count = 5): number[] {
 }
 
 export const fmtNum = (v: number) => {
+  if (!Number.isFinite(v)) return '–';
   const a = Math.abs(v);
   const s = a === 0 ? '0' : a >= 100 ? a.toFixed(0) : a >= 10 ? +a.toFixed(1) + '' : +a.toPrecision(2) + '';
   return (v < 0 ? '−' : '') + s;
 };
+const fmtP = (p: number) => (p < 0.001 ? '< .001' : '= ' + p.toFixed(3).replace(/^0/, ''));
 
-/** Deterministic offsets so subject dots in one band don't overlap (a 1D swarm). */
-function swarm(ys: number[], r: number): number[] {
-  const order = ys.map((y, i) => [y, i]).sort((a, b) => a[0] - b[0]);
-  const placed: { y: number; x: number }[] = [];
-  const out = new Array(ys.length).fill(0);
+/** Horizontal offsets so dots sharing a band don't overlap: a 1D beeswarm. */
+export function swarm(ys: number[], r: number): number[] {
+  const order = ys.map((y, i) => [y, i] as const).sort((a, b) => a[0] - b[0]);
+  const placed: { x: number; y: number }[] = [];
+  const out = new Array<number>(ys.length).fill(0);
+  const d2 = (2 * r) ** 2;
   for (const [y, i] of order) {
     let x = 0;
-    for (let k = 0; k < 40; k++) {
-      const cand = k === 0 ? 0 : (k % 2 ? 1 : -1) * Math.ceil(k / 2) * r * 1.05;
-      if (placed.every((p) => (p.x - cand) ** 2 + (p.y - y) ** 2 >= (2 * r) ** 2 * 0.95)) { x = cand; break; }
+    for (let k = 0; k < 200; k++) {
+      const cand = (k % 2 ? 1 : -1) * Math.ceil(k / 2) * r * 0.9;
+      if (placed.every((p) => p.y < y - 2 * r || (p.x - cand) ** 2 + (p.y - y) ** 2 >= d2)) { x = cand; break; }
     }
     placed.push({ x, y });
     out[i] = x;
@@ -52,106 +57,150 @@ function swarm(ys: number[], r: number): number[] {
   return out;
 }
 
+/** Spread labels at least `gap` apart, keeping order; returns new positions. */
+export function relax(ys: number[], gap: number): number[] {
+  const idx = ys.map((y, i) => [y, i] as const).sort((a, b) => a[0] - b[0]);
+  const pos = idx.map(([y]) => y);
+  for (let it = 0; it < 50; it++) {
+    let moved = false;
+    for (let k = 1; k < pos.length; k++) {
+      const over = gap - (pos[k] - pos[k - 1]);
+      if (over > 0) { pos[k - 1] -= over / 2; pos[k] += over / 2; moved = true; }
+    }
+    if (!moved) break;
+  }
+  const out = new Array<number>(ys.length);
+  idx.forEach(([, i], k) => (out[i] = pos[k]));
+  return out;
+}
+
+export interface HitPoint {
+  x: number;
+  y: number;
+  subject?: string;
+  /** Tooltip lines. */
+  lines: string[];
+  color: string;
+}
+
 export interface RenderOptions {
   width: number;
   height?: number;
-  /** CSS colors for color levels, in level order. */
-  palette?: string[];
-  highlight?: string | null;
-  onSubject?: (id: string | null, ev?: MouseEvent) => void;
+  /** CSS color for a color level (null: the single series). */
+  color: (level: string | null) => string;
 }
 
-export const DEFAULT_PALETTE = ['var(--nij-series-1)', 'var(--nij-series-2)', 'var(--nij-series-3)', 'var(--nij-series-4)'];
+export interface Rendered { svg: SVGSVGElement; hits: HitPoint[] }
 
-export function renderScene(scene: Scene, o: RenderOptions): SVGSVGElement {
-  const W = o.width;
-  const H = o.height ?? 240;
-  const palette = o.palette ?? DEFAULT_PALETTE;
-  const colorOf = (s: Series) => (s.level == null ? palette[0] : palette[scene.color.levels.indexOf(s.level) % palette.length]);
+export function renderScene(scene: Scene, o: RenderOptions): Rendered {
+  const H = o.height ?? 230;
   const linear = scene.x.kind === 'linear';
-  const endLabels = linear && !scene.covariate && scene.color.levels.length > 1;
-  const m = { top: scene.facet.name ? 22 : 8, right: endLabels ? 64 : 12, bottom: 34, left: 40 };
+  const strip = !scene.x.name; // one value per subject: a strip and a sentence
+  const W = strip ? Math.min(o.width, 360) : o.width;
+  const nS = scene.panels[0]?.series.length ?? 1;
+  const endLabels = nS > 1 && (linear ? !scene.covariate : scene.paired);
+  const m = { top: 26, right: endLabels ? 70 : 14, bottom: 30, left: 38 };
   const nP = scene.panels.length;
-  const gap = 18;
-  const pw = (W - m.left - m.right - gap * (nP - 1)) / nP;
+  const gap = 20;
+  const plotW = strip ? 96 : W - m.left - m.right;
+  const pw = (plotW - gap * (nP - 1)) / nP;
   const ph = H - m.top - m.bottom;
+  const hits: HitPoint[] = [];
+  const colorOf = (s: Series) => o.color(s.level);
 
-  // Shared y domain: summaries always; subject marks when drawn.
+  // Domains from what is drawn.
   const ys: number[] = [0];
   const xs: number[] = [];
+  const showSubjects = scene.covariate || scene.subjects !== 'hidden';
   for (const p of scene.panels) for (const s of p.series) {
     for (const c of s.cells) { ys.push(c.mean); if (Number.isFinite(c.lo)) ys.push(c.lo, c.hi); if (linear) xs.push(c.x as number); }
-    if (scene.subjects !== 'hidden' || scene.covariate) for (const sub of s.subjects) for (const pt of sub.points) {
-      ys.push(pt.y); if (linear) xs.push(pt.x as number);
-    }
+    if (showSubjects) for (const sub of s.subjects) for (const pt of sub.points) { ys.push(pt.y); if (linear) xs.push(pt.x as number); }
+    if (s.fit) for (const x of xs) ys.push(s.fit.intercept + s.fit.slope * x + s.fit.band(x), s.fit.intercept + s.fit.slope * x - s.fit.band(x));
   }
-  const yt = niceTicks(Math.min(...ys), Math.max(...ys));
-  const y0 = Math.min(yt[0], Math.min(...ys)), y1 = Math.max(yt[yt.length - 1], Math.max(...ys));
+  const dlo = Math.min(...ys), dhi = Math.max(...ys);
+  const yt = niceTicks(dlo, dhi, 4).filter((t) => t >= dlo - 1e-9 && t <= dhi + 1e-9);
+  const pad = (dhi - dlo) * 0.04 || 1;
+  const y0 = dlo - pad, y1 = dhi + pad;
   const Y = (v: number) => m.top + ph - ((v - y0) / (y1 - y0)) * ph;
-  const xt = linear ? niceTicks(Math.min(...xs), Math.max(...xs), 5) : [];
   const xlo = linear ? Math.min(...xs) : 0, xhi = linear ? Math.max(...xs) : 1;
+  const xpad = scene.covariate ? (xhi - xlo) * 0.03 : 0;
+  const xt = linear ? niceTicks(xlo, xhi, 5).filter((t) => t >= xlo - 1e-9 && t <= xhi + 1e-9) : [];
 
   const svg = el('svg', { viewBox: `0 0 ${W} ${H}`, width: W, height: H, class: 'nij-plot-svg', role: 'img' });
   svg.setAttribute('aria-label', `${scene.y.label} at ${scene.probe}`);
 
-  // Y axis: ticks as text, hairline grid.
+  // Y: a range frame over the data, the quantity named at its top.
   const axis = el('g', { class: 'nij-axis' }, svg);
+  el('line', { x1: m.left - 8, x2: m.left - 8, y1: Y(dlo), y2: Y(dhi), class: 'nij-frame' }, axis);
   for (const t of yt) {
-    text(axis, fmtNum(t), { x: m.left - 6, y: Y(t), 'text-anchor': 'end', 'dominant-baseline': 'middle' });
-    el('line', { x1: m.left, x2: W - m.right, y1: Y(t), y2: Y(t), class: t === 0 ? 'nij-zero' : 'nij-grid' }, axis);
+    el('line', { x1: m.left - 11, x2: m.left - 8, y1: Y(t), y2: Y(t), class: 'nij-frame' }, axis);
+    text(axis, fmtNum(t), { x: m.left - 14, y: Y(t), 'text-anchor': 'end', 'dominant-baseline': 'middle' });
   }
+  text(svg, scene.y.label, { x: m.left - 8, y: 10, class: 'nij-label' });
 
   scene.panels.forEach((panel, pi) => {
     const px = m.left + pi * (pw + gap);
     const g = el('g', { class: 'nij-panel' }, svg);
-    if (panel.facet != null) text(g, panel.facet, { x: px, y: 12, class: 'nij-facet' });
-    const nS = panel.series.length;
+    if (panel.facet != null) text(g, panel.facet, { x: px + pw / 2, y: 10, class: 'nij-facet', 'text-anchor': 'middle' });
     const band = scene.x.levels.length || 1;
     const bw = pw / band;
-    const dodge = (si: number) => (nS > 1 && !linear ? (si - (nS - 1) / 2) * Math.min(18, bw / (nS + 1)) : 0);
+    const dodge = (si: number) => (nS > 1 && !linear ? (si - (nS - 1) / 2) * Math.min(14, bw / (nS + 2)) : 0);
     const X = (x: string | number, si = 0) =>
-      linear ? px + ((Number(x) - xlo) / (xhi - xlo || 1)) * pw
+      linear ? px + ((Number(x) - xlo + xpad) / (xhi - xlo + 2 * xpad || 1)) * pw
         : px + (Math.max(0, scene.x.levels.indexOf(String(x))) + 0.5) * bw + dodge(si);
 
-    // X axis.
-    const xa = el('g', { class: 'nij-axis' }, g);
-    if (linear) for (const t of xt) {
-      if (t < xlo - 1e-9 || t > xhi + 1e-9) continue;
-      text(xa, fmtNum(t), { x: X(t), y: m.top + ph + 16, 'text-anchor': 'middle' });
-    } else scene.x.levels.forEach((l) => text(xa, l, { x: X(l), y: m.top + ph + 16, 'text-anchor': 'middle' }));
+    if (dlo < 0 && dhi > 0 || dlo === 0 || dhi === 0) el('line', { x1: px, x2: px + pw, y1: Y(0), y2: Y(0), class: 'nij-zero' }, g);
 
+    // X: range frame on linear axes, level names on bands; the name and unit at the end.
+    const xa = el('g', { class: 'nij-axis' }, g);
+    const by = m.top + ph + 6;
+    if (linear) {
+      el('line', { x1: X(xlo), x2: X(xhi), y1: by, y2: by, class: 'nij-frame' }, xa);
+      xt.forEach((t) => {
+        el('line', { x1: X(t), x2: X(t), y1: by, y2: by + 3, class: 'nij-frame' }, xa);
+        text(xa, fmtNum(t), { x: X(t), y: by + 14, 'text-anchor': 'middle' });
+      });
+      if (pi === nP - 1 && scene.x.name) {
+        const lab = scene.x.unit ? `${scene.x.name}, ${scene.x.unit}` : scene.x.name;
+        text(xa, lab, { x: px + pw, y: by + 26, 'text-anchor': 'end', class: 'nij-label' });
+      }
+    } else scene.x.levels.forEach((l) => text(xa, l, { x: X(l), y: by + 12, 'text-anchor': 'middle' }));
+
+    const ends: { y: number; label: string; x: number; color: string }[] = [];
     panel.series.forEach((s, si) => {
       const col = colorOf(s);
       const sg = el('g', { class: 'nij-series', style: `--c:${col}` }, g);
-      // Subjects first, quiet.
-      if (scene.covariate || scene.subjects !== 'hidden') {
+      const tag = s.level != null ? `${s.level} · ` : '';
+      if (showSubjects) {
         const subs = el('g', { class: 'nij-subjects' }, sg);
-        if (scene.subjects === 'lines' && (scene.paired || linear) && !scene.covariate) {
-          for (const sub of s.subjects) {
-            if (sub.points.length < 2) continue;
-            const d = sub.points.map((p, i) => `${i ? 'L' : 'M'}${X(p.x, si).toFixed(1)},${Y(p.y).toFixed(1)}`).join('');
-            const path = el('path', { d, class: 'nij-subject-line', 'data-subject': sub.id }, subs);
-            bindSubject(path, sub.id, o);
-          }
+        const lines = scene.subjects === 'lines' && (scene.paired || linear) && !scene.covariate;
+        if (lines) for (const sub of s.subjects) {
+          if (sub.points.length < 2) continue;
+          const d = sub.points.map((p, i) => `${i ? 'L' : 'M'}${X(p.x, si).toFixed(1)},${Y(p.y).toFixed(1)}`).join('');
+          el('path', { d, class: 'nij-subject-line', 'data-subject': sub.id }, subs);
+          for (const p of sub.points) hits.push({ x: X(p.x, si), y: Y(p.y), subject: sub.id, color: col, lines: [sub.id, `${tag}${p.x}: ${fmtNum(p.y)}`] });
         }
-        if (scene.subjects === 'points' || scene.covariate || !(scene.paired || linear)) {
+        else {
           const groups = new Map<string, { id: string; x: string | number; y: number }[]>();
           for (const sub of s.subjects) for (const p of sub.points) {
-            const k = String(p.x);
-            const arr = groups.get(k) ?? [];
+            const arr = groups.get(String(p.x)) ?? [];
             arr.push({ id: sub.id, ...p });
-            groups.set(k, arr);
+            groups.set(String(p.x), arr);
           }
+          const r = scene.covariate ? 3.2 : 2.4;
           for (const pts of groups.values()) {
-            const off = linear ? pts.map(() => 0) : swarm(pts.map((p) => Y(p.y)), 2.6);
+            const off = linear ? pts.map(() => 0) : swarm(pts.map((p) => Y(p.y)), r);
             pts.forEach((p, i) => {
-              const c = el('circle', { cx: X(p.x, si) + off[i] + (linear ? 0 : -dodgeShift(nS)), cy: Y(p.y), r: scene.covariate ? 3.5 : 2.6, class: 'nij-subject-dot', 'data-subject': p.id }, subs);
-              bindSubject(c, p.id, o);
+              const cx = X(p.x, si) + off[i] + (linear ? 0 : nS > 1 ? 0 : -14);
+              el('circle', { cx, cy: Y(p.y), r, class: 'nij-subject-dot', 'data-subject': p.id }, subs);
+              hits.push({ x: cx, y: Y(p.y), subject: p.id, color: col,
+                lines: [p.id, scene.covariate ? `${tag}${scene.x.name} ${fmtNum(p.x as number)}: ${fmtNum(p.y)}` : `${tag}${p.x === '' ? '' : p.x + ': '}${fmtNum(p.y)}`] });
             });
           }
         }
       }
-      // Summary.
+      const ci = (c: { mean: number; lo: number; hi: number; n: number }) =>
+        `${fmtNum(c.mean)}${Number.isFinite(c.lo) ? ` [${fmtNum(c.lo)}, ${fmtNum(c.hi)}]` : ''}, n = ${c.n}`;
       if (linear && s.cells.length) {
         const pts = s.cells;
         if (pts.every((c) => Number.isFinite(c.lo))) {
@@ -160,51 +209,62 @@ export function renderScene(scene: Scene, o: RenderOptions): SVGSVGElement {
           el('path', { d, class: 'nij-ribbon' }, sg);
         }
         el('path', { d: pts.map((c, i) => `${i ? 'L' : 'M'}${X(c.x)},${Y(c.mean)}`).join(''), class: 'nij-mean-line' }, sg);
-        if (endLabels && s.level != null) {
-          const last = pts[pts.length - 1];
-          text(sg, s.level, { x: px + pw + 6, y: Y(last.mean), class: 'nij-direct', 'dominant-baseline': 'middle' });
+        const sparse = pts.length <= 24; // measured bins (FIR) get dots; a smooth curve doesn't
+        for (const c of pts) {
+          if (sparse) el('circle', { cx: X(c.x), cy: Y(c.mean), r: 2.6, class: 'nij-mean' }, sg);
+          hits.push({ x: X(c.x), y: Y(c.mean), color: col, lines: [`${tag}${scene.x.name} ${fmtNum(c.x as number)}${scene.x.unit ?? ''}`, ci(c)] });
         }
+        const last = pts[pts.length - 1];
+        if (endLabels && s.level != null) ends.push({ y: Y(last.mean), label: s.level, x: X(last.x), color: col });
       } else if (!linear) {
         if (s.cells.length > 1 && scene.paired) {
           el('path', { d: s.cells.map((c, i) => `${i ? 'L' : 'M'}${X(c.x, si)},${Y(c.mean)}`).join(''), class: 'nij-mean-line' }, sg);
+          const last = s.cells[s.cells.length - 1];
+          if (endLabels && s.level != null) ends.push({ y: Y(last.mean), label: s.level, x: X(last.x, si), color: col });
         }
         for (const c of s.cells) {
-          const x = X(c.x, si);
+          const x = X(c.x, si) + (strip ? 14 : 0);
           if (Number.isFinite(c.lo)) el('line', { x1: x, x2: x, y1: Y(c.lo), y2: Y(c.hi), class: 'nij-err' }, sg);
-          const dot = el('circle', { cx: x, cy: Y(c.mean), r: 4.5, class: 'nij-mean' }, sg);
-          const t = el('title', {}, dot);
-          t.textContent = `${fmtNum(c.mean)} [${fmtNum(c.lo)}, ${fmtNum(c.hi)}], n = ${c.n}`;
+          el('circle', { cx: x, cy: Y(c.mean), r: 4, class: 'nij-mean' }, sg);
+          hits.push({ x, y: Y(c.mean), color: col, lines: [`${tag}${c.x === '' ? 'mean' : c.x}`, ci(c)] });
         }
       }
       if (s.fit) {
         const f = s.fit;
+        const n = 24;
+        const at = Array.from({ length: n + 1 }, (_, i) => xlo + ((xhi - xlo) * i) / n);
+        const d = at.map((x, i) => `${i ? 'L' : 'M'}${X(x)},${Y(f.intercept + f.slope * x + f.band(x))}`).join('') +
+          at.slice().reverse().map((x) => `L${X(x)},${Y(f.intercept + f.slope * x - f.band(x))}`).join('') + 'Z';
+        el('path', { d, class: 'nij-ribbon' }, sg);
         el('line', { x1: X(xlo), x2: X(xhi), y1: Y(f.intercept + f.slope * xlo), y2: Y(f.intercept + f.slope * xhi), class: 'nij-fit' }, sg);
-        text(sg, `r = ${f.r.toFixed(2)}, p = ${f.p < 0.001 ? '<.001' : f.p.toFixed(3).replace(/^0/, '')}`, {
-          x: px + pw, y: m.top + 4 + si * 14, 'text-anchor': 'end', class: 'nij-note' });
+        text(sg, `${tag}r = ${f.r.toFixed(2)}, p ${fmtP(f.p)}, n = ${f.n}`, { x: px + pw, y: m.top + si * 14, 'text-anchor': 'end', class: 'nij-note' });
       }
     });
+
+    // Direct labels at line ends, spread apart, with a leader when moved.
+    const placed = relax(ends.map((e) => e.y), 13);
+    ends.forEach((e, i) => {
+      const lx = px + pw + 8;
+      if (Math.abs(placed[i] - e.y) > 1.5) el('path', { d: `M${e.x + 4},${e.y}L${lx - 2},${placed[i]}`, class: 'nij-leader' }, g);
+      const t = text(g, e.label, { x: lx, y: placed[i], class: 'nij-direct', 'dominant-baseline': 'middle' });
+      t.style.setProperty('--c', e.color);
+    });
+
+    // One value per subject: say the estimate in words beside the strip.
+    if (strip) {
+      const c = panel.series[0]?.cells[0];
+      const vals = panel.series[0]?.subjects.flatMap((s) => s.points.map((p) => p.y)) ?? [];
+      if (c && vals.length > 1) {
+        const dz = mean(vals) / sd(vals);
+        const t = mean(vals) / (sd(vals) / Math.sqrt(vals.length));
+        const tx = px + pw + 20;
+        text(g, `${fmtNum(c.mean)} [${fmtNum(c.lo)}, ${fmtNum(c.hi)}]`, { x: tx, y: Y(c.mean), class: 'nij-estimate', 'dominant-baseline': 'middle' });
+        text(g, `mean, 95% CI · n = ${c.n}`, { x: tx, y: Y(c.mean) + 16, class: 'nij-note', 'dominant-baseline': 'middle' });
+        text(g, `t(${vals.length - 1}) = ${t.toFixed(1)}, p ${fmtP(tPValue(t, vals.length - 1))}, dz = ${dz.toFixed(2)}`,
+          { x: tx, y: Y(c.mean) + 30, class: 'nij-note', 'dominant-baseline': 'middle' });
+      }
+    }
   });
 
-  if (scene.x.name) {
-    text(svg, scene.x.name + (scene.x.unit ? ` (${scene.x.unit})` : ''), { x: m.left + (W - m.left - m.right) / 2, y: H - 4, 'text-anchor': 'middle', class: 'nij-label' });
-  }
-  if (o.highlight) svg.querySelectorAll(`[data-subject="${CSS.escape(o.highlight)}"]`).forEach((e) => e.classList.add('is-hot'));
-  return svg;
-}
-
-const dodgeShift = (_n: number) => 0;
-
-function bindSubject(e: Element, id: string, o: RenderOptions) {
-  e.addEventListener('mouseenter', (ev) => {
-    const root = e.closest('svg');
-    root?.querySelectorAll(`[data-subject="${CSS.escape(id)}"]`).forEach((x) => x.classList.add('is-hot'));
-    root?.classList.add('has-hot');
-    o.onSubject?.(id, ev as MouseEvent);
-  });
-  e.addEventListener('mouseleave', () => {
-    const root = e.closest('svg');
-    root?.querySelectorAll('.is-hot').forEach((x) => x.classList.remove('is-hot'));
-    root?.classList.remove('has-hot');
-    o.onSubject?.(null);
-  });
+  return { svg, hits };
 }
