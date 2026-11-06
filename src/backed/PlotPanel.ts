@@ -16,8 +16,8 @@ const DARK = '--nij-surface:#1a1a19;--nij-ink:#f0efec;--nij-ink-2:#c3c2b7;--nij-
   '--nij-s1:#3987e5;--nij-s2:#d95926;--nij-s3:#199e70;--nij-s4:#c98500;--nij-s5:#d55181;--nij-s6:#008300;--nij-s7:#9085e9;--nij-s8:#e66767;';
 const CSS = `
 .nij-plot{${LIGHT}position:relative;font:12px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--nij-ink);background:var(--nij-surface)}
-@media (prefers-color-scheme:dark){:root:where(:not([data-theme="light"])) .nij-plot{${DARK}}}
-:root[data-theme="dark"] .nij-plot{${DARK}}
+@media (prefers-color-scheme:dark){:root:where(:not([data-theme="light"])) .nij-plot{${DARK}--nij-faint:.6}}
+:root[data-theme="dark"] .nij-plot{${DARK}--nij-faint:.6}
 .nij-plot-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 8px;margin-bottom:2px}
 .nij-plot-title{font-weight:600}
 .nij-plot-meta{color:var(--nij-ink-2)}
@@ -33,7 +33,7 @@ const CSS = `
 .nij-estimate{fill:var(--nij-ink);font-size:15px;font-weight:600;font-variant-numeric:tabular-nums}
 .nij-direct{fill:var(--nij-ink-2);font-size:11px}
 .nij-leader{stroke:var(--c);stroke-width:1;opacity:.6;fill:none}
-.nij-subject-dot{fill:var(--c);opacity:.4}
+.nij-subject-dot{fill:var(--c);opacity:var(--nij-faint,.4)}
 .nij-subject-line{fill:none;stroke:var(--c);stroke-width:1;opacity:.22}
 .has-hot .nij-subject-dot,.has-hot .nij-subject-line{opacity:.08}
 .nij-plot .is-hot{opacity:1!important}
@@ -239,7 +239,15 @@ export class PlotPanel {
       foot.push(`Mean ± 95% within-subject CI (Cousineau–Morey${scene.x.name === ax && ax ? ', at each time point' : ''}): ` +
         `for comparing ${scene.color.name && scene.mixed ? 'conditions within a group' : 'conditions'}, not for comparing with 0${scene.mixed ? ' or across groups' : ''}.`);
     } else if (scene.error === 'between') foot.push('Mean ± 95% CI across subjects.');
-    if (scene.covariate) foot.push('One point per subject; line with 95% CI of the fit.');
+    if (scene.covariate) {
+      const fits = scene.panels.flatMap((p) => p.series.filter((x) => x.fit).map((x) => {
+        const f = x.fit!;
+        const pv = f.p < 0.001 ? '< .001' : '= ' + f.p.toFixed(3).replace(/^0/, '');
+        const head = (x.level != null ? `${x.level}: ` : '') + `r = ${f.r.toFixed(2)}${scene.circular ? '' : `, p ${pv}`}, n = ${f.n}`;
+        return head + (x.robust ? ` (${x.robust.fit.r.toFixed(2)} without ${x.robust.subjects.join(', ')}, ringed)` : '');
+      }));
+      foot.push(`${fits.join('; ')}. One point per subject; line with 95% CI of the fit.`);
+    }
     if (scene.incomplete.length) foot.push(`${scene.incomplete.length} subject${scene.incomplete.length > 1 ? 's' : ''} without every cell left out of the intervals.`);
     if (scene.collapsed.length) foot.push(`Averaged within subject over ${scene.collapsed.join(', ')}.`);
     if (foot.length) div(root, 'nij-plot-foot', foot.join(' '));

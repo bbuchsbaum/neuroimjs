@@ -244,8 +244,6 @@ export function renderScene(scene: Scene, o: RenderOptions): Rendered {
           at.slice().reverse().map((x) => `L${X(x)},${Y(f.intercept + f.slope * x - f.band(x))}`).join('') + 'Z';
         el('path', { d, class: 'nij-ribbon' }, sg);
         el('line', { x1: X(xlo), x2: X(xhi), y1: Y(f.intercept + f.slope * xlo), y2: Y(f.intercept + f.slope * xhi), class: 'nij-fit' }, sg);
-        const stat = scene.circular ? `${tag}r = ${f.r.toFixed(2)}, n = ${f.n}` : `${tag}r = ${f.r.toFixed(2)}, p ${fmtP(f.p)}, n = ${f.n}`;
-        text(sg, stat + (s.robust ? `; ${s.robust.fit.r.toFixed(2)} without ${s.robust.subjects.join(', ')} (ringed)` : ''), { x: px + pw, y: 10 + si * 14, 'text-anchor': 'end', class: 'nij-note' });
         if (s.robust) {
           const flagged = new Set(s.robust.subjects);
           sg.querySelectorAll<SVGCircleElement>('.nij-subject-dot').forEach((d) => {
