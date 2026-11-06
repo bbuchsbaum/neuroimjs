@@ -96,6 +96,13 @@ export interface PlotPanelOptions {
    * the selection, e.g. "faces − houses, t > 3.1".
    */
   circular?: boolean | string;
+  /**
+   * Why the probe is independent of these data, e.g. "ROI from the localizer
+   * runs"; shown in the caption. PlotPanel alone cannot know how a probe was
+   * chosen: attach it through BackedView, which marks probes circular unless
+   * told otherwise.
+   */
+  independent?: string;
   onSubject?: (id: string | null) => void;
   onSpec?: (spec: PlotSpec) => void;
 }
@@ -166,9 +173,10 @@ export class PlotPanel {
   }
 
   /** Show values at a probe (an extract from the backing). */
-  show(ext: Extract, opts: { circular?: boolean | string } = {}): void {
+  show(ext: Extract, opts: { circular?: boolean | string; independent?: string } = {}): void {
     this.ext = ext;
     if (opts.circular !== undefined) this.o.circular = opts.circular;
+    if (opts.independent !== undefined) this.o.independent = opts.independent;
     this.draw();
   }
 
@@ -255,6 +263,7 @@ export class PlotPanel {
     }
     if (scene.incomplete.length) foot.push(`Left out of the intervals for a missing cell: ${scene.incomplete.join(', ')}.`);
     if (scene.collapsed.length) foot.push(`Averaged within subject over ${scene.collapsed.join(', ')}.`);
+    if (!this.o.circular && this.o.independent) foot.push(`Region chosen independently: ${this.o.independent}.`);
     if (foot.length) div(root, 'nij-plot-foot', foot.join(' '));
     if (this.o.controls !== false) this.controls(root, scene, color);
   }

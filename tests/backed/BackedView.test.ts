@@ -49,6 +49,24 @@ describe('BackedView', () => {
     await Promise.resolve();
     expect(panel.scene()!.circular).toBe(false);
     expect(panel.element.textContent).not.toContain('Circular');
+    expect(panel.element.textContent).toContain('Region chosen independently: a priori ROI.');
+  });
+
+  it('shows the newest probe when answers arrive out of order', async () => {
+    const delays = [30, 0];
+    const slow = Object.assign(Object.create(Object.getPrototypeOf(backing)), backing, {
+      extract(p: any) {
+        const ms = delays.shift() ?? 0;
+        return new Promise((res) => setTimeout(() => res(backing.extract(p)), ms));
+      },
+    });
+    const v = fakeViewer();
+    const panel = new PlotPanel(backing, { width: 300 });
+    BackedView.attach(v, slow, panel, { probe: 'voxel', hover: false });
+    v.emit('pointerDown', { worldCoord: [-2, -2, -2] }); // slow, older
+    v.emit('pointerDown', { worldCoord: [0, 0, 0] }); // fast, newer
+    await new Promise((r) => setTimeout(r, 60));
+    expect(panel.scene()!.probe).toBe('voxel at 0 0 0');
   });
 
   it('detaches its listeners', () => {

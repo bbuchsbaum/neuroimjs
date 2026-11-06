@@ -40,6 +40,7 @@ export class BackedView {
   private frame = 0;
   private pending: number[] | null = null;
   private live = true;
+  private seq = 0;
 
   private constructor(private backing: Backing, private panel: PlotPanel, private o: BackedViewOptions) {}
 
@@ -59,9 +60,11 @@ export class BackedView {
 
   /** Read the backing at a world coordinate and show it. */
   async probeAt(world: number[]): Promise<void> {
+    const id = ++this.seq; // a slow answer to an older probe must not win
     const ext = await this.backing.extract(this.probe(world));
-    if (!this.live) return;
-    this.panel.show(ext, { circular: this.circular() });
+    if (!this.live || id !== this.seq) return;
+    const why = typeof this.o.independent === 'string' ? this.o.independent : undefined;
+    this.panel.show(ext, { circular: this.circular(), independent: why });
   }
 
   detach(): void {
