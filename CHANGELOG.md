@@ -7,6 +7,8 @@ in the pull request that makes the change.
 
 ## Unreleased
 
+## 0.6.1 - 2026-11-06
+
 ### Fixed
 
 - Changing a layer's threshold (or range, opacity or colormap) through
