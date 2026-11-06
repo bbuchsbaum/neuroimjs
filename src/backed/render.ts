@@ -192,7 +192,7 @@ export function renderScene(scene: Scene, o: RenderOptions): Rendered {
             const off = linear ? pts.map(() => 0) : swarm(pts.map((p) => Y(p.y)), r);
             pts.forEach((p, i) => {
               const cx = X(p.x, si) + off[i] + (linear ? 0 : nS > 1 ? 0 : -14);
-              el('circle', { cx, cy: Y(p.y), r, class: 'nij-subject-dot', 'data-subject': p.id }, subs);
+              el('circle', { cx, cy: Y(p.y), r, class: 'nij-subject-dot', 'data-subject': p.id, 'data-key': `s|${p.id}|${p.x}` }, subs);
               hits.push({ x: cx, y: Y(p.y), subject: p.id, color: col,
                 lines: [p.id, scene.covariate ? `${tag}${scene.x.name} ${fmtNum(p.x as number)}: ${fmtNum(p.y)}` : `${tag}${p.x === '' ? '' : p.x + ': '}${fmtNum(p.y)}`] });
             });
@@ -211,7 +211,7 @@ export function renderScene(scene: Scene, o: RenderOptions): Rendered {
         el('path', { d: pts.map((c, i) => `${i ? 'L' : 'M'}${X(c.x)},${Y(c.mean)}`).join(''), class: 'nij-mean-line' }, sg);
         const sparse = pts.length <= 24; // measured bins (FIR) get dots; a smooth curve doesn't
         for (const c of pts) {
-          if (sparse) el('circle', { cx: X(c.x), cy: Y(c.mean), r: 2.6, class: 'nij-mean' }, sg);
+          if (sparse) el('circle', { cx: X(c.x), cy: Y(c.mean), r: 2.6, class: 'nij-mean', 'data-key': `m|${s.level}|${c.x}` }, sg);
           hits.push({ x: X(c.x), y: Y(c.mean), color: col, lines: [`${tag}${scene.x.name} ${fmtNum(c.x as number)}${scene.x.unit ?? ''}`, ci(c)] });
         }
         const last = pts[pts.length - 1];
@@ -225,7 +225,7 @@ export function renderScene(scene: Scene, o: RenderOptions): Rendered {
         for (const c of s.cells) {
           const x = X(c.x, si) + (strip ? 14 : 0);
           if (Number.isFinite(c.lo)) el('line', { x1: x, x2: x, y1: Y(c.lo), y2: Y(c.hi), class: 'nij-err' }, sg);
-          el('circle', { cx: x, cy: Y(c.mean), r: 4, class: 'nij-mean' }, sg);
+          el('circle', { cx: x, cy: Y(c.mean), r: 4, class: 'nij-mean', 'data-key': `m|${s.level}|${c.x}` }, sg);
           hits.push({ x, y: Y(c.mean), color: col, lines: [`${tag}${c.x === '' ? 'mean' : c.x}`, ci(c)] });
         }
       }

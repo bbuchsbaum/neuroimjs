@@ -125,9 +125,38 @@ export class PlotPanel {
   getSpec(): PlotSpec { return this.spec; }
 
   setSpec(spec: PlotSpec): void {
+    const before = this.positions();
     this.spec = spec;
     this.o.onSpec?.(spec);
     this.draw();
+    this.glide(before);
+  }
+
+  /** Screen centres of keyed marks, for object constancy across a spec change. */
+  private positions(): Map<string, [number, number]> {
+    const out = new Map<string, [number, number]>();
+    this.svg?.querySelectorAll<SVGCircleElement>('[data-key]').forEach((e) => {
+      const r = e.getBoundingClientRect();
+      out.set(e.dataset.key as string, [r.left + r.width / 2, r.top + r.height / 2]);
+    });
+    return out;
+  }
+
+  /** FLIP: marks that persist slide from where they were; new ones fade in. */
+  private glide(before: Map<string, [number, number]>): void {
+    const svg = this.svg;
+    if (!svg || !before.size || typeof svg.animate !== 'function') return;
+    if (globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+    const k = svg.getBoundingClientRect().width / (svg.viewBox.baseVal.width || 1) || 1;
+    const opts = { duration: 380, easing: 'cubic-bezier(.2,.7,.2,1)' };
+    svg.querySelectorAll<SVGCircleElement>('[data-key]').forEach((e) => {
+      const was = before.get(e.dataset.key as string);
+      if (!was) { e.animate([{ opacity: 0 }, { opacity: getComputedStyle(e).opacity }], opts); return; }
+      const r = e.getBoundingClientRect();
+      const dx = (was[0] - (r.left + r.width / 2)) / k, dy = (was[1] - (r.top + r.height / 2)) / k;
+      if (Math.abs(dx) + Math.abs(dy) > 0.5) e.animate([{ transform: `translate(${dx}px,${dy}px)` }, { transform: 'none' }], opts);
+    });
+    svg.querySelectorAll('path, line, text').forEach((e) => (e as SVGElement).animate([{ opacity: 0 }, { opacity: 1 }], { duration: 240 }));
   }
 
   /** Show values at a probe (an extract from the backing). */
