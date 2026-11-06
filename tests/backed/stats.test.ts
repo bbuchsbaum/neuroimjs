@@ -51,6 +51,17 @@ describe('summarise', () => {
     expect(s.cells.find((c) => c.key.cond === 'a')!.mean).toBeCloseTo(5.5, 10);
   });
 
+  it('keeps every subject in the means when one lacks a within cell', () => {
+    const r4 = [...rows, { subject: 's4', cond: 'a', value: 100 }];
+    const s = summarise(r4, { subject: 'subject', keys: ['cond'], within: ['cond'], error: 'within' });
+    const a = s.cells.find((c) => c.key.cond === 'a')!;
+    expect(s.incomplete).toEqual(['s4']);
+    expect(a.n).toBe(4);
+    expect(a.mean).toBeCloseTo(115 / 4, 10);
+    // the interval still comes from the three complete subjects
+    expect(a.hi - a.mean).toBeCloseTo((4.302653 * 0.5 * Math.sqrt(2)) / Math.sqrt(3), 4);
+  });
+
   it('knows what varies within subject', () => {
     expect(variesWithin(rows, 'subject', 'cond')).toBe(true);
     expect(variesWithin(rows.map((r) => ({ ...r, g: r.subject === 's1' ? 'x' : 'y' })), 'subject', 'g')).toBe(false);
