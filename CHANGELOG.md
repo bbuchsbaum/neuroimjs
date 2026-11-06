@@ -9,6 +9,15 @@ in the pull request that makes the change.
 
 ### Fixed
 
+- Changing a layer's threshold (or range, opacity or colormap) through
+  `SimpleOrthogonalViewer.updateLayer` is much faster. The update reached the
+  shared `VolLayer` once per image layer (main plus three per-view), and each
+  `SliceView` re-rendered from two autoruns, so one slider tick re-coloured
+  every slice four times and rendered 27 times; it now re-colours each view
+  once and renders at most twice per view. `VolLayer.setThreshold`,
+  `setRange` and `setOpacity` are no-ops when the value is unchanged, and the
+  cluster sizing behind `minOutlineClusterSize` outlines is about 3x faster.
+
 - The docs home page and guide overview give the current version (0.6.0), and
   the home page no longer lists unscaled `UINT32` reads, fixed in 0.6.0, as a
   known bug. The I/O guide links ADR-0004 in `docs/adr/` instead of PR #19 and
