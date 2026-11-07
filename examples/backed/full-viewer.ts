@@ -20,7 +20,7 @@ async function boot() {
   const { backing, tmap } = makeStudy(template);
   const [tlo, thi] = template.getRange();
   const anatomy = new VolLayer('anatomy', template, ColorMapFactory.createGrayscale({ range: [tlo, thi * 0.8] }), [tlo, thi * 0.8]);
-  const map = new VolLayer('faces − houses (t)', tmap, ColorMapFactory.createHot({ range: [0, 9] }), [0, 9], [-1e9, 3.1], 0.9);
+  const map = new VolLayer('faces − houses (t)', tmap, ColorMapFactory.createHot({ range: [0, 9] }), [0, 9], [-20, 3.1], 0.9);
   const stack = new VolStack(anatomy);
   stack.addLayer(map);
 

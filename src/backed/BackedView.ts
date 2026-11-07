@@ -229,7 +229,9 @@ export class BackedView {
   }
 
   private thresholdText(): string {
-    return this.o.map ? describeThreshold(this.o.map.getThreshold() as [number, number], this.o.stat ?? 'value') : '';
+    if (!this.o.map) return '';
+    const vol = this.o.map.volume as { getRange?: () => [number, number] };
+    return describeThreshold(this.o.map.getThreshold() as [number, number], this.o.stat ?? 'value', vol.getRange?.());
   }
 
   private circular(): boolean | string {

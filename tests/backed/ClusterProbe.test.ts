@@ -40,6 +40,7 @@ describe('regrid and describeThreshold', () => {
     expect(describeThreshold([-1e9, 2.3], 'z')).toBe('z > 2.3');
     expect(describeThreshold([-2, 1e9], 'z')).toBe('z < −2');
     expect(describeThreshold([-1, 2], 't')).toBe('t outside [−1, 2]');
+    expect(describeThreshold([-20, 2.3], 't', [-5.9, 5.9])).toBe('t > 2.3');
   });
 });
 

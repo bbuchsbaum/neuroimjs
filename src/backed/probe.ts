@@ -121,11 +121,18 @@ export function regrid(indices: number[], from: NeuroSpace, to: NeuroSpace): num
   return [...out].sort((p, q) => p - q);
 }
 
-/** "|t| > 3.1", "t > 3.1", "t < −2" or "t outside [−1, 2]", for a threshold. */
-export function describeThreshold(threshold: readonly [number, number], stat = 'value'): string {
-  const [lo, hi] = threshold;
+/**
+ * "|t| > 3.1", "t > 3.1", "t < −2" or "t outside [−1, 2]", for a threshold.
+ * With the map's data range, a bound beyond the data hides nothing and is
+ * left out ("t > 2.3" when the low bound is below every value).
+ */
+export function describeThreshold(threshold: readonly [number, number], stat = 'value', range?: readonly [number, number]): string {
+  let [lo, hi] = threshold;
+  if (range && lo < range[0]) lo = -Infinity;
+  if (range && hi > range[1]) hi = Infinity;
   const f = (v: number) => (v < 0 ? '−' : '') + +Math.abs(v).toPrecision(3);
   if (Math.abs(lo + hi) < 1e-9 * Math.max(1, Math.abs(hi))) return hi === 0 ? `${stat} ≠ 0` : `|${stat}| > ${f(hi)}`;
+  if (lo <= -1e8 && hi >= 1e8) return 'everything hidden';
   if (lo <= -1e8) return `${stat} > ${f(hi)}`;
   if (hi >= 1e8) return `${stat} < ${f(lo)}`;
   return `${stat} outside [${f(lo)}, ${f(hi)}]`;
