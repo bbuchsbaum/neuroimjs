@@ -93,6 +93,23 @@ describe('cluster probe in BackedView', () => {
     expect(panel.scene()!.voxels).toBe(0);
   });
 
+  it('says so when the map layer is hidden, and stops when it is shown', async () => {
+    layer.setThreshold([-3, 3]);
+    const v = viewer();
+    const panel = new PlotPanel(backing, { width: 300 });
+    BackedView.attach(v, backing, panel, { probe: { cluster: true }, map: layer, stat: 't' });
+    v.emit('pointerDown', { worldCoord: at(2) });
+    await tick();
+    expect(panel.element.querySelector('.nij-plot-note')).toBeNull();
+    layer.setVisible(false);
+    await tick();
+    expect(panel.element.querySelector('.nij-plot-note')?.textContent).toBe(
+      'The map (tmap) is hidden; this plot still shows the data behind it, and clusters still follow its threshold.');
+    layer.setVisible(true);
+    await tick();
+    expect(panel.element.querySelector('.nij-plot-note')).toBeNull();
+  });
+
   it('draws through a shared VolStack, as internal layers', async () => {
     const base = new VolLayer('base', new FloatNeuroVol(space, new Float32Array(10)), ColorMapFactory.createGrayscale({ range: [0, 1] }));
     const stack = new VolStack(base);

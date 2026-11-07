@@ -4,7 +4,7 @@
  * Returns the hit points so the host can do nearest-point hover.
  */
 import type { Scene, Series } from './spec';
-import { mean, sd, tPValue } from './stats';
+import { mean, sd, tPValue, tukeyOutliers } from './stats';
 
 const NS = 'http://www.w3.org/2000/svg';
 
@@ -277,6 +277,15 @@ export function renderScene(scene: Scene, o: RenderOptions): Rendered {
         text(g, scene.circular ? 'no test: region chosen on these data'
           : `t(${vals.length - 1}) = ${t.toFixed(1)}, p ${fmtP(tPValue(t, vals.length - 1))}, dz = ${dz.toFixed(2)}`,
           { x: tx, y: Y(c.mean) + 30, class: 'nij-note', 'dominant-baseline': 'middle' });
+        // Points beyond Tukey's fences, ringed and counted, so one subject cannot carry the mean unseen.
+        const subs = panel.series[0].subjects;
+        const far = new Set(tukeyOutliers(subs.map((s) => s.points[0]?.y ?? NaN)).map((i) => subs[i].id));
+        if (far.size) {
+          g.querySelectorAll<SVGCircleElement>('.nij-subject-dot').forEach((d) => {
+            if (far.has(d.dataset.subject as string)) el('circle', { cx: d.getAttribute('cx') ?? 0, cy: d.getAttribute('cy') ?? 0, r: 5.5, class: 'nij-flag' }, g);
+          });
+          text(g, `${far.size} beyond 1.5 × IQR (ringed)`, { x: tx, y: Y(c.mean) + 44, class: 'nij-note', 'dominant-baseline': 'middle' });
+        }
       }
     }
   });

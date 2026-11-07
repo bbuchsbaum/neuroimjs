@@ -52,6 +52,7 @@ const CSS = `
 .nij-tip i{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--c);margin-right:5px}
 .nij-plot-svg:focus-visible{outline:2px solid var(--nij-s1);outline-offset:2px}
 .nij-plot-foot{color:var(--nij-ink-3);margin:2px 0 4px;max-width:62ch}
+.nij-plot-note{color:var(--nij-ink-2);border-left:3px solid var(--nij-rule);padding:1px 0 1px 7px;margin:2px 0 4px}
 .nij-plot-warn{display:block;color:var(--nij-ink);border-left:3px solid var(--nij-s4);padding:1px 0 1px 7px;margin:2px 0 4px}
 .nij-plot-controls{display:grid;grid-template-columns:max-content max-content 1fr;gap:3px 8px;align-items:center;color:var(--nij-ink-2);font-size:11px}
 .nij-plot{container-type:inline-size}
@@ -123,6 +124,7 @@ export class PlotPanel {
   private lastWidth = 0;
   private listening?: AbortController;
   private subjectListeners = new Set<(id: string | null) => void>();
+  private note: string | null = null;
 
   constructor(private backing: Backing, private o: PlotPanelOptions = {}) {
     ensureStyle();
@@ -176,8 +178,9 @@ export class PlotPanel {
   }
 
   /** Show values at a probe (an extract from the backing). */
-  show(ext: Extract, opts: { circular?: boolean | string; independent?: string } = {}): void {
+  show(ext: Extract, opts: { circular?: boolean | string; independent?: string; note?: string | null } = {}): void {
     this.ext = ext;
+    if (opts.note !== undefined) this.note = opts.note;
     if (opts.circular !== undefined) this.o.circular = opts.circular;
     if (opts.independent !== undefined) this.o.independent = opts.independent;
     this.draw();
@@ -275,6 +278,7 @@ export class PlotPanel {
       const what = typeof this.o.circular === 'string' ? ` (${this.o.circular})` : '';
       div(root, 'nij-plot-warn', `Circular: this region was picked on a map of these data${what}. Effects here are inflated; judge them on independent data.`);
     }
+    if (this.note) div(root, 'nij-plot-note', this.note);
     if (scene.voxels === 0) {
       div(root, 'nij-plot-foot', 'No backing data at this point.');
       return;
@@ -297,7 +301,9 @@ export class PlotPanel {
         const f = x.fit!;
         const pv = f.p < 0.001 ? '< .001' : '= ' + f.p.toFixed(3).replace(/^0/, '');
         const head = (x.level != null ? `${x.level}: ` : '') + `r = ${f.r.toFixed(2)}${scene.circular ? '' : `, p ${pv}`}, n = ${f.n}`;
-        return head + (x.robust ? ` (${x.robust.fit.r.toFixed(2)} without ${x.robust.subjects.join(', ')}, ringed)` : '');
+        const robust = x.robust ? ` (${x.robust.fit.r.toFixed(2)} without ${x.robust.subjects.join(', ')}, ringed)` : '';
+        const rank = x.rank ? `; Spearman ρ = ${x.rank.rho.toFixed(2)}` : '';
+        return head + robust + rank;
       }));
       foot.push(`${fits.join('; ')}. One point per subject; line with 95% CI of the fit.`);
     }

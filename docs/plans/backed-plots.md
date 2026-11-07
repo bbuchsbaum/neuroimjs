@@ -241,7 +241,7 @@ keep it, not lose it.
 | # | Repo | Work | Done when |
 |---|---|---|---|
 | 1 | neuroimjs | Probes, summaries, `PlotSpec`, SVG renderer, `PlotPanel`, `BackedView` | **Done.** Critic rounds at equilibrium; 2344 tests green |
-| 2 | neuroimjs | NFTab JSON reader into `MemoryBacking`; committed expected-value fixtures; static demo site (viewer + plot, `npm run build:backed-demo`) | The demo serves from a plain static directory with no server code, loads faces-demo, and plots on click |
+| 2 | neuroimjs | NFTab reader (`src/tabs/`, from `neuroimjs/browser`) into `MemoryBacking`, following `x-backing`; reader tests on real NIfTI files; static demo site (`npm run build:backed-demo`, `npm run test:backed-static`) | **Done.** The site serves from a plain directory under a subpath, makes no request outside it, reads 60 rows behind the group map, and plots on click. The neurotabs faces-demo example reads too (its NIfTI is not in the repo, which the reader reports) |
 | 3 | neurotabs | Spec text for the extensions (lag/basis axes, `x-basis`, `x-backing`, `x-probe-pack`); `nf_analyze` writes `x-backing` | Spec merged; R output reads in the browser unchanged |
 | 4 | neuroimjs | `neuroimjs pack` CLI; `PackBacking` over Range reads; in-browser LOSO for memory backings | A 2 GB-class study plots from a static host in < 150 ms per click |
 | 5 | fmriregdsl | Write the explore cache as an nftab + `x-backing`; swap `explore.jsx` plots for `PlotPanel` | End-to-end test still recovers the planted face effect |

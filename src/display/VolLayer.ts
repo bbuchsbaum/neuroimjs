@@ -97,6 +97,9 @@ export class VolLayer {
    */
   @observable public textureVersion: number = 0;
 
+  /** Bumped by setVisible, so observers can follow a layer being shown or hidden. */
+  @observable public visibilityVersion: number = 0;
+
   /**
    * Texture sampling used when the slice is magnified on screen.
    */
@@ -640,7 +643,9 @@ export class VolLayer {
    */
   @action
   public setVisible(visible: boolean): void {
+    if (visible === this.visible) return;
     this.visible = visible;
+    this.visibilityVersion++;
   }
 }
 

@@ -5,7 +5,8 @@ const chromiumExecutable = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
 export default defineConfig({
   testDir: './e2e',
   // The volume-set gate needs its own synthetic-data server: playwright.volume-set.config.ts.
-  testIgnore: ['**/volume-set/**'],
+  // The static backed-plots site is served from dist/: playwright.backed-static.config.ts.
+  testIgnore: ['**/volume-set/**', '**/static/**'],
   // Copies the committed MNI152 template into the git-ignored tests/data/,
   // which the e2e fixtures load through the dev server.
   globalSetup: './scripts/prepare-test-data.mjs',

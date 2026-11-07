@@ -199,3 +199,7 @@ export * from './space/index';
 export * as backed from './backed/index';
 export { PlotPanel, BackedView, MemoryBacking } from './backed/index';
 export type { Backing, PlotSpec } from './backed/index';
+
+// NFTab datasets, read from a URL or supplied files (no server, no R).
+export { openNFTab, NFTab } from './tabs/index';
+export type { NFTabSource, Manifest as NFTabManifest, BackingLink, VolumeSeries } from './tabs/index';

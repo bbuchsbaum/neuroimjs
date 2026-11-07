@@ -1,7 +1,8 @@
 /** A synthetic faces/houses study on a 4 mm grid over a template, and its group t map. */
-import { FloatNeuroVol, NeuroSpace } from '../../src/browser';
-import { MemoryBacking } from '../../src/backed';
-import type { Row } from '../../src/backed';
+import { NeuroSpace } from '../../src/geometry/NeuroSpace';
+import { FloatNeuroVol } from '../../src/volume/DenseNeuroVol';
+import { MemoryBacking } from '../../src/backed/MemoryBacking';
+import type { Row } from '../../src/backed/types';
 
 let seed = 11;
 const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);

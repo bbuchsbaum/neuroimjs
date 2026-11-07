@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { tQuantile, tPValue, fitLine } from '../../src/backed/stats';
+import { tQuantile, tPValue, fitLine, spearman, ranks, tukeyOutliers, quantile } from '../../src/backed/stats';
 import { summarise, long, variesWithin } from '../../src/backed/frame';
 import { MemoryBacking } from '../../src/backed/MemoryBacking';
 import { NeuroSpace } from '../../src/geometry/NeuroSpace';
@@ -17,6 +17,19 @@ describe('t distribution', () => {
     const f = fitLine([1, 2, 3, 4], [2, 4, 6, 8.5]);
     expect(f.slope).toBeCloseTo(2.15, 6);
     expect(f.r).toBeGreaterThan(0.99);
+  });
+});
+
+describe('robustness checks', () => {
+  it('ranks ties by their average and matches a hand-checked Spearman ρ', () => {
+    expect(ranks([10, 20, 20, 30])).toEqual([1, 2.5, 2.5, 4]);
+    // ranks 1..5 against 2,1,4,3,5: sum d² = 4, ρ = 1 − 6·4/(5·24) = 0.8
+    expect(spearman([1, 2, 3, 4, 5], [2, 1, 4, 3, 5]).rho).toBeCloseTo(0.8, 10);
+  });
+  it('flags points beyond Tukey fences (type-7 quartiles, as R)', () => {
+    expect(quantile([1, 2, 3, 4], 0.25)).toBeCloseTo(1.75, 10); // quantile(1:4, .25)
+    expect(tukeyOutliers([1, 2, 3, 4, 5, 6, 7, 8, 30])).toEqual([8]);
+    expect(tukeyOutliers([1, 2, 3])).toEqual([]);
   });
 });
 

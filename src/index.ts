@@ -342,3 +342,5 @@ export * from './space/index';
 export * as backed from './backed/index';
 export { PlotPanel, BackedView, MemoryBacking } from './backed/index';
 export type { Backing, PlotSpec } from './backed/index';
+
+// The NFTab reader (openNFTab) ships from 'neuroimjs/browser', beside readNiftiArrayBuffer.

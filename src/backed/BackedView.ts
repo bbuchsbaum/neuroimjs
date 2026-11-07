@@ -57,6 +57,9 @@ export interface MapLayer {
   getThreshold(): readonly [number, number] | [number, number];
   /** MobX-observable change counter (VolLayer has one); lets the plot follow threshold changes. */
   version?: number;
+  visible?: boolean;
+  /** MobX-observable counter bumped when the layer is shown or hidden (VolLayer has one). */
+  visibilityVersion?: number;
 }
 
 export interface BackedViewOptions {
@@ -123,6 +126,7 @@ export class BackedView {
         const now = key();
         if (now !== last) { last = now; this.refresh(); }
       }));
+      this.subs.push(reaction(() => o.map!.visibilityVersion, () => this.refresh()));
     }
     if (host && space) {
       if (o.marker !== false) this.marker = new ProbeMarker(host, space, typeof o.marker === 'object' ? o.marker : {});
@@ -191,7 +195,10 @@ export class BackedView {
       : { label: `no cluster at ${fmtAt(world)} at ${this.thresholdText()}`, voxels: 0, width: 1, values: new Float32Array(0) };
     if (!this.live || id !== this.seq) return;
     const why = typeof this.o.independent === 'string' ? this.o.independent : undefined;
-    this.panel.show(ext, { circular: this.circular(), independent: why });
+    const hidden = this.o.map && this.o.map.visible === false
+      ? `The map (${this.o.map.id}) is hidden; this plot still shows the data behind it${isCluster(this.getProbe()) ? ', and clusters still follow its threshold' : ''}.`
+      : null;
+    this.panel.show(ext, { circular: this.circular(), independent: why, note: hidden });
   }
 
   detach(): void {

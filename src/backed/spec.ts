@@ -5,7 +5,7 @@
  */
 import type { Backing, Column, Extract, Row } from './types';
 import { type Cell, type ErrorKind, cellMeans, long, summarise, variesWithin } from './frame';
-import { type Fit, fitLine } from './stats';
+import { type Fit, fitLine, spearman } from './stats';
 
 export interface PlotSpec {
   x?: string;
@@ -52,6 +52,8 @@ export interface Series {
   fit?: Fit;
   /** Fit without the influential points, and which subjects those are. */
   robust?: { fit: Fit; subjects: string[] };
+  /** Spearman's rank correlation, a check that does not drop any point. */
+  rank?: { rho: number; p: number };
 }
 
 export interface Panel { facet: string | null; series: Series[] }
@@ -142,6 +144,7 @@ export function buildScene(b: Backing, ext: Extract, spec: PlotSpec, circular = 
       if (pts.length > 2) {
         const xs = pts.map((r) => r[spec.x as string] as number), ys = pts.map((r) => r.value as number);
         s.fit = fitLine(xs, ys);
+        s.rank = spearman(xs, ys);
         const out = new Set(s.fit.influential);
         if (out.size && pts.length - out.size > 2) {
           const keep = (_: unknown, i: number) => !out.has(i);

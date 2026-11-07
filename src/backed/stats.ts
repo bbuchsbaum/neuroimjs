@@ -110,3 +110,37 @@ export function fitLine(xs: number[], ys: number[]): Fit {
   }
   return { slope, intercept, r, p: n > 2 ? tPValue(t, n - 2) : NaN, n, band, influential };
 }
+
+/** Ranks with ties averaged (1-based). */
+export function ranks(xs: number[]): number[] {
+  const order = xs.map((x, i) => [x, i] as const).sort((a, b) => a[0] - b[0]);
+  const out = new Array<number>(xs.length);
+  for (let i = 0; i < order.length;) {
+    let j = i;
+    while (j + 1 < order.length && order[j + 1][0] === order[i][0]) j++;
+    for (let k = i; k <= j; k++) out[order[k][1]] = (i + j) / 2 + 1;
+    i = j + 1;
+  }
+  return out;
+}
+
+/** Spearman's ρ (Pearson r on ranks), with the usual t approximation for p. */
+export function spearman(xs: number[], ys: number[]): { rho: number; p: number; n: number } {
+  const f = fitLine(ranks(xs), ranks(ys));
+  return { rho: f.r, p: f.p, n: f.n };
+}
+
+/** Quantile by linear interpolation (R's type 7). */
+export function quantile(sorted: number[], q: number): number {
+  const h = (sorted.length - 1) * q;
+  const lo = Math.floor(h);
+  return sorted[lo] + (h - lo) * ((sorted[Math.min(lo + 1, sorted.length - 1)] ?? sorted[lo]) - sorted[lo]);
+}
+
+/** Indices beyond Tukey's fences: below Q1 − 1.5·IQR or above Q3 + 1.5·IQR. */
+export function tukeyOutliers(xs: number[]): number[] {
+  if (xs.length < 4) return [];
+  const s = [...xs].sort((a, b) => a - b);
+  const q1 = quantile(s, 0.25), q3 = quantile(s, 0.75), k = 1.5 * (q3 - q1);
+  return xs.map((x, i) => (x < q1 - k || x > q3 + k ? i : -1)).filter((i) => i >= 0);
+}
