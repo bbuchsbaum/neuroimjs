@@ -1,8 +1,18 @@
 # Plan: plots backed by the data behind a map
 
-Status: proposal, for review before building. Touches three repos:
+Status: core built (phase 1 below); the rest agreed. Touches three repos:
 neurotabs (format), neuroimjs (reader, extraction, plots, viewer link),
 fmriregdsl (first consumer).
+
+## 0. Constraints
+
+- **JS/TS only.** Nothing in the plotting path depends on R. neurotabs is
+  the format: files with a written spec. The R package is one tool that
+  writes them; neuroimjs reads them and, where needed, writes them too.
+- **Static hosting.** A study must be servable from a plain static host
+  (GitHub Pages, S3, Netlify): every read is an HTTP GET of a file, with
+  Range requests for large data. No server, no endpoint, no runtime
+  computation outside the browser.
 
 ## 1. Goal
 
@@ -110,9 +120,17 @@ Implementations:
 - `PackBacking`: HTTP Range reads of a voxel-major probe pack (§5.3), one
   small read per probed voxel run. Usable for hover once a voxel is cached.
 - `ColumnsBacking`: ROI vectors.
-- `RemoteBacking`: POSTs the probe to an endpoint (the fmriregdsl R server,
-  or `neurotabs probe` from the CLI). Used for anything that needs R, such
-  as LOSO re-selection.
+- No remote backing. A static host has nothing to answer a POST, and
+  everything a probe needs is computed in the browser.
+
+Static-host sizes, which decide between the two:
+- `MemoryBacking` fetches the NIfTIs and holds every row's in-mask values.
+  24 subjects × 6 conditions × 200k voxels is about 115 MB as Float32: fine.
+- `PackBacking` is for studies too large to hold. 40 subjects × 6
+  conditions × 12 lags × 200k voxels is about 2.3 GB; one voxel is a
+  single ~11 KB Range read. Static hosts honour Range requests. The pack
+  is stored raw or chunk-compressed, never gzipped as a whole, since a
+  gzip stream cannot be read from the middle.
 
 ### 4.3 `Probe`
 Probe kinds: `voxel`, `sphere(r mm)`, `cluster(labelVol, id)`,
@@ -134,8 +152,10 @@ dependencies. The operations:
 The subject column comes from `semantic_role: subject`. Whether a factor is
 within or between subjects is inferred from the design: it is within if its
 levels vary inside a subject. This is the same partition `nf_analyze`
-makes. Numbers are checked against R in golden tests: neurotabs writes the
-fixtures and neuroimjs asserts equality.
+makes. Numbers are checked in tests against expected values committed to
+the repo (computed once, e.g. R's `qt`), so the test suite needs no R.
+Comparing against neurotabs output stays possible as an optional, dev-time
+cross-check.
 
 ### 4.5 `PlotSpec` and `inferSpec`
 A small declarative spec that can be serialised to JSON:
@@ -180,8 +200,11 @@ the points.
 ### 4.8 Circularity is first-class
 If the probe was chosen from the very map the backing produced (from the
 `x-backing` provenance plus a peak or cluster probe), the plot is labelled
-*circular*. It then offers either a `RemoteBacking` LOSO reading or an
-independent contrast. The studio already handles this; the library has to
+*circular* by default (`BackedView` does this unless the map is declared
+independent). It offers an independent contrast, and a leave-one-subject-out
+reading computed in the browser when the backing is in memory and carries
+the selecting map's design. For pack-backed studies the warning stands and
+the plot points to an independent contrast. The studio already handles this; the library has to
 keep it, not lose it.
 
 ## 5. neurotabs additions (all `x-` extensions, nothing breaking)
@@ -203,36 +226,39 @@ keep it, not lose it.
 3. **`x-probe-pack`: a voxel-major sidecar** made for interactive reads.
    - A JSON header points to a little-endian Float32 blob laid out as
      `[in-mask voxel][row][axis]`, plus the `x-masked-volume` index map.
-   - `nf_pack(x, feature)` writes it.
+   - A Node CLI in neuroimjs writes it from the NIfTIs:
+     `neuroimjs pack nftab.json --feature beta` (also writes `nftab.json`
+     beside a YAML manifest). neurotabs may add `nf_pack()` for R users, but
+     nothing depends on it.
    - Size check: 40 subjects × 6 conditions × 12 lags × 200k voxels comes to
      about 2.3 GB on disk. One voxel is still a single ~11 KB range read,
      and the browser never holds the whole thing.
-4. **`neurotabs probe`** CLI subcommand (and `nf_probe()` in R). It takes a
-   probe and returns the tidy frame as JSON. This is the reference
-   implementation that both `RemoteBacking` and the golden tests use.
+4. **Probing is defined by the TS implementation** (`src/backed/`). An
+   `nf_probe()` in R, if added, is a convenience that must match it.
 
 ## 6. Phases
 
 | # | Repo | Work | Done when |
 |---|---|---|---|
-| 0 | neurotabs | Spec text for the four extensions; `nf_probe`, `nf_pack`, `x-backing` from `nf_analyze`; golden fixtures | Spec PR merged; fixtures for each §3 shape |
-| 1 | neuroimjs | `tabs/` reader, `Frame`, `Probe`, `MemoryBacking`, `PackBacking` | Golden tests equal R to 1e-6; reads faces-demo |
-| 2 | neuroimjs | `PlotSpec`, `inferSpec`, SVG renderer, `PlotPanel`, `<nij-plot>` | Visual tests (Playwright) for every §3 row, light + dark |
-| 3 | neuroimjs | `BackedView` link, hover preview, reverse links, circularity badge; demo `npm run demo:backed` | Click in the demo, plot updates in < 50 ms (memory) / < 150 ms (pack) |
-| 4 | fmriregdsl | Write the explore cache as an nftab + pack + `x-backing`; R endpoint for `RemoteBacking` (LOSO); swap `explore.jsx` plots for `<nij-plot>` | End-to-end test still recovers the planted face effect; studio has no hand-written plot code left |
-| 5 | neuroimjs | Consumer contract test for the studio; CHANGELOG; release | `npm run test:consumers` green |
+| 1 | neuroimjs | Probes, summaries, `PlotSpec`, SVG renderer, `PlotPanel`, `BackedView` | **Done.** Critic rounds at equilibrium; 2344 tests green |
+| 2 | neuroimjs | NFTab JSON reader into `MemoryBacking`; committed expected-value fixtures; static demo site (viewer + plot, `npm run build:backed-demo`) | The demo serves from a plain static directory with no server code, loads faces-demo, and plots on click |
+| 3 | neurotabs | Spec text for the extensions (lag/basis axes, `x-basis`, `x-backing`, `x-probe-pack`); `nf_analyze` writes `x-backing` | Spec merged; R output reads in the browser unchanged |
+| 4 | neuroimjs | `neuroimjs pack` CLI; `PackBacking` over Range reads; in-browser LOSO for memory backings | A 2 GB-class study plots from a static host in < 150 ms per click |
+| 5 | fmriregdsl | Write the explore cache as an nftab + `x-backing`; swap `explore.jsx` plots for `PlotPanel` | End-to-end test still recovers the planted face effect |
+| 6 | neuroimjs | Consumer contract test for the studio; CHANGELOG; release | `npm run test:consumers` green |
 
-Phases 0 and 1 can proceed in parallel once the extension shapes are agreed.
+Phases 2 and 3 can proceed in parallel once the extension shapes are agreed.
 
-## 7. Decisions needed before building
+## 7. Decisions (all agreed)
 
 1. **Renderer.** The recommendation is the in-house SVG renderer described
    in §4.6. The alternative is Observable Plot: faster to start, but it adds
    d3 and is harder to animate and theme to match the viewer.
 2. **Manifest format in the browser.** The recommendation is JSON-first,
-   with YAML through an optional peer dependency. Option: have `nf_write`
-   always emit `nftab.json` as well.
+   with YAML through an optional peer dependency; `neuroimjs pack` writes
+   `nftab.json` beside a YAML manifest.
 3. **Parquet observation tables.** The recommendation is to defer them
    (CSV/TSV only in v1), because parquet would mean a WASM dependency.
 4. **Hover vs click default.** The recommendation is click to commit, with
    hover preview on by default only when the backing is local.
+5. **No R at runtime, static hosting.** See §0.
