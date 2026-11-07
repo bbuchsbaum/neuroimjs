@@ -107,6 +107,12 @@ export class VolLayer {
   @observable public interpolation: SliceInterpolation = 'linear';
 
   /**
+   * Drawn by a tool rather than chosen by the user (a probe marker, a hover
+   * preview). Layer panels leave internal layers out of their lists.
+   */
+  public internal = false;
+
+  /**
    * Strength in [0, 1] of a dark outline drawn on the visible side of every
    * edge between drawn and transparent pixels (i.e. at the threshold contour).
    * 0 disables it.

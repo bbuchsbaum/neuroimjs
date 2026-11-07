@@ -112,6 +112,7 @@
     "demo:composable": "vite --open /examples/composable-views-index.html",
     "demo:backed": "vite --open /examples/backed/viewer.html",
     "demo:backed-gallery": "vite --open /examples/backed/gallery.html",
+    "demo:backed-full": "vite --open /examples/backed/full-viewer.html",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:headed": "playwright test --headed",

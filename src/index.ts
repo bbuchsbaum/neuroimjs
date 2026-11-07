@@ -339,6 +339,6 @@ export type {
 export * from './space/index';
 
 // Backed plots: the data behind a map, plotted at a probe (see docs/plans/backed-plots.md).
-export * as backed from './backed';
-export { PlotPanel, BackedView, MemoryBacking } from './backed';
-export type { Backing, PlotSpec } from './backed';
+export * as backed from './backed/index';
+export { PlotPanel, BackedView, MemoryBacking } from './backed/index';
+export type { Backing, PlotSpec } from './backed/index';

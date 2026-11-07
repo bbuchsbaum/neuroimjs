@@ -54,6 +54,8 @@ const CSS = `
 .nij-plot-foot{color:var(--nij-ink-3);margin:2px 0 4px;max-width:62ch}
 .nij-plot-warn{display:block;color:var(--nij-ink);border-left:3px solid var(--nij-s4);padding:1px 0 1px 7px;margin:2px 0 4px}
 .nij-plot-controls{display:grid;grid-template-columns:max-content max-content 1fr;gap:3px 8px;align-items:center;color:var(--nij-ink-2);font-size:11px}
+.nij-plot{container-type:inline-size}
+@container (max-width:420px){.nij-plot-controls{grid-template-columns:max-content 1fr}.nij-plot-controls .nij-chips{grid-column:2;margin-bottom:4px}.nij-plot-controls .nij-chips:empty{display:none}}
 .nij-seg{display:inline-flex;gap:1px}
 .nij-seg button,.nij-chip,.nij-more{font:inherit;border:0;background:none;color:var(--nij-ink-3);padding:1px 5px;cursor:pointer;border-radius:4px}
 .nij-seg button[aria-pressed=true]{color:var(--nij-ink);background:var(--nij-rule)}

@@ -21,6 +21,45 @@ export interface LayerHost {
   listLayers?(): { id: string }[];
 }
 
+/** What a shared VolStack offers; enough to draw on every view built over it. */
+export interface StackLike {
+  addLayer(layer: VolLayer): void;
+  removeLayer(layer: VolLayer): void;
+  getLayerById(id: string): VolLayer | undefined;
+  getLayerIds(): string[];
+  moveLayerById(id: string, toIndex: number): void;
+}
+
+export function isStackLike(x: unknown): x is StackLike {
+  const s = x as Partial<StackLike> | null;
+  return !!s && typeof s.getLayerById === 'function' && typeof s.addLayer === 'function' &&
+    typeof s.moveLayerById === 'function' && typeof s.getLayerIds === 'function';
+}
+
+/**
+ * Draw through a VolStack directly: for viewers composed of SingleSliceViewers
+ * sharing one stack (the views redraw from the layers' own changes).
+ */
+export function stackLayers(stack: StackLike): LayerHost {
+  return {
+    addLayer: (l) => stack.addLayer(l),
+    removeLayer: (id) => { const l = stack.getLayerById(id); if (l) stack.removeLayer(l); },
+    updateLayerVolume: (id, vol, opts) => {
+      stack.getLayerById(id)?.replaceVolume(vol, { range: opts?.range ?? null, threshold: opts?.threshold, opacity: opts?.alpha });
+    },
+    updateLayer: (id, p) => {
+      const l = stack.getLayerById(id);
+      if (!l) return;
+      if (p.visible !== undefined) l.setVisible(p.visible);
+      if (p.alpha !== undefined) l.setOpacity(p.alpha);
+      if (p.range) l.setRange(p.range);
+      if (p.threshold) l.setThreshold(p.threshold);
+    },
+    moveLayer: (id, i) => stack.moveLayerById(id, i),
+    listLayers: () => stack.getLayerIds().map((id) => ({ id })),
+  };
+}
+
 export function isLayerHost(x: unknown): x is LayerHost {
   const h = x as Partial<LayerHost> | null;
   return !!h && typeof h.addLayer === 'function' && typeof h.removeLayer === 'function' &&
@@ -71,6 +110,7 @@ export class ProbeMarker {
     this.layer = new OwnedLayer(host, 'backed-probe', (vol) => {
       const l = new VolLayer('backed-probe', vol, ColorMapFactory.createGradient(color, color, 2, { name: 'Probe', range: [0, 1] }),
         [0, 1], [-0.5, 0.5], o.opacity ?? 0.55);
+      l.internal = true;
       return l;
     });
   }
@@ -109,8 +149,10 @@ export class SubjectMap {
   constructor(private host: LayerHost, private space: NeuroSpace, private o: SubjectMapOptions = {}) {
     this.layer = new OwnedLayer(host, 'backed-subject', (vol, range) => {
       const r = range ?? o.range ?? [-1, 1];
-      return new VolLayer('backed-subject', vol, o.colormap ?? ColorMapFactory.createDiverging('#2a78d6', '#f4f4f2', '#d6452a', 256, { name: 'Subject' }),
+      const l = new VolLayer('backed-subject', vol, o.colormap ?? ColorMapFactory.createDiverging('#2a78d6', '#f4f4f2', '#d6452a', 256, { name: 'Subject' }),
         r, o.threshold ?? quiet(r), o.opacity ?? 0.85);
+      l.internal = true;
+      return l;
     });
   }
 

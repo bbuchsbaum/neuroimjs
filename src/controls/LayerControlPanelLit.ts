@@ -665,8 +665,13 @@ export class LayerControlPanel extends LitElement {
     });
   }
 
+  /** Layer ids a person chose; tool-drawn (internal) layers are left out. */
+  private listedIds(stack: VolStack): string[] {
+    return stack.getLayerIds().filter((id) => !stack.getLayerById(id)?.internal);
+  }
+
   private captureAllDefaults(stack: VolStack) {
-    stack.getLayerIds().forEach(layerId => {
+    this.listedIds(stack).forEach(layerId => {
       if (this.defaultsByLayer.has(layerId)) return;
       const layer = stack.getLayerById(layerId);
       if (!layer) return;
@@ -702,7 +707,7 @@ export class LayerControlPanel extends LitElement {
     if (!this.imageLayer) return;
 
     this.volLayer = this.imageLayer.getLayer(0);
-    this.availableLayers = this.imageLayer.getLayerIds();
+    this.availableLayers = this.listedIds(this.imageLayer.getVolStack());
     this.selectedLayerId = this.availableLayers[0];
     this.range = this.volLayer.getRange();
     this.selectedColormap = this.volLayer.colorMap.name;
@@ -724,7 +729,7 @@ export class LayerControlPanel extends LitElement {
     if (!this._volStack) return;
 
     this.volLayer = this._volStack.getLayer(0);
-    this.availableLayers = this._volStack.getLayerIds();
+    this.availableLayers = this.listedIds(this._volStack);
     this.selectedLayerId = this.availableLayers[0];
     this.range = this.volLayer.getRange();
     this.selectedColormap = this.volLayer.colorMap.name;
