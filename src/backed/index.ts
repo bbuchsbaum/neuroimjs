@@ -7,3 +7,4 @@ export { renderScene, niceTicks, swarm, relax, type RenderOptions, type Rendered
 export { PlotPanel, colorScale, type PlotPanelOptions } from './PlotPanel';
 export { mean, sd, tQuantile, tPValue, fitLine } from './stats';
 export { BackedView, type BackedViewOptions, type ViewerLike } from './BackedView';
+export { ProbeMarker, SubjectMap, symmetricRange, type LayerHost, type ProbeMarkerOptions, type SubjectMapOptions } from './Overlays';

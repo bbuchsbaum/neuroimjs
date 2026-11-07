@@ -63,4 +63,10 @@ export interface Backing {
   /** What a value is, e.g. "β (% signal)". */
   readonly valueLabel?: string;
   extract(probe: Probe): Extract | Promise<Extract>;
+  /**
+   * The whole-grid map averaged over these design rows (and over the axis,
+   * as the mean of the response it stands for), NaN where nothing is stored.
+   * Optional: a backing that cannot afford it leaves it out.
+   */
+  mapOf?(rows: number[]): Float32Array | Promise<Float32Array>;
 }

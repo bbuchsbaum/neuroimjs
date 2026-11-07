@@ -57,7 +57,7 @@ export type {
   OrthogonalImageViewerParams,
 } from './display/OrthogonalImageViewer';
 export { SimpleOrthogonalViewer } from './display/SimpleOrthogonalViewer';
-export type { LayoutMode, SimpleOrthogonalViewerOptions } from './display/SimpleOrthogonalViewer';
+export type { LayoutMode, OrthogonalPointerEvent, SimpleOrthogonalViewerOptions } from './display/SimpleOrthogonalViewer';
 export { ImageLayer } from './display/ImageLayer';
 export { ColorMap } from './display/ColorMap';
 export type {

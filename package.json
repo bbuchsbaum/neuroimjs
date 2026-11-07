@@ -110,6 +110,8 @@
     "demo:multi-layer": "vite --open /examples/multi-layer-viewer.html",
     "demo:overlay-review": "vite --open /examples/overlay-review-demo.html",
     "demo:composable": "vite --open /examples/composable-views-index.html",
+    "demo:backed": "vite --open /examples/backed/viewer.html",
+    "demo:backed-gallery": "vite --open /examples/backed/gallery.html",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:headed": "playwright test --headed",

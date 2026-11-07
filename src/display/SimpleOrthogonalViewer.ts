@@ -75,6 +75,14 @@ export interface SimpleOrthogonalViewerOptions {
  * custom layouts or finer control, compose {@link SingleSliceViewer} instances with
  * {@link ViewSynchronizer} instead. See the architecture note on {@link SliceViewer}.
  */
+/** Where the pointer is, in one of the three views. */
+export interface OrthogonalPointerEvent {
+  view: 'axial' | 'coronal' | 'sagittal';
+  image?: { x: number; y: number } | null;
+  volume?: number[] | null;
+  world?: number[] | null;
+}
+
 export class SimpleOrthogonalViewer {
   private root: HTMLElement;
   private imageLayer: ImageLayer;
@@ -87,8 +95,8 @@ export class SimpleOrthogonalViewer {
     layerRemoved: [{ id: string }];
     layerUpdated: [{ id: string }];
     layerOrderChanged: [string[]];
-    pointerMove: [{ view: 'axial'|'coronal'|'sagittal'; image?: {x:number;y:number}|null; volume?: number[]|null; world?: number[]|null }];
-    pointerDown: [{ view: 'axial'|'coronal'|'sagittal'; image?: {x:number;y:number}|null; volume?: number[]|null; world?: number[]|null }];
+    pointerMove: [OrthogonalPointerEvent];
+    pointerDown: [OrthogonalPointerEvent];
   }>();
 
   private constructor(root: HTMLElement, imageLayer: ImageLayer) {
@@ -391,6 +399,24 @@ export class SimpleOrthogonalViewer {
   }
   onSliceChange(handler: (p: { view: 'axial' | 'coronal' | 'sagittal'; index: number }) => void): () => void {
     return this.emitter.on('sliceChanged', handler as any);
+  }
+
+  /**
+   * Pointer moves over any view, with the image, voxel and world position
+   * under the pointer (null outside the volume). Returns an unsubscribe.
+   */
+  onPointerMove(handler: (e: OrthogonalPointerEvent) => void): () => void {
+    return this.emitter.on('pointerMove', handler);
+  }
+
+  /** The element the viewer was created in. */
+  getRootElement(): HTMLElement {
+    return this.root;
+  }
+
+  /** Pointer presses on any view; same payload as {@link onPointerMove}. */
+  onPointerDown(handler: (e: OrthogonalPointerEvent) => void): () => void {
+    return this.emitter.on('pointerDown', handler);
   }
 
   // Alignment controls for overlays with differing FOV/spacing

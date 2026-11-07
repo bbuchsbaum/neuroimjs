@@ -2,7 +2,7 @@
 // Export only browser-safe modules (no fs/path/canvas node-only usage).
 
 export { SimpleOrthogonalViewer } from './display/SimpleOrthogonalViewer';
-export type { LayoutMode, SimpleOrthogonalViewerOptions } from './display/SimpleOrthogonalViewer';
+export type { LayoutMode, OrthogonalPointerEvent, SimpleOrthogonalViewerOptions } from './display/SimpleOrthogonalViewer';
 export { OrthogonalImageViewer, ViewName } from './display/OrthogonalImageViewer';
 export type {
   OrthogonalImageViewerOptions,

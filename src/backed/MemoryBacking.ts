@@ -83,4 +83,33 @@ export class MemoryBacking implements Backing {
     }
     return { label: probeLabel(probe), voxels: at.length, width: w, values };
   }
+
+  mapOf(rows: number[]): Float32Array {
+    const n = (this.space.dim as number[]).slice(0, 3).reduce((a, b) => a * b, 1);
+    const w = this.width;
+    // Weight of each axis position in the mean response: for a basis, the
+    // time-average of its curve; otherwise an equal share of each position.
+    const basis = this.axis?.basis;
+    const wt = basis
+      ? Array.from({ length: w }, (_, b) => basis.weights.reduce((s, row) => s + row[b], 0) / basis.weights.length)
+      : new Array(w).fill(1 / w);
+    const sum = new Float64Array(n), count = new Uint16Array(n);
+    for (const r of rows) {
+      const d = this.data[r];
+      if (!d) continue;
+      const cells = d.length / w;
+      for (let m = 0; m < cells; m++) {
+        let v = 0;
+        for (let a = 0; a < w; a++) v += wt[a] * d[m * w + a];
+        if (!Number.isFinite(v)) continue;
+        sum[m] += v;
+        count[m]++;
+      }
+    }
+    const out = new Float32Array(n).fill(NaN);
+    if (this.gridToMask) {
+      for (let g = 0; g < n; g++) { const m = this.gridToMask[g]; if (m >= 0 && count[m]) out[g] = sum[m] / count[m]; }
+    } else for (let g = 0; g < n; g++) if (count[g]) out[g] = sum[g] / count[g];
+    return out;
+  }
 }

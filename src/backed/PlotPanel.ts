@@ -120,6 +120,7 @@ export class PlotPanel {
   private resize?: ResizeObserver;
   private lastWidth = 0;
   private listening?: AbortController;
+  private subjectListeners = new Set<(id: string | null) => void>();
 
   constructor(private backing: Backing, private o: PlotPanelOptions = {}) {
     ensureStyle();
@@ -191,23 +192,60 @@ export class PlotPanel {
     if (!id) return;
     const marks = svg.querySelectorAll(`[data-subject="${cssEscape(id)}"]`);
     marks.forEach((e) => e.classList.add('is-hot'));
-    // Name the subject at the end of its line (or beside its last dot).
+    // Name the subject at the start of its line, clear of the direct labels
+    // at the right (a lone dot gets the name beside it).
     let at: [number, number] | null = null;
+    let line = false;
     marks.forEach((e) => {
       if (e.tagName === 'path') {
-        const pts = (e.getAttribute('d') ?? '').slice(1).split('L').map((p) => p.split(',').map(Number));
-        const last = pts[pts.length - 1];
-        if (!at || last[0] > at[0]) at = [last[0], last[1]];
+        const first = (e.getAttribute('d') ?? '').slice(1).split('L')[0].split(',').map(Number);
+        if (!line || first[0] < (at as [number, number])[0]) at = [first[0], first[1]];
+        line = true;
       } else if (!at) at = [Number(e.getAttribute('cx')), Number(e.getAttribute('cy'))];
     });
     if (at) {
       const t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
       t.setAttribute('class', 'nij-hot-label');
-      t.setAttribute('x', String(at[0] + 6));
-      t.setAttribute('y', String(at[1] - 6));
+      t.setAttribute('x', String(line ? at[0] - 12 : at[0] + 6));
+      t.setAttribute('y', String(line ? at[1] : at[1] - 6));
+      t.setAttribute('text-anchor', line ? 'end' : 'start');
+      t.setAttribute('dominant-baseline', line ? 'middle' : 'auto');
       t.textContent = id;
       svg.appendChild(t);
     }
+  }
+
+  /**
+   * Hear which subject the reader is pointing at in the plot (null when
+   * none). Returns an unsubscribe.
+   */
+  onSubjectFocus(handler: (id: string | null) => void): () => void {
+    this.subjectListeners.add(handler);
+    return () => this.subjectListeners.delete(handler);
+  }
+
+  /** Point at one subject from outside the plot (a table, a list): highlight it and tell listeners. */
+  focusSubject(id: string | null): void {
+    this.setHighlight(id);
+    this.emitSubject(id);
+  }
+
+  private emitSubject(id: string | null): void {
+    this.o.onSubject?.(id);
+    this.subjectListeners.forEach((h) => h(id));
+  }
+
+  /** The design rows a subject contributes to the current view (its levels kept). */
+  rowsOf(id: string): number[] {
+    const subj = this.backing.subject;
+    const keep = this.spec.keep ?? {};
+    const out: number[] = [];
+    this.backing.design.forEach((r, i) => {
+      if (subj && String(r[subj]) !== id) return;
+      for (const [col, levels] of Object.entries(keep)) if (levels?.length && !levels.includes(String(r[col]))) return;
+      out.push(i);
+    });
+    return out;
   }
 
   scene(): Scene | null {
@@ -350,13 +388,13 @@ export class PlotPanel {
       tip.style.left = `${Math.max(0, Math.min(px + 12, er.width - tip.offsetWidth))}px`;
       tip.style.top = `${py - tip.offsetHeight - 10}px`;
       const id = r.snapped ? null : best.subject ?? null;
-      if (id !== hot) { hot = id; this.setHighlight(id); this.o.onSubject?.(id); }
+      if (id !== hot) { hot = id; this.setHighlight(id); this.emitSubject(id); }
     };
     const clear = () => {
       tip.hidden = true;
       rule.style.display = 'none';
       ring.style.display = 'none';
-      if (hot !== null) { hot = null; this.setHighlight(null); this.o.onSubject?.(null); }
+      if (hot !== null) { hot = null; this.setHighlight(null); this.emitSubject(null); }
     };
     const local = (ev: PointerEvent): [number, number] => {
       const r = svg.getBoundingClientRect();
