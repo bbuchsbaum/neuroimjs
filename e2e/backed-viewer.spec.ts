@@ -22,6 +22,9 @@ test.describe('Backed plots in the viewer', () => {
     expect(await title(page)).toBe('8 mm sphere at 42 −52 −18 (MNI)');
     await expect(page.locator('.nij-plot-warn')).toContainText('Circular');
     expect((await layer(page, 'backed-probe'))?.visible).toBe(true);
+    // The ortho layout's fourth cell holds the map's key and histogram.
+    await expect(page.locator('[data-nij-legend] .nij-legend-title')).toHaveText('faces − houses (t)');
+    await expect(page.locator('[data-nij-legend] .nij-legend-tick')).toHaveText(['0', '3.1', '9']);
   });
 
   test('a click on the brain plots the data there', async ({ page }) => {

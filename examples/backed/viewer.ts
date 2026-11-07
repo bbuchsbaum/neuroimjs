@@ -1,5 +1,5 @@
 import {
-  readNiftiArrayBuffer, SimpleOrthogonalViewer, VolLayer, VolStack, ColorMapFactory, FloatNeuroVol,
+  readNiftiArrayBuffer, SimpleOrthogonalViewer, VolLayer, VolStack, ColorMapFactory, FloatNeuroVol, MapLegend,
 } from '../../src/browser';
 import { PlotPanel, BackedView } from '../../src/backed';
 import { makeStudy } from './study';
@@ -21,6 +21,7 @@ async function boot() {
   const panel = new PlotPanel(backing, { width: 480 });
   plot.appendChild(panel.element);
   const view = BackedView.attach(viewer, backing, panel, { probe: { sphere: 8 }, selection: 'faces − houses, t > 3.1' })!;
+  MapLegend.attach(viewer, map, { title: 'faces − houses (t)', stat: 't', ground: 'dark' });
   viewer.setWorldCoord([42, -52, -18]);
   status.textContent = 'Click the brain to plot the data there. Point at a subject in the plot to see their map.';
   Object.assign(window, { __BACKED__: { viewer, panel, view, backing, ready: true } });

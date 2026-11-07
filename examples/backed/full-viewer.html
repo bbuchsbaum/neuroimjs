@@ -12,7 +12,7 @@
   .app { display: grid; grid-template-columns: minmax(0, 1fr) 340px; height: 100vh; }
   .views { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 4px; padding: 4px; background: #000; min-height: 0; }
   .views > div { position: relative; overflow: hidden; min-height: 0; }
-  #status { position: absolute; left: 12px; bottom: 10px; color: #c3c2b7; font-size: 12px; }
+  #status { margin: 0; color: var(--ink-3); font-size: 12px; }
   aside { border-left: 1px solid var(--rule); background: var(--panel); overflow-y: auto; display: flex; flex-direction: column; }
   aside section { padding: 12px 14px; border-bottom: 1px solid var(--rule); display: grid; gap: 8px; }
   aside h2 { margin: 0; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
@@ -32,9 +32,12 @@
     <div id="axial" data-view="axial"></div>
     <div id="sagittal" data-view="sagittal"></div>
     <div id="coronal" data-view="coronal"></div>
-    <div><div id="status">Loading the template…</div></div>
+    <div id="legend" data-view="legend"></div>
   </div>
   <aside>
+    <section>
+      <p id="status" role="status">Loading the template…</p>
+    </section>
     <section>
       <h2>Layers</h2>
       <layer-control-panel id="layers"></layer-control-panel>

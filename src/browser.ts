@@ -203,3 +203,7 @@ export type { Backing, PlotSpec } from './backed/index';
 // NFTab datasets, read from a URL or supplied files (no server, no R).
 export { openNFTab, NFTab } from './tabs/index';
 export type { NFTabSource, Manifest as NFTabManifest, BackingLink, VolumeSeries } from './tabs/index';
+
+// The colour key and histogram of a map layer, for the ortho layout's fourth cell (ported from neuromosaic).
+export { MapLegend, histogramCounts, reportNumber, valueAt } from './controls/MapLegend';
+export type { MapLegendOptions, LegendLayer, LegendHostViewer } from './controls/MapLegend';

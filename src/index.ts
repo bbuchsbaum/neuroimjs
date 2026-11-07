@@ -344,3 +344,7 @@ export { PlotPanel, BackedView, MemoryBacking } from './backed/index';
 export type { Backing, PlotSpec } from './backed/index';
 
 // The NFTab reader (openNFTab) ships from 'neuroimjs/browser', beside readNiftiArrayBuffer.
+
+// The colour key and histogram of a map layer, for the ortho layout's fourth cell (ported from neuromosaic).
+export { MapLegend, histogramCounts, reportNumber, valueAt } from './controls/MapLegend';
+export type { MapLegendOptions, LegendLayer, LegendHostViewer } from './controls/MapLegend';

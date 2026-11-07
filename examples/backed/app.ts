@@ -4,7 +4,7 @@
  * a configurable probe. Shared by the dev demo and the static site.
  */
 import {
-  SingleSliceViewer, ViewSynchronizer, VolLayer, VolStack, ColorMapFactory, LayerControlPanel,
+  SingleSliceViewer, ViewSynchronizer, VolLayer, VolStack, ColorMapFactory, LayerControlPanel, MapLegend,
 } from '../../src/browser';
 import type { NeuroVol } from '../../src/browser';
 import { PlotPanel, BackedView, type Backing, type ProbeSpec } from '../../src/backed';
@@ -40,6 +40,10 @@ export async function mountViewer(o: ViewerApp) {
   const coronal = await SingleSliceViewer.createCoronal($('coronal'), stack, opts);
   ViewSynchronizer.createOrthogonal(axial, sagittal, coronal, { syncOnHover: false });
 
+  // The fourth square: the map's colour key and histogram, following the cursor.
+  const legend = new MapLegend($('legend'), map, { title: o.mapName, stat: o.stat, ground: 'dark' });
+  axial.onCoordChange((c) => legend.setCursor(c));
+
   const layers = $('layers') as unknown as LayerControlPanel;
   layers.volStack = stack;
   layers.setAttribute('theme', matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
@@ -70,7 +74,8 @@ export async function mountViewer(o: ViewerApp) {
   radius.onchange = () => apply('sphere');
 
   axial.setCoord([42, -52, -18]);
-  const app = { views: { axial, sagittal, coronal }, stack, map, layers, panel, view, backing: o.backing, ready: true };
+  legend.setCursor([42, -52, -18]);
+  const app = { views: { axial, sagittal, coronal }, stack, map, layers, panel, view, legend, backing: o.backing, ready: true };
   Object.assign(window, { __BACKED__: app });
   return app;
 }
