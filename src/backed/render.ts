@@ -117,7 +117,10 @@ export function renderScene(scene: Scene, o: RenderOptions): Rendered {
   const xs: number[] = [];
   const showSubjects = scene.covariate || scene.subjects !== 'hidden';
   for (const p of scene.panels) for (const s of p.series) {
-    for (const c of s.cells) { ys.push(c.mean); if (Number.isFinite(c.lo)) ys.push(c.lo, c.hi); if (linear) xs.push(c.x as number); }
+    for (const c of s.cells) {
+      if (!Number.isFinite(c.mean)) continue; // a stored row without an estimate draws nothing
+      ys.push(c.mean); if (Number.isFinite(c.lo)) ys.push(c.lo, c.hi); if (linear) xs.push(c.x as number);
+    }
     if (showSubjects) for (const sub of s.subjects) for (const pt of sub.points) { ys.push(pt.y); if (linear) xs.push(pt.x as number); }
     if (s.fit) for (const x of xs) ys.push(s.fit.intercept + s.fit.slope * x + s.fit.band(x), s.fit.intercept + s.fit.slope * x - s.fit.band(x));
   }
@@ -206,11 +209,13 @@ export function renderScene(scene: Scene, o: RenderOptions): Rendered {
           }
         }
       }
-      const ci = (c: { mean: number; lo: number; hi: number; n: number }) =>
-        `${fmtNum(c.mean)}${Number.isFinite(c.lo) ? ` [${fmtNum(c.lo)}, ${fmtNum(c.hi)}]` : ''}, n = ${c.n}`;
+      const ci = (c: { mean: number; lo: number; hi: number; n: number; note?: string[] }) =>
+        `${fmtNum(c.mean)}${Number.isFinite(c.lo) ? ` [${fmtNum(c.lo)}, ${fmtNum(c.hi)}]` : ''}${c.note ? '' : `, n = ${c.n}`}`;
+      const notes = (c: { note?: string[] }) => c.note ?? [];
+      const markR = scene.stored?.mark === 'interval' ? 2 : 3.5;
       if (linear && s.cells.length) {
-        const pts = s.cells;
-        if (pts.every((c) => Number.isFinite(c.lo))) {
+        const pts = s.cells.filter((c) => Number.isFinite(c.mean));
+        if (pts.length && pts.every((c) => Number.isFinite(c.lo))) {
           const d = pts.map((c, i) => `${i ? 'L' : 'M'}${X(c.x)},${Y(c.hi)}`).join('') +
             pts.slice().reverse().map((c) => `L${X(c.x)},${Y(c.lo)}`).join('') + 'Z';
           el('path', { d, class: 'nij-ribbon' }, sg);
@@ -220,21 +225,22 @@ export function renderScene(scene: Scene, o: RenderOptions): Rendered {
         for (const c of pts) {
           if (sparse) el('circle', { cx: X(c.x), cy: Y(c.mean), r: 2.6, class: 'nij-mean', 'data-key': `m|${s.level}|${c.x}` }, sg);
           hits.push({ x: X(c.x), y: Y(c.mean), color: col, panel: pi, xv: c.x as number,
-            lines: [`${scene.x.name} ${fmtNum(c.x as number)}${scene.x.unit ? ' ' + scene.x.unit : ''}`, `${s.level != null ? s.level + ': ' : ''}${ci(c)}`] });
+            lines: [`${scene.x.name} ${fmtNum(c.x as number)}${scene.x.unit ? ' ' + scene.x.unit : ''}`, `${s.level != null ? s.level + ': ' : ''}${ci(c)}`, ...notes(c)] });
         }
         const last = pts[pts.length - 1];
-        if (endLabels && s.level != null) ends.push({ y: Y(last.mean), label: s.level, x: X(last.x), color: col });
+        if (last && endLabels && s.level != null) ends.push({ y: Y(last.mean), label: s.level, x: X(last.x), color: col });
       } else if (!linear) {
-        if (s.cells.length > 1 && scene.paired) {
-          el('path', { d: s.cells.map((c, i) => `${i ? 'L' : 'M'}${X(c.x, si)},${Y(c.mean)}`).join(''), class: 'nij-mean-line' }, sg);
-          const last = s.cells[s.cells.length - 1];
+        const drawn = s.cells.filter((c) => Number.isFinite(c.mean));
+        if (drawn.length > 1 && scene.paired) {
+          el('path', { d: drawn.map((c, i) => `${i ? 'L' : 'M'}${X(c.x, si)},${Y(c.mean)}`).join(''), class: 'nij-mean-line' }, sg);
+          const last = drawn[drawn.length - 1];
           if (endLabels && s.level != null) ends.push({ y: Y(last.mean), label: s.level, x: X(last.x, si), color: col });
         }
-        for (const c of s.cells) {
+        for (const c of drawn) {
           const x = X(c.x, si) + (strip ? 14 : 0);
           if (Number.isFinite(c.lo)) el('line', { x1: x, x2: x, y1: Y(c.lo), y2: Y(c.hi), class: 'nij-err' }, sg);
-          el('circle', { cx: x, cy: Y(c.mean), r: 3.5, class: 'nij-mean', 'data-key': `m|${s.level}|${c.x}` }, sg);
-          hits.push({ x, y: Y(c.mean), color: col, lines: [`${tag}${c.x === '' ? 'mean' : c.x}`, ci(c)] });
+          el('circle', { cx: x, cy: Y(c.mean), r: markR, class: 'nij-mean', 'data-key': `m|${s.level}|${c.x}` }, sg);
+          hits.push({ x, y: Y(c.mean), color: col, lines: [`${tag}${c.x === '' ? 'estimate' : c.x}`, ci(c), ...notes(c)] });
         }
       }
       if (s.fit) {

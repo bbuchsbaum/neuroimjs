@@ -1,0 +1,3 @@
+condition,estimate,lower,upper,interval_kind,interval_level,df,n
+A,2,1,3,ci_t,0.95,9,10
+B,4,3,5,ci_t,0.95,9,10

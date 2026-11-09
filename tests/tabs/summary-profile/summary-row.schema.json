@@ -1,0 +1,387 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "NFTab Summary row 0.1.0",
+  "type": "object",
+  "required": [
+    "estimate",
+    "lower",
+    "upper",
+    "interval_kind"
+  ],
+  "properties": {
+    "estimate": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "lower": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "upper": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "interval_kind": {
+      "enum": [
+        "none",
+        "sd",
+        "se",
+        "ci_normal",
+        "ci_t",
+        "quantile_range",
+        "wsci_cm",
+        "heuristic_se",
+        "custom"
+      ]
+    },
+    "interval_level": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "exclusiveMinimum": 0,
+      "exclusiveMaximum": 1
+    },
+    "df": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "exclusiveMinimum": 0
+    },
+    "n": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "sd": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "se": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "mean_voxel_se": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "method": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "interval_reason": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "interval_definition": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "original_kind": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "additionalProperties": {
+    "type": [
+      "string",
+      "number",
+      "boolean",
+      "null"
+    ]
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "interval_kind": {
+            "enum": [
+              "ci_normal",
+              "ci_t",
+              "quantile_range",
+              "wsci_cm",
+              "heuristic_se"
+            ]
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "interval_level"
+        ],
+        "properties": {
+          "interval_level": {
+            "type": "number"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "interval_level": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "interval_kind": {
+            "const": "none"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "lower": {
+            "type": "null"
+          },
+          "upper": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "lower": {
+            "type": "null"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "upper": {
+            "type": "null"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "upper": {
+            "type": "number"
+          },
+          "estimate": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "estimate": {
+            "type": "null"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "lower": {
+            "type": "null"
+          },
+          "upper": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "interval_kind": {
+            "not": {
+              "enum": [
+                "none",
+                "custom"
+              ]
+            }
+          },
+          "lower": {
+            "type": "null"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "interval_reason"
+        ],
+        "properties": {
+          "interval_reason": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "interval_kind": {
+            "const": "custom"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "interval_definition"
+        ],
+        "properties": {
+          "interval_definition": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "lower": {
+            "type": "number"
+          },
+          "upper": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "interval_kind": {
+            "enum": [
+              "ci_t",
+              "wsci_cm"
+            ]
+          },
+          "lower": {
+            "type": "number"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "df"
+        ],
+        "properties": {
+          "df": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "interval_kind": {
+            "const": "heuristic_se"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "se": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "original_kind"
+        ],
+        "properties": {
+          "original_kind": {
+            "type": "string"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "interval_kind": {
+            "const": "custom"
+          }
+        }
+      }
+    }
+  ],
+  "not": {
+    "anyOf": [
+      {
+        "required": [
+          "conf_level"
+        ]
+      },
+      {
+        "required": [
+          "conf.low"
+        ]
+      },
+      {
+        "required": [
+          "conf.high"
+        ]
+      },
+      {
+        "required": [
+          "lwr"
+        ]
+      },
+      {
+        "required": [
+          "upr"
+        ]
+      }
+    ]
+  }
+}

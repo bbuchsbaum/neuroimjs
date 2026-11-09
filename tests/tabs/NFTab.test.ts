@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { parse as parseYaml } from 'yaml';
 import { NeuroSpace } from '../../src/geometry/NeuroSpace';
@@ -10,6 +11,7 @@ import { writeVol, writeVec } from '../../src/io/io';
 import { openNFTab, parseDelimited } from '../../src/tabs';
 import { sphere, voxel } from '../../src/backed/probe';
 import { buildScene } from '../../src/backed/spec';
+import { long } from '../../src/backed/frame';
 
 const space = new NeuroSpace([4, 4, 4], [2, 2, 2], [-3, -3, -3]);
 const space4 = (nt: number) => new NeuroSpace([4, 4, 4, nt], [2, 2, 2, 1], [-3, -3, -3, 0]);
@@ -57,7 +59,8 @@ beforeAll(async () => {
     features: { t: { logical: { kind: 'volume', axes: ['x', 'y', 'z'], dtype: 'float32', support_ref: 'g' },
       encodings: [{ type: 'ref', binding: { backend: 'nifti', locator: { column: 't_loc' } } }] } },
     supports: { g: { support_type: 'volume', support_id: 'g', space: 'MNI', grid_id: 'g' } },
-    extensions: { 'x-backing': { source: '../betas/nftab.json', feature: 'beta', map: 'faces − houses', stat: 't' } },
+    extensions: { 'x-backing': { version: '0.1.0', source: '../betas/nftab.json', feature: 'beta', map: 'faces − houses', stat: 't',
+      source_checksum: 'sha256:' + createHash('sha256').update(readFileSync(join(b, 'nftab.json'))).digest('hex') } },
   }));
   // An FIR feature: a lag axis carried in each row's 4D file.
   for (const s of ['sub-01', 'sub-02']) {
@@ -65,13 +68,23 @@ beforeAll(async () => {
     for (let a = 0; a < 3; a++) for (let i = 0; i < 64; i++) data[a * 64 + i] = (a + 1) * (s === 'sub-01' ? 1 : 2);
     await writeVec(new Float32NeuroVec(space4(3), data), join(fir, 'maps', `${s}_fir.nii.gz`));
   }
+  writeFileSync(join(fir, 'basis.tsv'), 'b1\tb2\tb3\n1\t0\t0\n0.5\t0.5\t1\n');
   writeFileSync(join(fir, 'observations.csv'), 'row_id,subject,loc\na,sub-01,maps/sub-01_fir.nii.gz\nb,sub-02,maps/sub-02_fir.nii.gz\n');
   writeFileSync(join(fir, 'nftab.json'), json({
     spec_version: '0.1.0', dataset_id: 'fir', storage_profile: 'table-package', observation_table: { path: 'observations.csv', format: 'csv' },
     row_id: 'row_id', observation_axes: ['subject'],
     observation_columns: { row_id: { dtype: 'string' }, subject: { dtype: 'string', semantic_role: 'subject' }, loc: { dtype: 'string' } },
-    features: { response: { logical: { kind: 'array', axes: ['x', 'y', 'z', 'lag'], dtype: 'float32', axis_domains: { lag: { values: [0, 2, 4], unit: 's' } } },
-      encodings: [{ type: 'ref', binding: { backend: 'nifti', locator: { column: 'loc' } } }] } },
+    features: {
+      response: { logical: { kind: 'volume', axes: ['x', 'y', 'z', 'lag'], dtype: 'float32', support_ref: 'g' },
+        encodings: [{ type: 'ref', binding: { backend: 'nifti', locator: { column: 'loc' } } }] },
+      coef: { logical: { kind: 'volume', axes: ['x', 'y', 'z', 'basis'], dtype: 'float32', support_ref: 'g' },
+        encodings: [{ type: 'ref', binding: { backend: 'nifti', locator: { column: 'loc' } } }] },
+    },
+    supports: { g: { support_type: 'volume', support_id: 'g', space: 'MNI', grid_id: 'g' } },
+    extensions: { 'x-volume-series': { version: '0.1.0', features: {
+      response: { axis: 'lag', values: [0, 2, 4], unit: 's' },
+      coef: { axis: 'basis', values: [1, 2, 3], basis: { name: 'time', unit: 's', values: [0, 1], weights: { path: 'basis.tsv', format: 'tsv' } } },
+    } } },
   }));
 });
 
@@ -119,6 +132,7 @@ describe('openNFTab', () => {
     const t = await group.volume(0, 't');
     expect((t.getData() as Float32Array)[30]).toBeCloseTo(3, 5);
     const linked = (await group.followBacking())!;
+    expect(linked.stale).toBe(false);
     expect(linked.source.manifest.dataset_id).toBe('betas');
     expect(linked.backing.provenance).toMatchObject({ map: 'faces − houses', space: 'MNI' });
     expect(linked.backing.extract(voxel(space.indexToCoord(9))).values[0]).toBeCloseTo(beta(9, 1, 0), 5);
@@ -135,6 +149,22 @@ describe('openNFTab', () => {
     expect(b.axis).toEqual({ name: 'lag', values: [0, 2, 4], unit: 's' });
     const e = b.extract(voxel(space.indexToCoord(5)));
     expect(Array.from(e.values)).toEqual([1, 2, 3, 2, 4, 6]);
+  });
+
+  it('reads basis weights from a table and reconstructs curves (x-volume-series)', async () => {
+    const tab = await openNFTab(reader(join(dir, 'fir')));
+    const b = await tab.backing('coef');
+    expect(b.axis?.basis).toEqual({ name: 'time', unit: 's', values: [0, 1], weights: [[1, 0, 0], [0.5, 0.5, 1]] });
+    // sub-01's coefficients are 1, 2, 3: curve = [1, 0.5 + 1 + 3]
+    const rows = long(b, b.extract(voxel(space.indexToCoord(5))));
+    expect(rows.filter((r) => r.subject === 'sub-01').map((r) => r.value)).toEqual([1, 4.5]);
+  });
+
+  it('refuses an x-volume-series that does not fit its feature', async () => {
+    const m = JSON.parse(readFileSync(join(dir, 'fir', 'nftab.json'), 'utf8'));
+    m.extensions['x-volume-series'].features.response.values = [0, 2];
+    const src = { read: async (p: string) => (p === 'nftab.json' ? new TextEncoder().encode(JSON.stringify(m)).buffer as ArrayBuffer : reader(join(dir, 'fir')).read(p)) };
+    await expect((await openNFTab(src)).backing('response')).rejects.toThrow(/values must be 3 finite numbers/);
   });
 
   it('reads the neurotabs faces-demo example and reports its missing NIfTI plainly', async () => {
@@ -182,5 +212,28 @@ describe('openNFTab', () => {
       expect(linked.backing.design).toHaveLength(8);
       expect([...served.keys()]).toContain('betas/maps/sub-04_betas.nii.gz');
     } finally { globalThis.fetch = old; }
+  });
+});
+
+describe('x-backing (draft 0.1.0)', () => {
+  const group = () => JSON.parse(readFileSync(join(dir, 'group', 'nftab.json'), 'utf8'));
+  const open = (m: unknown) => openNFTab({ read: async (p: string) => (p === 'group/nftab.json' ? new TextEncoder().encode(JSON.stringify(m)).buffer as ArrayBuffer : reader(dir).read(p)) }, { at: 'group/nftab.json' });
+  it('says when the source changed since the map was written', async () => {
+    const m = group();
+    m.extensions['x-backing'].source_checksum = 'sha256:' + '0'.repeat(64);
+    expect((await (await open(m)).followBacking())!.stale).toBe(true);
+  });
+  it('reads the per-feature form, and refuses unknown versions and mixed forms', async () => {
+    const m = group();
+    const { version, ...link } = m.extensions['x-backing'];
+    m.extensions['x-backing'] = { version, features: { t: link } };
+    expect((await open(m)).backingLink('t')?.feature).toBe('beta');
+    await expect(open({ ...m, extensions: { 'x-backing': { ...m.extensions['x-backing'], version: '9.0.0' } } }).then((t) => t.backingLink())).rejects.toThrow(/version 9.0.0/);
+    await expect(open({ ...m, extensions: { 'x-backing': { ...m.extensions['x-backing'], source: 'x' } } }).then((t) => t.backingLink())).rejects.toThrow(/not both/);
+  });
+  it('refuses a link to a feature the source does not declare', async () => {
+    const m = group();
+    m.extensions['x-backing'].feature = 'nope';
+    await expect((await open(m)).followBacking()).rejects.toThrow(/feature "nope"/);
   });
 });

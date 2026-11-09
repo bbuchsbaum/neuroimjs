@@ -8,6 +8,8 @@
 import type { Backing, Extract } from './types';
 import { type PlotSpec, buildScene, factors, covariates, inferSpec, axisName, type Scene } from './spec';
 import { type HitPoint, renderScene } from './render';
+import { summaryScene } from './summaryScene';
+import type { SummaryTable } from '../tabs/summary';
 
 const STYLE_ID = 'nij-plot-style';
 const LIGHT = '--nij-surface:#fcfcfb;--nij-ink:#0b0b0b;--nij-ink-2:#52514e;--nij-ink-3:#8a8984;--nij-rule:#e6e5e1;' +
@@ -125,6 +127,21 @@ export class PlotPanel {
   private listening?: AbortController;
   private subjectListeners = new Set<(id: string | null) => void>();
   private note: string | null = null;
+  private fixed: Scene | null = null;
+
+  /**
+   * A panel for a stored summary table (NFTab Summary Profile): the table's
+   * estimates and bounds drawn as stored, laid out by its plot block, with the
+   * same reading and themes. No slice/collapse controls: the profile's plot
+   * does not aggregate or filter.
+   */
+  static fromSummary(table: SummaryTable, o: PlotPanelOptions = {}): PlotPanel {
+    const empty: Backing = { design: [], columns: [], extract: () => ({ label: table.name, voxels: 0, width: 1, values: new Float32Array(0) }) };
+    const panel = new PlotPanel(empty, { ...o, controls: false });
+    panel.fixed = summaryScene(table);
+    panel.draw();
+    return panel;
+  }
 
   constructor(private backing: Backing, private o: PlotPanelOptions = {}) {
     ensureStyle();
@@ -254,6 +271,7 @@ export class PlotPanel {
   }
 
   scene(): Scene | null {
+    if (this.fixed) return this.fixed;
     return this.ext ? buildScene(this.backing, this.ext, this.spec, !!this.o.circular) : null;
   }
 
@@ -273,7 +291,7 @@ export class PlotPanel {
 
     const head = div(root, 'nij-plot-head');
     span(head, 'nij-plot-title', scene.probe + space);
-    span(head, 'nij-plot-meta', `${scene.voxels} voxel${scene.voxels === 1 ? '' : 's'} averaged · ${scene.nSubjects} subjects`);
+    span(head, 'nij-plot-meta', scene.stored?.meta ?? `${scene.voxels} voxel${scene.voxels === 1 ? '' : 's'} averaged · ${scene.nSubjects} subjects`);
     if (this.o.circular) {
       const what = typeof this.o.circular === 'string' ? ` (${this.o.circular})` : '';
       div(root, 'nij-plot-warn', `Circular: this region was picked on a map of these data${what}. Effects here are inflated; judge them on independent data.`);
@@ -290,7 +308,7 @@ export class PlotPanel {
     this.hover(svg, hits);
     if (this.highlight) this.setHighlight(this.highlight);
 
-    const foot: string[] = [];
+    const foot: string[] = [...(scene.stored?.foot ?? [])];
     const ax = axisName(this.backing);
     if (scene.error === 'within') {
       foot.push(`Mean ± 95% within-subject CI (Cousineau–Morey${scene.x.name === ax && ax ? ', at each time point' : ''}): ` +
@@ -356,7 +374,8 @@ export class PlotPanel {
       }
       return best ? { at: best, rows: rowsOf(best), snapped: false } : null;
     };
-    const rowsOf = (h: HitPoint) => h.lines.map((text, i) => ({ text, color: i === h.lines.length - 1 ? h.color : undefined }));
+    // The swatch marks the value line: the second line when there is a heading, else the only one.
+    const rowsOf = (h: HitPoint) => h.lines.map((text, i) => ({ text, color: i === Math.min(1, h.lines.length - 1) ? h.color : undefined }));
     const snap = (near: HitPoint): Reading => {
       const col = summaries.filter((h) => h.panel === near.panel && h.xv === near.xv).sort((a, b) => a.y - b.y);
       return {

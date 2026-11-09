@@ -75,6 +75,8 @@ export interface Cell {
   lo: number;
   hi: number;
   n: number;
+  /** Extra reading lines for this cell (a stored interval's label, a reason, a method). */
+  note?: string[];
 }
 
 export interface Summary {

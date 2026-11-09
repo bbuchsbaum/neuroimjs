@@ -12,6 +12,7 @@
  */
 import { mkdirSync, readFileSync, writeFileSync, copyFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { createHash } from 'node:crypto';
 import { readNiftiArrayBuffer } from '../src/io/browserNifti';
 import { writeVol, writeVec } from '../src/io/io';
 import { NeuroSpace } from '../src/geometry/NeuroSpace';
@@ -107,7 +108,9 @@ async function main() {
       },
     },
     supports: support,
-    extensions: { 'x-backing': { source: '../betas/nftab.json', feature: 'beta', map: 'faces − houses', stat: 't', formula: '~ condition + (1 | subject)' } },
+    // Draft x-backing 0.1.0 (neurotabs spec/extensions/x-backing.md).
+    extensions: { 'x-backing': { version: '0.1.0', source: '../betas/nftab.json', feature: 'beta', map: 'faces − houses', stat: 't',
+      formula: '~ condition + (1 | subject)', source_checksum: 'sha256:' + createHash('sha256').update(readFileSync(join(out, 'betas', 'nftab.json'))).digest('hex') } },
   }));
   console.log(`wrote ${subjects.length} subjects × ${conditions.length} conditions and the group map to ${out}`);
 }

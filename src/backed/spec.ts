@@ -84,6 +84,8 @@ export interface Scene {
   /** The probe was chosen on a map of these data: no inferential statistics. */
   circular: boolean;
   provenance?: Backing['provenance'];
+  /** Set for stored summaries (NFTab Summary Profile): drawn as stored, never recomputed. */
+  stored?: { meta: string; foot: string[]; mark: 'point' | 'line' | 'interval' };
 }
 
 const levelsOf = (b: Backing, name: string | undefined, rows: Row[]): string[] => {

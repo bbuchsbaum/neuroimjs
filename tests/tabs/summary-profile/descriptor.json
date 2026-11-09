@@ -1,0 +1,24 @@
+{
+  "version": "0.1.0",
+  "tables": {
+    "effects": {
+      "table": {
+        "path": "summaries.csv",
+        "format": "csv"
+      },
+      "statistic": "mean",
+      "counting_unit": "subject",
+      "unit": "percent_signal_change",
+      "plot": {
+        "mark": "point",
+        "x": "condition",
+        "order": {
+          "condition": [
+            "A",
+            "B"
+          ]
+        }
+      }
+    }
+  }
+}

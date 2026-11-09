@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stored summaries</title><link rel="icon" href="data:,">
+<style>
+  :root { --bg: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #1a1a19; --ink: #f0efec; --ink-2: #c3c2b7; } }
+  body { margin: 0; padding: 24px; background: var(--bg); color: var(--ink); font: 13px/1.45 system-ui, sans-serif; }
+  h1 { font-size: 16px; margin: 0 0 4px; } p { color: var(--ink-2); margin: 0 0 16px; max-width: 80ch; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 32px; }
+</style>
+</head>
+<body>
+<h1>Stored summaries (NFTab Summary Profile 0.1)</h1>
+<p>Each table is read from <code>summary.json</code> beside it and drawn from its stored estimates and bounds, laid out by its plot block. Nothing is recomputed.</p>
+<div class="grid" id="grid"></div>
+<script type="module">
+  import { openSummary } from '../../../src/tabs';
+  import { PlotPanel } from '../../../src/backed';
+  const tables = await openSummary('./summary.json');
+  for (const t of tables) document.getElementById('grid').appendChild(PlotPanel.fromSummary(t, { width: 460 }).element);
+  window.__SUMMARY_READY__ = true;
+</script>
+</body>
+</html>

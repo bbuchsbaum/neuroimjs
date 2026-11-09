@@ -19,7 +19,8 @@ async function boot() {
   if (!linked) throw new Error('the group map does not say which data it was computed from (no x-backing)');
   const { backing, link } = linked;
   await mountViewer({ template, map, mapName: `${link.map ?? 'map'} (${link.stat ?? 'value'})`, selection: link.map ?? 'this map', stat: link.stat ?? 'value', backing });
-  status.textContent = `${backing.design.length} rows from ${linked.source.manifest.dataset_id}. Click the brain to plot the data behind the map.`;
+  status.textContent = `${backing.design.length} rows from ${linked.source.manifest.dataset_id}. Click the brain to plot the data behind the map.` +
+    (linked.stale ? ' Note: the source data changed after this map was written.' : '');
 }
 
 boot().catch((e) => { status.textContent = `Could not load: ${e.message}`; console.error(e); });

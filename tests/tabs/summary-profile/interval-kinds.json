@@ -1,0 +1,111 @@
+{
+  "version": "0.1.0",
+  "kinds": [
+    {
+      "id": "none",
+      "statistics": [
+        "mean",
+        "median",
+        "custom"
+      ],
+      "level": "none",
+      "label": "No interval",
+      "formula": "No bounds",
+      "needs_design": false,
+      "single_cell": false
+    },
+    {
+      "id": "sd",
+      "statistics": [
+        "mean"
+      ],
+      "level": "none",
+      "label": "± SD",
+      "formula": "estimate ± sample SD (n−1)",
+      "needs_design": false,
+      "single_cell": true
+    },
+    {
+      "id": "se",
+      "statistics": [
+        "mean"
+      ],
+      "level": "none",
+      "label": "± SE",
+      "formula": "estimate ± SE",
+      "needs_design": false,
+      "single_cell": true
+    },
+    {
+      "id": "ci_normal",
+      "statistics": [
+        "mean",
+        "custom"
+      ],
+      "level": "confidence",
+      "label": "{percent}% CI (normal)",
+      "formula": "estimate ± normal_quantile((1+level)/2) × SE",
+      "needs_design": false,
+      "single_cell": true
+    },
+    {
+      "id": "ci_t",
+      "statistics": [
+        "mean",
+        "custom"
+      ],
+      "level": "confidence",
+      "label": "{percent}% CI (t)",
+      "formula": "estimate ± t_quantile((1+level)/2, df) × SE",
+      "needs_design": false,
+      "single_cell": true
+    },
+    {
+      "id": "quantile_range",
+      "statistics": [
+        "mean",
+        "median"
+      ],
+      "level": "central_mass",
+      "label": "{percent}% quantile range",
+      "formula": "type-7 sample quantiles at (1−level)/2 and (1+level)/2",
+      "needs_design": false,
+      "single_cell": true
+    },
+    {
+      "id": "wsci_cm",
+      "statistics": [
+        "mean"
+      ],
+      "level": "confidence",
+      "label": "{percent}% within-subject CI (Cousineau–Morey)",
+      "formula": "raw cell mean ± t_quantile((1+level)/2, n−1) × normalized SE × sqrt(J/(J−1))",
+      "needs_design": true,
+      "single_cell": false
+    },
+    {
+      "id": "heuristic_se",
+      "statistics": [
+        "mean"
+      ],
+      "level": "calibration",
+      "label": "Heuristic band ({percent}% calibration; not a CI)",
+      "formula": "regional mean ± normal_quantile((1+level)/2) × mean_voxel_se",
+      "needs_design": false,
+      "single_cell": false
+    },
+    {
+      "id": "custom",
+      "statistics": [
+        "mean",
+        "median",
+        "custom"
+      ],
+      "level": "none",
+      "label": "{definition}",
+      "formula": "Stored bounds; see interval_definition",
+      "needs_design": false,
+      "single_cell": false
+    }
+  ]
+}

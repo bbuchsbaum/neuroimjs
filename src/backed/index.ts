@@ -8,3 +8,4 @@ export { PlotPanel, colorScale, type PlotPanelOptions } from './PlotPanel';
 export { mean, sd, tQuantile, tPValue, fitLine } from './stats';
 export { BackedView, type BackedViewOptions, type ViewerLike, type ProbeSpec, type PointProbe, type MapLayer } from './BackedView';
 export { ProbeMarker, SubjectMap, symmetricRange, stackLayers, type StackLike, type LayerHost, type ProbeMarkerOptions, type SubjectMapOptions } from './Overlays';
+export { summaryScene } from './summaryScene';

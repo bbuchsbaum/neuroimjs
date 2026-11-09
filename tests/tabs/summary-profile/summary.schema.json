@@ -1,0 +1,206 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "NFTab x-summary 0.1.0",
+  "type": "object",
+  "required": [
+    "version",
+    "tables"
+  ],
+  "properties": {
+    "version": {
+      "const": "0.1.0"
+    },
+    "tables": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "\\S"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "table",
+          "statistic",
+          "counting_unit"
+        ],
+        "properties": {
+          "table": {
+            "type": "object",
+            "required": [
+              "path",
+              "format"
+            ],
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*[:\\\\]).+$"
+              },
+              "format": {
+                "enum": [
+                  "csv",
+                  "tsv"
+                ]
+              }
+            },
+            "additionalProperties": false
+          },
+          "statistic": {
+            "enum": [
+              "mean",
+              "median",
+              "custom"
+            ]
+          },
+          "counting_unit": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "unit": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "definition": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "design": {
+            "type": "object",
+            "required": [
+              "subject",
+              "within",
+              "between"
+            ],
+            "properties": {
+              "subject": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              },
+              "within": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "array",
+                  "minItems": 1,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                }
+              },
+              "between": {
+                "type": "array",
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "\\S"
+                }
+              },
+              "repeat": {
+                "type": "array",
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "\\S"
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          "plot": {
+            "type": "object",
+            "required": [
+              "mark"
+            ],
+            "properties": {
+              "mark": {
+                "enum": [
+                  "point",
+                  "line",
+                  "interval"
+                ]
+              },
+              "x": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              },
+              "color": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              },
+              "facet": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              },
+              "detail": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              },
+              "y_label": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              },
+              "order": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "array",
+                  "minItems": 1,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          "extensions": {
+            "type": "object",
+            "patternProperties": {
+              "^x-": {}
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "statistic": {
+                  "const": "custom"
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "definition"
+              ]
+            }
+          }
+        ]
+      }
+    }
+  },
+  "additionalProperties": false
+}

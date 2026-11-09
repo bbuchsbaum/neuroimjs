@@ -207,3 +207,13 @@ export type { NFTabSource, Manifest as NFTabManifest, BackingLink, VolumeSeries 
 // The colour key and histogram of a map layer, for the ortho layout's fourth cell (ported from neuromosaic).
 export { MapLegend, histogramCounts, reportNumber, valueAt } from './controls/MapLegend';
 export type { MapLegendOptions, LegendLayer, LegendHostViewer } from './controls/MapLegend';
+
+// NFTab Summary Profile 0.1 (x-summary): stored estimates and intervals, read, written and labelled.
+export {
+  SUMMARY_PROFILE_VERSION, validateDescriptor as validateSummaryDescriptor, validateRow as validateSummaryRow, parseSummaryTable, writeSummaryTable,
+  importSummaryRow, intervalLabel, intervalLabels, intervalKind, readSummaries,
+} from './tabs/summary';
+export type { SummaryRow, SummaryTable, SummaryDescriptor, SummaryTableDescriptor, SummaryPlot, ImportContext } from './tabs/summary';
+export { INTERVAL_KINDS, SUMMARY_REGISTRY_VERSION } from './tabs/summaryRegistry';
+export type { IntervalKind } from './tabs/summaryRegistry';
+export { openSummary } from './tabs/NFTab';

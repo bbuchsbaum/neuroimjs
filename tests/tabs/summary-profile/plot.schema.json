@@ -1,0 +1,58 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "NFTab Summary plot 0.1.0",
+  "type": "object",
+  "required": [
+    "mark"
+  ],
+  "properties": {
+    "mark": {
+      "enum": [
+        "point",
+        "line",
+        "interval"
+      ]
+    },
+    "x": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S"
+    },
+    "color": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S"
+    },
+    "facet": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S"
+    },
+    "detail": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S"
+    },
+    "y_label": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S"
+    },
+    "order": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "minItems": 1,
+        "uniqueItems": true,
+        "items": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        }
+      }
+    }
+  },
+  "additionalProperties": false
+}
