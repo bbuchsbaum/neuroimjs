@@ -2,7 +2,7 @@
 // Export only browser-safe modules (no fs/path/canvas node-only usage).
 
 export { SimpleOrthogonalViewer } from './display/SimpleOrthogonalViewer';
-export type { LayoutMode, SimpleOrthogonalViewerOptions } from './display/SimpleOrthogonalViewer';
+export type { LayoutMode, OrthogonalPointerEvent, SimpleOrthogonalViewerOptions } from './display/SimpleOrthogonalViewer';
 export { OrthogonalImageViewer, ViewName } from './display/OrthogonalImageViewer';
 export type {
   OrthogonalImageViewerOptions,
@@ -194,3 +194,26 @@ export type {
   LogLevelName,
 } from './display/logging/Logger';
 export * from './space/index';
+
+// Backed plots: the data behind a map, plotted at a probe (see docs/plans/backed-plots.md).
+export * as backed from './backed/index';
+export { PlotPanel, BackedView, MemoryBacking } from './backed/index';
+export type { Backing, PlotSpec } from './backed/index';
+
+// NFTab datasets, read from a URL or supplied files (no server, no R).
+export { openNFTab, NFTab } from './tabs/index';
+export type { NFTabSource, Manifest as NFTabManifest, BackingLink, VolumeSeries } from './tabs/index';
+
+// The colour key and histogram of a map layer, for the ortho layout's fourth cell (ported from neuromosaic).
+export { MapLegend, histogramCounts, reportNumber, valueAt } from './controls/MapLegend';
+export type { MapLegendOptions, LegendLayer, LegendHostViewer } from './controls/MapLegend';
+
+// NFTab Summary Profile 0.1 (x-summary): stored estimates and intervals, read, written and labelled.
+export {
+  SUMMARY_PROFILE_VERSION, validateDescriptor as validateSummaryDescriptor, validateRow as validateSummaryRow, parseSummaryTable, writeSummaryTable,
+  importSummaryRow, intervalLabel, intervalLabels, intervalKind, readSummaries,
+} from './tabs/summary';
+export type { SummaryRow, SummaryTable, SummaryDescriptor, SummaryTableDescriptor, SummaryPlot, ImportContext } from './tabs/summary';
+export { INTERVAL_KINDS, SUMMARY_REGISTRY_VERSION } from './tabs/summaryRegistry';
+export type { IntervalKind } from './tabs/summaryRegistry';
+export { openSummary } from './tabs/NFTab';

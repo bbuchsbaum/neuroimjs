@@ -1,0 +1,11 @@
+export type { Axis, Backing, Column, Extract, Provenance, Row, Value } from './types';
+export { type Probe, voxel, sphere, mask, region, probeIndices, probeLabel, clusterAt, regrid, describeThreshold, type ThresholdedMap, type ClusterResult } from './probe';
+export { MemoryBacking, inferColumns, type MemoryBackingOptions } from './MemoryBacking';
+export { long, cellMeans, summarise, variesWithin, type Cell, type Summary, type SummaryOptions, type ErrorKind } from './frame';
+export { type PlotSpec, type Scene, type Series, type Panel, inferSpec, buildScene, factors, covariates } from './spec';
+export { renderScene, niceTicks, swarm, relax, type RenderOptions, type Rendered, type HitPoint } from './render';
+export { PlotPanel, colorScale, type PlotPanelOptions } from './PlotPanel';
+export { mean, sd, tQuantile, tPValue, fitLine } from './stats';
+export { BackedView, type BackedViewOptions, type ViewerLike, type ProbeSpec, type PointProbe, type MapLayer } from './BackedView';
+export { ProbeMarker, SubjectMap, symmetricRange, stackLayers, type StackLike, type LayerHost, type ProbeMarkerOptions, type SubjectMapOptions } from './Overlays';
+export { summaryScene } from './summaryScene';

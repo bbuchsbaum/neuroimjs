@@ -1,0 +1,596 @@
+{
+  "version": "0.1.0",
+  "valid": [
+    {
+      "id": "t",
+      "row": {
+        "estimate": 2,
+        "lower": 1,
+        "upper": 3,
+        "interval_kind": "ci_t",
+        "interval_level": 0.95,
+        "df": 9,
+        "n": 10
+      },
+      "label": "95% CI (t)"
+    },
+    {
+      "id": "normal",
+      "row": {
+        "estimate": 2,
+        "lower": 1,
+        "upper": 3,
+        "interval_kind": "ci_normal",
+        "interval_level": 0.9
+      },
+      "label": "90% CI (normal)"
+    },
+    {
+      "id": "within",
+      "row": {
+        "estimate": 2,
+        "lower": 1,
+        "upper": 3,
+        "interval_kind": "wsci_cm",
+        "interval_level": 0.95,
+        "df": 9
+      },
+      "label": "95% within-subject CI (Cousineau–Morey)"
+    },
+    {
+      "id": "sd",
+      "row": {
+        "estimate": 2,
+        "lower": 1,
+        "upper": 3,
+        "interval_kind": "sd"
+      },
+      "label": "± SD"
+    },
+    {
+      "id": "se",
+      "row": {
+        "estimate": 2,
+        "lower": 1,
+        "upper": 3,
+        "interval_kind": "se"
+      },
+      "label": "± SE"
+    },
+    {
+      "id": "quantile",
+      "row": {
+        "estimate": 2,
+        "lower": 1,
+        "upper": 3,
+        "interval_kind": "quantile_range",
+        "interval_level": 0.5
+      },
+      "label": "50% quantile range"
+    },
+    {
+      "id": "heuristic",
+      "row": {
+        "estimate": 2,
+        "lower": 1,
+        "upper": 3,
+        "interval_kind": "heuristic_se",
+        "interval_level": 0.95,
+        "mean_voxel_se": 0.5
+      },
+      "label": "Heuristic band (95% calibration; not a CI)"
+    },
+    {
+      "id": "custom",
+      "row": {
+        "estimate": 2,
+        "lower": 1,
+        "upper": 3,
+        "interval_kind": "custom",
+        "interval_definition": "Bootstrap percentile bounds",
+        "original_kind": "bootstrap"
+      },
+      "label": "Bootstrap percentile bounds"
+    },
+    {
+      "id": "none",
+      "row": {
+        "estimate": 2,
+        "lower": null,
+        "upper": null,
+        "interval_kind": "none"
+      },
+      "label": "No interval"
+    },
+    {
+      "id": "zero",
+      "row": {
+        "estimate": null,
+        "lower": null,
+        "upper": null,
+        "interval_kind": "ci_t",
+        "interval_level": 0.95,
+        "n": 0,
+        "interval_reason": "No observations"
+      },
+      "label": "95% CI (t)"
+    },
+    {
+      "id": "one",
+      "row": {
+        "estimate": 2,
+        "lower": null,
+        "upper": null,
+        "interval_kind": "ci_t",
+        "interval_level": 0.95,
+        "n": 1,
+        "interval_reason": "Fewer than two observations"
+      },
+      "label": "95% CI (t)"
+    },
+    {
+      "id": "constant",
+      "row": {
+        "estimate": 2,
+        "lower": 2,
+        "upper": 2,
+        "interval_kind": "ci_t",
+        "interval_level": 0.95,
+        "n": 3,
+        "df": 2,
+        "sd": 0,
+        "se": 0
+      },
+      "label": "95% CI (t)"
+    },
+    {
+      "id": "model",
+      "row": {
+        "estimate": 2,
+        "lower": 1,
+        "upper": 3,
+        "interval_kind": "ci_t",
+        "interval_level": 0.95,
+        "df": 7.5,
+        "method": "Model coefficient"
+      },
+      "label": "95% CI (t)"
+    },
+    {
+      "id": "t90",
+      "row": {
+        "estimate": 2,
+        "lower": 1,
+        "upper": 3,
+        "interval_kind": "ci_t",
+        "interval_level": 0.9,
+        "df": 9
+      },
+      "label": "90% CI (t)"
+    },
+    {
+      "id": "custom-second",
+      "row": {
+        "estimate": 2,
+        "lower": 0,
+        "upper": 4,
+        "interval_kind": "custom",
+        "interval_definition": "Expert supplied bounds, including \"judgment\""
+      },
+      "label": "Expert supplied bounds, including \"judgment\""
+    },
+    {
+      "id": "precision",
+      "row": {
+        "estimate": 1.2345678901234567,
+        "lower": 0.23456789012345677,
+        "upper": 2.234567890123457,
+        "interval_kind": "custom",
+        "interval_definition": "Stored precision example",
+        "region_id": "001",
+        "text_label": "NA"
+      },
+      "label": "Stored precision example"
+    }
+  ],
+  "invalid": [
+    {
+      "id": "missing-level",
+      "row": {
+        "estimate": 2,
+        "lower": 1,
+        "upper": 3,
+        "interval_kind": "ci_t",
+        "df": 9
+      }
+    },
+    {
+      "id": "bad-level",
+      "row": {
+        "estimate": 2,
+        "lower": 1,
+        "upper": 3,
+        "interval_kind": "ci_t",
+        "interval_level": 95,
+        "df": 9
+      }
+    },
+    {
+      "id": "missing-df",
+      "row": {
+        "estimate": 2,
+        "lower": 1,
+        "upper": 3,
+        "interval_kind": "ci_t",
+        "interval_level": 0.95
+      }
+    },
+    {
+      "id": "reversed",
+      "row": {
+        "estimate": 2,
+        "lower": 4,
+        "upper": 3,
+        "interval_kind": "ci_t",
+        "interval_level": 0.95,
+        "df": 9
+      }
+    },
+    {
+      "id": "half-null",
+      "row": {
+        "estimate": 2,
+        "lower": null,
+        "upper": 3,
+        "interval_kind": "ci_t",
+        "interval_level": 0.95,
+        "df": 9
+      }
+    },
+    {
+      "id": "none-with-bounds",
+      "row": {
+        "estimate": 2,
+        "lower": 1,
+        "upper": 3,
+        "interval_kind": "none"
+      }
+    },
+    {
+      "id": "custom-without-definition",
+      "row": {
+        "estimate": 2,
+        "lower": 1,
+        "upper": 3,
+        "interval_kind": "custom"
+      }
+    },
+    {
+      "id": "unknown-canonical",
+      "row": {
+        "estimate": 2,
+        "lower": 1,
+        "upper": 3,
+        "interval_kind": "bootstrap"
+      }
+    },
+    {
+      "id": "negative-n",
+      "row": {
+        "estimate": 2,
+        "lower": 1,
+        "upper": 3,
+        "interval_kind": "ci_t",
+        "interval_level": 0.95,
+        "df": 9,
+        "n": -1
+      }
+    },
+    {
+      "id": "noninteger-n",
+      "row": {
+        "estimate": 2,
+        "lower": 1,
+        "upper": 3,
+        "interval_kind": "ci_t",
+        "interval_level": 0.95,
+        "df": 9,
+        "n": 1.5
+      }
+    },
+    {
+      "id": "heuristic-se-confusion",
+      "row": {
+        "estimate": 2,
+        "lower": 1,
+        "upper": 3,
+        "interval_kind": "heuristic_se",
+        "interval_level": 0.95,
+        "se": 0.5
+      }
+    },
+    {
+      "id": "alias-output",
+      "row": {
+        "estimate": 2,
+        "lower": 1,
+        "upper": 3,
+        "interval_kind": "ci_t",
+        "interval_level": 0.95,
+        "df": 9,
+        "conf_level": 0.95
+      }
+    },
+    {
+      "id": "unavailable-without-reason",
+      "row": {
+        "estimate": 2,
+        "lower": null,
+        "upper": null,
+        "interval_kind": "ci_t",
+        "interval_level": 0.95
+      }
+    }
+  ],
+  "imports": [
+    {
+      "id": "broom",
+      "input": {
+        "estimate": 2,
+        "conf.low": 1,
+        "conf.high": 3,
+        "interval_kind": "ci_t",
+        "conf_level": 0.95,
+        "df": 9
+      },
+      "context": null,
+      "expected": {
+        "estimate": 2,
+        "lower": 1,
+        "upper": 3,
+        "interval_kind": "ci_t",
+        "interval_level": 0.95,
+        "df": 9
+      },
+      "error": false
+    },
+    {
+      "id": "old-t",
+      "input": {
+        "estimate": 2,
+        "lower": 1,
+        "upper": 3,
+        "interval_kind": "ci95_t",
+        "df": 9
+      },
+      "context": null,
+      "expected": {
+        "estimate": 2,
+        "lower": 1,
+        "upper": 3,
+        "interval_kind": "ci_t",
+        "interval_level": 0.95,
+        "df": 9
+      },
+      "error": false
+    },
+    {
+      "id": "old-ws",
+      "input": {
+        "estimate": 2,
+        "lower": 1,
+        "upper": 3,
+        "interval_kind": "wsci95_cm",
+        "df": 9
+      },
+      "context": null,
+      "expected": {
+        "estimate": 2,
+        "lower": 1,
+        "upper": 3,
+        "interval_kind": "wsci_cm",
+        "interval_level": 0.95,
+        "df": 9
+      },
+      "error": false
+    },
+    {
+      "id": "brainflow-population-v1",
+      "input": {
+        "estimate": 2,
+        "lower": 1,
+        "upper": 3,
+        "interval_kind": "ci95",
+        "df": 9
+      },
+      "context": "brainflow-population-v1",
+      "expected": {
+        "estimate": 2,
+        "lower": 1,
+        "upper": 3,
+        "interval_kind": "ci_t",
+        "interval_level": 0.95,
+        "df": 9
+      },
+      "error": false
+    },
+    {
+      "id": "brainflow-trace-v1",
+      "input": {
+        "estimate": 2,
+        "lower": 1,
+        "upper": 3,
+        "interval_kind": "ci95"
+      },
+      "context": "brainflow-trace-v1",
+      "expected": {
+        "estimate": 2,
+        "lower": 1,
+        "upper": 3,
+        "interval_kind": "quantile_range",
+        "interval_level": 0.95
+      },
+      "error": false
+    },
+    {
+      "id": "ambiguous-ci95",
+      "input": {
+        "estimate": 2,
+        "lower": 1,
+        "upper": 3,
+        "interval_kind": "ci95"
+      },
+      "context": null,
+      "expected": {
+        "estimate": 2,
+        "lower": 1,
+        "upper": 3,
+        "interval_kind": "custom",
+        "interval_definition": "Unknown interval kind: ci95",
+        "original_kind": "ci95"
+      },
+      "error": false
+    },
+    {
+      "id": "unknown-row",
+      "input": {
+        "estimate": 2,
+        "lower": 1,
+        "upper": 3,
+        "interval_kind": "bootstrap",
+        "interval_definition": "Bootstrap percentile bounds"
+      },
+      "context": "row",
+      "expected": {
+        "estimate": 2,
+        "lower": 1,
+        "upper": 3,
+        "interval_kind": "custom",
+        "interval_definition": "Bootstrap percentile bounds",
+        "original_kind": "bootstrap"
+      },
+      "error": false
+    },
+    {
+      "id": "unknown-frame",
+      "input": {
+        "estimate": 2,
+        "lower": 1,
+        "upper": 3,
+        "interval_kind": "bootstrap",
+        "interval_definition": "Bootstrap percentile bounds"
+      },
+      "context": "frame",
+      "expected": {
+        "estimate": 2,
+        "lower": 1,
+        "upper": 3,
+        "interval_kind": "custom",
+        "interval_definition": "Bootstrap percentile bounds",
+        "original_kind": "bootstrap"
+      },
+      "error": false
+    },
+    {
+      "id": "unknown-no-definition",
+      "input": {
+        "estimate": 2,
+        "lower": 1,
+        "upper": 3,
+        "interval_kind": "bootstrap"
+      },
+      "context": null,
+      "expected": {
+        "estimate": 2,
+        "lower": 1,
+        "upper": 3,
+        "interval_kind": "custom",
+        "interval_definition": "Unknown interval kind: bootstrap",
+        "original_kind": "bootstrap"
+      },
+      "error": false
+    },
+    {
+      "id": "known-invalid",
+      "input": {
+        "estimate": 2,
+        "lower": 1,
+        "upper": 3,
+        "interval_kind": "ci_t",
+        "df": 9
+      },
+      "context": null,
+      "expected": null,
+      "error": true
+    },
+    {
+      "id": "conflicting-level",
+      "input": {
+        "estimate": 2,
+        "lower": 1,
+        "upper": 3,
+        "interval_kind": "ci_t",
+        "interval_level": 0.9,
+        "conf_level": 0.95,
+        "df": 9
+      },
+      "context": null,
+      "expected": null,
+      "error": true
+    },
+    {
+      "id": "region-level-is-not-confidence",
+      "input": {
+        "estimate": 2,
+        "lower": 1,
+        "upper": 3,
+        "interval_kind": "ci_t",
+        "level": "cluster",
+        "df": 9
+      },
+      "context": null,
+      "expected": null,
+      "error": true
+    },
+    {
+      "id": "embedded-conflict",
+      "input": {
+        "estimate": 2,
+        "lower": 1,
+        "upper": 3,
+        "interval_kind": "ci95_t",
+        "interval_level": 0.9,
+        "df": 9
+      },
+      "context": null,
+      "expected": null,
+      "error": true
+    }
+  ],
+  "mixed_rows": [
+    "t",
+    "normal",
+    "custom",
+    "within",
+    "t90",
+    "custom-second"
+  ],
+  "roundtrip_rows": [
+    "t",
+    "normal",
+    "within",
+    "sd",
+    "se",
+    "quantile",
+    "heuristic",
+    "custom",
+    "none",
+    "zero",
+    "one",
+    "constant",
+    "model",
+    "t90",
+    "custom-second",
+    "precision"
+  ]
+}

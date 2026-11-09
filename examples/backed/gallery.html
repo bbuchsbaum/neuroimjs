@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Backed plots gallery</title>
+<style>
+  body { margin: 0; padding: 24px; background: #fcfcfb; font: 13px system-ui, sans-serif; color: #0b0b0b; }
+  h1 { font-size: 16px; margin: 0 0 16px; }
+  .grid { display: grid; grid-template-columns: repeat(2, 480px); gap: 32px 40px; }
+  .case h2 { font-size: 12px; font-weight: 500; color: #52514e; margin: 0 0 8px; text-transform: uppercase; letter-spacing: .04em; }
+  @media (prefers-color-scheme: dark) { body { background: #1a1a19; color: #f0efec; } .case h2 { color: #c3c2b7; } }
+</style>
+</head>
+<body>
+<h1>Backed plots</h1>
+<div class="grid" id="grid"></div>
+<script type="module" src="./gallery.ts"></script>
+</body>
+</html>

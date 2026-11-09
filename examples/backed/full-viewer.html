@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Backed plots: full viewer</title>
+<style>
+  :root { --bg: #fcfcfb; --panel: #ffffff; --ink: #0b0b0b; --ink-2: #52514e; --ink-3: #8a8984; --rule: #e6e5e1; --accent: #2a78d6; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #161718; --panel: #1d1f20; --ink: #f0efec; --ink-2: #c3c2b7; --ink-3: #8f8e86; --rule: #2e2e2c; --accent: #3987e5; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 13px/1.45 system-ui, sans-serif; }
+  .app { display: grid; grid-template-columns: minmax(0, 1fr) 340px; height: 100vh; }
+  .views { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 4px; padding: 4px; background: #000; min-height: 0; }
+  .views > div { position: relative; overflow: hidden; min-height: 0; }
+  #status { margin: 0; color: var(--ink-3); font-size: 12px; }
+  aside { border-left: 1px solid var(--rule); background: var(--panel); overflow-y: auto; display: flex; flex-direction: column; }
+  aside section { padding: 12px 14px; border-bottom: 1px solid var(--rule); display: grid; gap: 8px; }
+  aside h2 { margin: 0; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
+  .probe-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+  .seg { display: inline-flex; border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; }
+  .seg button { font: inherit; border: 0; background: none; color: var(--ink-2); padding: 3px 9px; cursor: pointer; }
+  .seg button[aria-pressed="true"] { background: var(--rule); color: var(--ink); }
+  .seg button:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  select { font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--rule); border-radius: 6px; padding: 2px 4px; }
+  .hint { color: var(--ink-3); font-size: 12px; margin: 0; }
+  aside .nij-plot { --nij-surface: var(--panel); background: var(--panel); }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="views">
+    <div id="axial" data-view="axial"></div>
+    <div id="sagittal" data-view="sagittal"></div>
+    <div id="coronal" data-view="coronal"></div>
+    <div id="legend" data-view="legend"></div>
+  </div>
+  <aside>
+    <section>
+      <p id="status" role="status">Loading the template…</p>
+    </section>
+    <section>
+      <h2>Layers</h2>
+      <layer-control-panel id="layers"></layer-control-panel>
+    </section>
+    <section>
+      <h2>Plot</h2>
+      <div class="probe-row" role="group" aria-label="What a click reads">
+        <div class="seg" id="probe-kind">
+          <button type="button" data-kind="cluster" aria-pressed="true">Cluster</button>
+          <button type="button" data-kind="sphere" aria-pressed="false">Sphere</button>
+          <button type="button" data-kind="voxel" aria-pressed="false">Voxel</button>
+        </div>
+        <select id="radius" aria-label="Sphere radius" disabled>
+          <option value="4">4 mm</option><option value="6">6 mm</option><option value="8" selected>8 mm</option><option value="10">10 mm</option>
+        </select>
+      </div>
+      <p class="hint" id="probe-hint">Click a blob to plot the whole cluster at the current threshold. Move the threshold to change the cluster.</p>
+      <div id="plot"></div>
+    </section>
+  </aside>
+</div>
+<script type="module" src="./full-viewer.ts"></script>
+</body>
+</html>

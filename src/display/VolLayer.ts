@@ -97,6 +97,9 @@ export class VolLayer {
    */
   @observable public textureVersion: number = 0;
 
+  /** Bumped by setVisible, so observers can follow a layer being shown or hidden. */
+  @observable public visibilityVersion: number = 0;
+
   /**
    * Texture sampling used when the slice is magnified on screen.
    */
@@ -105,6 +108,12 @@ export class VolLayer {
    * reference (layer 0) grid; the reference layer itself should not use it.
    */
   @observable public interpolation: SliceInterpolation = 'linear';
+
+  /**
+   * Drawn by a tool rather than chosen by the user (a probe marker, a hover
+   * preview). Layer panels leave internal layers out of their lists.
+   */
+  public internal = false;
 
   /**
    * Strength in [0, 1] of a dark outline drawn on the visible side of every
@@ -634,7 +643,9 @@ export class VolLayer {
    */
   @action
   public setVisible(visible: boolean): void {
+    if (visible === this.visible) return;
     this.visible = visible;
+    this.visibilityVersion++;
   }
 }
 

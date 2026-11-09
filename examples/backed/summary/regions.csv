@@ -1,0 +1,9 @@
+region,group,condition,estimate,lower,upper,interval_kind,interval_level,df,n,interval_reason,method
+FFA,control,faces,1.12,0.94,1.30,wsci_cm,0.95,9,10,,
+FFA,control,houses,0.31,0.13,0.49,wsci_cm,0.95,9,10,,
+FFA,patient,faces,0.71,0.50,0.92,wsci_cm,0.95,9,10,,
+FFA,patient,houses,0.28,0.07,0.49,wsci_cm,0.95,9,10,,
+PPA,control,faces,0.22,-0.01,0.45,wsci_cm,0.95,9,10,,
+PPA,control,houses,0.95,0.72,1.18,wsci_cm,0.95,9,10,,
+PPA,patient,faces,0.18,,,wsci_cm,0.95,,1,Fewer than two subjects with both cells,
+PPA,patient,houses,0.88,0.52,1.24,ci_t,0.90,7.5,9,,Model coefficient

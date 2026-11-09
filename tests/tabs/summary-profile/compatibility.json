@@ -1,0 +1,24 @@
+{
+  "contract": "nftab-summary",
+  "version": "0.1.0",
+  "status": "draft",
+  "components": {
+    "intervals": "0.1.0",
+    "summary": "0.1.0",
+    "plot": "0.1.0"
+  },
+  "schema_dialect": "draft-07",
+  "nftab_embedding": "0.1.0",
+  "calculator_profiles": [],
+  "files": {
+    "README.md": "490806e7046b2b7b54099a9bf2d1eb7e93bd2ae0e3f36ea87488ca6655412008",
+    "cases.json": "195a855da589a121f4238e3291b60d55d693c8dfa331bbfdf11be10e87923ef6",
+    "descriptor.json": "0898546785254e31fe2f156e34b01826bda369fd1b0bda42165261535aed06ef",
+    "interval-kinds.json": "dfc9e904daa4bf0fb6a069b34991484f1fbc9136a3d9f5a6a58d2c834226e4d8",
+    "plot.schema.json": "f90cd94d1a4b32fcc2986b22659cc8cc160222e5c28ac777656fb2e538845d38",
+    "roundtrip.csv": "6aa36be05708d2c33b54f1b4839315efa42f7e4b95fa654649591da4fc4f7cbe",
+    "summaries.csv": "65dcb2c34b1278419284c045ef250cb792c3aa5491f3828502cebb8696bdde1e",
+    "summary-row.schema.json": "3b976306764b468d12ad32998b3233c4483d14739d40c450f305556e41a4f8ca",
+    "summary.schema.json": "1e70951ea0cff5995487c42f03121f2276a6c9171830fe41a92670ca6eb74543"
+  }
+}

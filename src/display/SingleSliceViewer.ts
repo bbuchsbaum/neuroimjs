@@ -194,6 +194,9 @@ export class SingleSliceViewer {
   private imageLayer: ImageLayer | null = null;
   private markerLayer: PointMarkerLayer | null = null;
 
+  /** The element the view was created in. */
+  private root: HTMLElement | null = null;
+
   /**
    * Private constructor. Use static factory methods to create instances.
    */
@@ -295,6 +298,7 @@ export class SingleSliceViewer {
 
     // Store reference to image layer for depth enhancement
     viewer.imageLayer = imageLayer;
+    viewer.root = container;
 
     // Add depth enhancement layer if requested
     if (options?.enableDepthEnhancement && sliceViewer.view.addLayer) {
@@ -508,6 +512,13 @@ export class SingleSliceViewer {
    */
   public getCoordinateTransformer(): ICoordinateTransformer {
     return this.viewer.view.getCoordinateTransformer();
+  }
+
+  /**
+   * The element the view was created in.
+   */
+  public getRootElement(): HTMLElement | null {
+    return this.root;
   }
 
   /**

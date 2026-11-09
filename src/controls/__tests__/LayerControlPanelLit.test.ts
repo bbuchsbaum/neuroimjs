@@ -73,6 +73,18 @@ describe('layer-control-panel', () => {
     expect(root.querySelector('#visibility-check')).not.toBeNull();
   });
 
+  it('leaves tool-drawn (internal) layers out of the layer list', async () => {
+    const el: any = document.createElement('layer-control-panel');
+    document.body.appendChild(el);
+    const stack: any = fakeStack(['anatomy', 'tmap', 'backed-probe']);
+    stack.getLayerById('backed-probe').internal = true;
+    el.volStack = stack;
+    await el.updateComplete;
+    await el.updateComplete;
+    const opts = [...el.shadowRoot.querySelectorAll('select[aria-label="Select layer"] option')].map((o: any) => o.value);
+    expect(opts).toEqual(['anatomy', 'tmap']);
+  });
+
   it('shows the layer selector when there are several layers', async () => {
     const root = await mount(['a', 'b']);
     expect(root.querySelectorAll('select[aria-label="Select layer"] option')).toHaveLength(2);

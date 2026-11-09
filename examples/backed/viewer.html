@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Backed viewer demo</title>
+<style>
+  :root { --bg: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e; --rule: #e6e5e1; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #1a1a19; --ink: #f0efec; --ink-2: #c3c2b7; --rule: #2e2e2c; } }
+  body { margin: 0; padding: 20px; background: var(--bg); color: var(--ink); font: 13px/1.45 system-ui, sans-serif; }
+  h1 { font-size: 16px; margin: 0 0 4px; }
+  p { margin: 0 0 14px; color: var(--ink-2); max-width: 80ch; }
+  .shell { display: grid; grid-template-columns: minmax(0, 640px) minmax(0, 480px); gap: 24px; align-items: start; }
+  #viewer { width: 640px; height: 640px; background: #000; border-radius: 6px; overflow: hidden; position: relative; }
+  #status { color: var(--ink-2); margin-bottom: 8px; }
+  @media (max-width: 1180px) { .shell { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<h1>Backed plots in the viewer</h1>
+<p>A synthetic faces/houses study on a 4 mm grid over the MNI template, with a planted face effect in both fusiform gyri.
+  The map is the group t for faces − houses. Click anywhere to plot the data behind the map there; the cyan patch is
+  the 8 mm sphere being averaged. Point at a subject in the plot to see that subject's map.</p>
+<div id="status">Loading the template…</div>
+<div class="shell">
+  <div id="viewer" data-testid="viewer"></div>
+  <div id="plot" data-testid="plot"></div>
+</div>
+<script type="module" src="./viewer.ts"></script>
+</body>
+</html>
