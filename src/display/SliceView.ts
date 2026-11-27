@@ -434,12 +434,21 @@ export class SliceView implements ISliceView {
     const pad = Math.max(0, this.options.fitPadding ?? 0);
     const fitW = Math.max(1, availableWidth - 2 * pad);
     const fitH = Math.max(1, availableHeight - 2 * pad);
-    const scale = Math.min(fitW / contentW, fitH / contentH, 16);
+
+    // Keep content coordinates in voxels, but fit their physical aspect ratio.
+    // Normalize by the larger spacing so the fit cap still bounds both axes.
+    const spacing = this.neuroSpace.spacing;
+    const spacingX = spacing[this.neuroSpace.whichDim(this.viewAxes.i)];
+    const spacingY = spacing[this.neuroSpace.whichDim(this.viewAxes.j)];
+    const maxSpacing = Math.max(spacingX, spacingY);
+    const relativeX = spacingX / maxSpacing;
+    const relativeY = spacingY / maxSpacing;
+    const scale = Math.min(fitW / (contentW * relativeX), fitH / (contentH * relativeY), 16);
     const safeScale = !Number.isFinite(scale) || scale <= 0 ? 1 : scale;
 
     this.mainContainer.pivot.set(pivotX, pivotY);
     const effectiveScale = safeScale * this.zoomLevel;
-    this.mainContainer.scale.set(effectiveScale, -effectiveScale);
+    this.mainContainer.scale.set(effectiveScale * relativeX, -effectiveScale * relativeY);
     this.mainContainer.position.set(
       availableWidth / 2 + this.panOffset.x,
       availableHeight / 2 + this.panOffset.y
@@ -764,7 +773,7 @@ export class SliceView implements ISliceView {
   }
 
   /**
-   * Get the current scale applied to the slice content.
+   * Get the current horizontal scale in screen pixels per slice voxel.
    */
   public getScale(): number {
     return this.mainContainer ? this.mainContainer.scale.x : 1;

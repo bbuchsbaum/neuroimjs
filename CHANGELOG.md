@@ -7,6 +7,13 @@ in the pull request that makes the change.
 
 ## Unreleased
 
+## 0.6.2 - 2026-11-27
+
+### Fixed
+
+- Slice views preserve the physical aspect ratio of anisotropic voxels.
+  Overlays, crosshairs, and picking use the same viewport transform.
+
 ## 0.6.1 - 2026-11-06
 
 ### Fixed
