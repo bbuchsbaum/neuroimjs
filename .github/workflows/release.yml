@@ -98,6 +98,8 @@ jobs:
           echo "Releasing $name@$version with dist-tag '$dist_tag'"
 
       - run: npm ci
+      - name: Install Chromium for consumer tests
+        run: npx playwright install --with-deps chromium
 
       # The release gate runs here, explicitly, exactly once. `prepublishOnly`
       # also runs verify:release, so every later npm pack/publish passes
